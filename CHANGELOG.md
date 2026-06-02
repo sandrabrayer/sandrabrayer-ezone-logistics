@@ -24,6 +24,9 @@ request-creation logic. A submitted request lands as a `דרישה` row. No appr
 - `apps-script/Code.gs` — `createRequest` now owns `id`, `status` (`דרישה`), and `created_at`
   server-side; the client no longer sends them. `validateNewRequest_` hardened against the
   controlled vocabularies (category, urgency, created_by). `approval_required` still left blank.
+- `package.json` — added a `start` script (`node src/server.js`) so Railway can boot the
+  frontend. `APPS_SCRIPT_EXEC_URL` (the form's submit target) is read from the environment at
+  serve time and must be set as a Railway env var; it is already documented in `.env.example`.
 
 **Why:** Requests must exist before approval routing can be meaningfully built or tested, so the
 form precedes approval (inc. 3). Server-owned id/status removes collision risk and prevents the
