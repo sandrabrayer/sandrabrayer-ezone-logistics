@@ -27,6 +27,7 @@ request-creation logic. A submitted request lands as a `דרישה` row. No appr
 - `package.json` — added a `start` script (`node src/server.js`) so Railway can boot the
   frontend. `APPS_SCRIPT_EXEC_URL` (the form's submit target) is read from the environment at
   serve time and must be set as a Railway env var; it is already documented in `.env.example`.
+- `src/index.html` — UI restyled to match the EZone family dark theme (cement-gray signature accent, amber/red urgency color-coding). Style/markup only; no JavaScript or form logic changed.
 
 **Why:** Requests must exist before approval routing can be meaningfully built or tested, so the
 form precedes approval (inc. 3). Server-owned id/status removes collision risk and prevents the
