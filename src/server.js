@@ -1,0 +1,42 @@
+// server.js — minimal zero-dependency Node server for the frontend.
+// Serves src/index.html and injects APPS_SCRIPT_EXEC_URL from the environment at request time,
+// so the URL is never hardcoded in the HTML and never committed. Reads .env if present.
+
+import { createServer } from 'node:http';
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Tiny .env loader (no dependency). Only used locally; Railway injects real env vars.
+function loadEnv() {
+  const path = join(__dirname, '..', '.env');
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+}
+loadEnv();
+
+const PORT = process.env.PORT || 3000;
+const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
+
+const server = createServer((req, res) => {
+  if (req.url === '/' || req.url === '/index.html') {
+    let html = readFileSync(join(__dirname, 'index.html'), 'utf8');
+    // Inject the exec URL as a window global; replaces the __EXEC_URL__ placeholder.
+    const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
+    html = html.replace('</head>', inject + '</head>');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
+  }
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+});
+
+server.listen(PORT, () => {
+  console.log(`EZone Logistics frontend on http://localhost:${PORT}`);
+  if (!EXEC_URL) console.warn('WARNING: APPS_SCRIPT_EXEC_URL not set — form submission will fail.');
+});

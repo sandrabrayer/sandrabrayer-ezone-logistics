@@ -3,6 +3,40 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 2a] — Request submission form (no photo)
+
+**What:** The Hebrew RTL form a maintenance lead uses to submit a request, plus the server-side
+request-creation logic. A submitted request lands as a `דרישה` row. No approval logic yet (inc. 3).
+
+**Added**
+- `src/request.js` — pure, testable `validateNewRequest` + `buildNewRequest` + `generateRequestId`.
+  Mirrors the `config.js` pattern so the rules run under `node:test`.
+- `src/index.html` — Hebrew RTL form: submitted-by picker (controlled list), house dropdown from
+  the live `?action=houses` feed, category/urgency segmented controls, description, location,
+  and estimated cost (**blank allowed**). Client validation mirrors the server.
+- `src/server.js` — zero-dependency Node static server; injects `APPS_SCRIPT_EXEC_URL` from env
+  at serve time so the URL is never hardcoded or committed.
+- `test/request.test.js` — covers blank cost accepted and kept blank, numeric cost stored as a
+  number, unknown category/urgency/created_by rejected, status stamped `דרישה`, server id/time
+  present, approval fields left blank.
+
+**Changed**
+- `apps-script/Code.gs` — `createRequest` now owns `id`, `status` (`דרישה`), and `created_at`
+  server-side; the client no longer sends them. `validateNewRequest_` hardened against the
+  controlled vocabularies (category, urgency, created_by). `approval_required` still left blank.
+
+**Why:** Requests must exist before approval routing can be meaningfully built or tested, so the
+form precedes approval (inc. 3). Server-owned id/status removes collision risk and prevents the
+client from spoofing lifecycle state; controlled `created_by` keeps later deferral-reminder
+routing reliable.
+
+**Security:** server-side stamping (client can't set status/id); inputs validated and
+vocabularies whitelisted before write; exec URL injected from env, never committed.
+
+**Not yet done:** optional photo upload (2b, wired to Drive); approval routing (inc. 3).
+
+---
+
 ## [Increment 1] — Data model scaffold
 
 **What:** Foundation for the whole app — the five-sheet Google Sheet structure, the Apps Script
