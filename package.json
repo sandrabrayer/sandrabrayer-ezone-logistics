@@ -1,0 +1,15 @@
+{
+  "name": "ezone-logistics",
+  "version": "0.1.0",
+  "description": "Logistics, procurement, and maintenance app for the EZone balance houses (standalone).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "test:watch": "node --test --watch"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

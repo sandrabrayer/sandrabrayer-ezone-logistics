@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets — NEVER commit real values
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+client_secret*.json
+service-account*.json
+
+# Apps Script local tooling (clasp), if used
+.clasp.json
+.clasprc.json
+
+# Logs / OS / editor
+*.log
+npm-debug.log*
+.DS_Store
+.idea/
+.vscode/
