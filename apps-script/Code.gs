@@ -127,6 +127,12 @@ function doGet(e) {
   return jsonOut_({ ok: true, data: result });
 }
 
+// Controlled vocabularies (mirror of src/schema.js + src/request.js).
+var VALID_CATEGORIES = ['רכישה', 'תיקון', 'החלפה'];
+var VALID_URGENCIES = ['רגיל', 'דחוף', 'חירום'];
+var SUBMITTERS = ['רמי', 'צחי', 'רועי', 'sandra'];
+var STATUS_REQUEST = 'דרישה';
+
 function doPost(e) {
   var body;
   try {
@@ -135,30 +141,59 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
-  var action = body.action;
-  // Whitelist: only known actions are accepted. Increment 1 exposes request creation only.
-  if (action !== 'createRequest') {
+  // Whitelist: only known actions are accepted. 2a exposes request creation only.
+  if (body.action !== 'createRequest') {
     return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
 
-  var validationError = validateNewRequest_(body.payload);
+  var input = body.payload || {};
+  var validationError = validateNewRequest_(input);
   if (validationError) return jsonOut_({ ok: false, error: validationError });
 
-  // NOTE: status/approval_required intentionally left to the approval increment.
-  var id = appendRequest(body.payload);
-  return jsonOut_({ ok: true, id: id });
+  // Server owns id, status, created_at — the client never supplies them.
+  var row = buildNewRequest_(input);
+  appendRequest(row);
+  return jsonOut_({ ok: true, id: row.id });
 }
 
-/** Minimal input validation for a new request payload. Hardened further in later increments. */
+/** Validate raw form input. estimated_cost BLANK is valid (unknown cost is a real case). */
 function validateNewRequest_(p) {
   if (!p || typeof p !== 'object') return 'Missing payload';
-  if (!p.id) return 'Missing id';
   if (!p.house) return 'Missing house';
-  if (!p.category) return 'Missing category';
-  if (p.estimated_cost !== '' && p.estimated_cost != null && isNaN(Number(p.estimated_cost))) {
-    return 'estimated_cost must be a number or blank';
-  }
-  return null; // valid
+  if (VALID_CATEGORIES.indexOf(p.category) === -1) return 'Invalid or missing category';
+  if (VALID_URGENCIES.indexOf(p.urgency) === -1) return 'Invalid or missing urgency';
+  if (SUBMITTERS.indexOf(p.created_by) === -1) return 'Invalid or missing created_by';
+  var blank = (p.estimated_cost === '' || p.estimated_cost == null);
+  if (!blank && isNaN(Number(p.estimated_cost))) return 'estimated_cost must be a number or blank';
+  return null;
+}
+
+/** Build the full row, stamping id/status/created_at server-side. Approval fields stay blank (inc. 3). */
+function buildNewRequest_(input) {
+  var blank = (input.estimated_cost === '' || input.estimated_cost == null);
+  return {
+    id: generateRequestId_(),
+    created_at: new Date().toISOString(),
+    created_by: input.created_by,
+    house: input.house,
+    category: input.category,
+    description: input.description || '',
+    location_in_house: input.location_in_house || '',
+    urgency: input.urgency,
+    estimated_cost: blank ? '' : Number(input.estimated_cost),
+    attachment_url: '',          // 2b
+    status: STATUS_REQUEST,      // דרישה
+    approval_required: '',       // increment 3
+    approved_by: '', approved_at: '', rejection_reason: '',
+    deferred_until: '', assigned_to: '', assignment_type: '', batch_id: '',
+    completed_at: '', actual_cost: '', completion_notes: '',
+  };
+}
+
+function generateRequestId_() {
+  var stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  var suffix = String(Math.floor(Math.random() * 1e4)).padStart(4, '0');
+  return 'REQ-' + stamp + '-' + suffix;
 }
 
 function jsonOut_(obj) {

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — דרישה חדשה</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* EZone Logistics — dark family theme. Same skeleton as Dashboard/Outpatient/Managers;
+       signature accent is cement/steel gray (each app owns a hue: Dashboard cyan, Outpatient
+       green, Managers pink — Logistics gray). Action button stays green like the family's
+       primary actions; urgency color-codes amber/red as Outpatient does for due-soon/stopped. */
+    :root {
+      --bg: #15171c;            /* dark charcoal, faint cool cast */
+      --bg2: #1b1e24;
+      --card: #1f232b;          /* one notch lighter than bg */
+      --card-line: #333a45;     /* steel border */
+      --ink: #eef1f5;           /* near-white headings/numbers */
+      --muted: #8b93a0;         /* slate labels */
+      --accent: #6b7280;        /* cement gray — the signature */
+      --accent-2: #9aa3af;      /* silver, gradient top */
+      --accent-soft: rgba(154,163,175,.12);
+      --go: #34c27e;            /* family green — primary action */
+      --go-press: #29a86a;
+      --amber: #e0a23a;         /* דחוף — due-soon */
+      --red: #e0584a;           /* חירום — stopped/urgent */
+      --radius: 16px;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 80% -10%, #232732 0%, transparent 60%),
+        var(--bg);
+      font-family: 'Heebo', sans-serif; line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--card-line);
+      background: linear-gradient(180deg, var(--bg2), transparent);
+    }
+    .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
+    .brand .e { color: var(--accent-2); }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .tab {
+      font-size: .85rem; font-weight: 700; color: var(--ink);
+      padding: 7px 16px; border-radius: 999px;
+      border: 1px solid var(--card-line);
+      background: var(--accent-soft);
+    }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 22px 18px 64px; }
+    header h1 { font-size: 1.5rem; font-weight: 800; margin: 6px 0 2px; letter-spacing: -.01em; }
+    header p { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .card {
+      background: var(--card); border: 1px solid var(--card-line);
+      border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 18px;
+    }
+    .field { margin-bottom: 18px; }
+    label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 7px; }
+    .opt { color: var(--muted); font-weight: 500; font-size: .8rem; }
+    input, select, textarea {
+      width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink);
+      background: #161a20; border: 1.5px solid var(--card-line); border-radius: 11px;
+      padding: 12px 13px; transition: border-color .15s, box-shadow .15s;
+    }
+    select option { background: #161a20; color: var(--ink); }
+    input::placeholder, textarea::placeholder { color: #5b626d; }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--accent-2);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    textarea { resize: vertical; min-height: 74px; }
+    .hint { color: var(--muted); font-size: .8rem; margin-top: 5px; }
+    .seg { display: flex; gap: 8px; }
+    .seg label {
+      flex: 1; margin: 0; cursor: pointer; text-align: center;
+      border: 1.5px solid var(--card-line); border-radius: 11px; padding: 11px 6px;
+      font-weight: 500; background: #161a20; color: var(--ink); transition: all .15s;
+    }
+    .seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .seg input:checked + span { font-weight: 700; }
+    /* default (category + רגיל): cement accent */
+    .seg label:has(input:checked) { border-color: var(--accent-2); background: var(--accent-soft); color: var(--accent-2); }
+    /* urgency color-coding, matching the family */
+    .seg label:has(input[value="דחוף"]:checked) { border-color: var(--amber); background: rgba(224,162,58,.12); color: var(--amber); }
+    .seg label:has(input[value="חירום"]:checked) { border-color: var(--red); background: rgba(224,88,74,.14); color: var(--red); }
+    button.submit {
+      width: 100%; margin-top: 6px; padding: 14px; font-size: 1.05rem; font-weight: 700;
+      color: #08120c; background: var(--go); border: none; border-radius: 12px; cursor: pointer;
+      transition: background .15s, transform .05s;
+    }
+    button.submit:hover { background: var(--go-press); }
+    button.submit:active { transform: translateY(1px); }
+    button.submit:disabled { opacity: .5; cursor: default; }
+    .msg { margin-top: 14px; padding: 12px 14px; border-radius: 11px; font-weight: 600; display: none; }
+    .msg.ok { display: block; background: rgba(52,194,126,.12); color: #5fd79b; border: 1px solid rgba(52,194,126,.35); }
+    .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
+    .loading { color: var(--muted); font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="tab">לוגיסטיקה</div>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <header>
+      <h1>דרישה חדשה</h1>
+      <p>מילוי בקשה לרכישה, תיקון או החלפה</p>
+    </header>
+
+    <div class="card">
+      <div class="field">
+        <label for="created_by">מגיש הבקשה</label>
+        <select id="created_by" required>
+          <option value="" disabled selected>בחר/י…</option>
+          <option value="רמי">רמי</option>
+          <option value="צחי">צחי</option>
+          <option value="רועי">רועי</option>
+          <option value="sandra">Sandra</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="house">בית</label>
+        <select id="house" required>
+          <option value="" disabled selected class="loading">טוען בתים…</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>קטגוריה</label>
+        <div class="seg" id="category">
+          <label><input type="radio" name="category" value="רכישה" /><span>רכישה</span></label>
+          <label><input type="radio" name="category" value="תיקון" /><span>תיקון</span></label>
+          <label><input type="radio" name="category" value="החלפה" /><span>החלפה</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>דחיפות</label>
+        <div class="seg" id="urgency">
+          <label><input type="radio" name="urgency" value="רגיל" checked /><span>רגיל</span></label>
+          <label><input type="radio" name="urgency" value="דחוף" /><span>דחוף</span></label>
+          <label><input type="radio" name="urgency" value="חירום" /><span>חירום</span></label>
+        </div>
+        <div class="hint">חירום עוקף אישור ומבוצע מיידית.</div>
+      </div>
+
+      <div class="field">
+        <label for="description">תיאור</label>
+        <textarea id="description" placeholder="מה צריך לרכוש / לתקן / להחליף?"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="location_in_house">מיקום בבית <span class="opt">(לא חובה)</span></label>
+        <input id="location_in_house" type="text" placeholder="למשל: מטבח, חדר 4, גינה" />
+      </div>
+
+      <div class="field">
+        <label for="estimated_cost">עלות משוערת (₪) <span class="opt">(לא חובה — אפשר להשאיר ריק)</span></label>
+        <input id="estimated_cost" type="number" min="0" step="any" inputmode="decimal" placeholder="אם לא ידוע, השאר/י ריק" />
+        <div class="hint">אם העלות לא ידועה, אפשר להשאיר ריק — הבקשה תטופל בהתאם.</div>
+      </div>
+
+      <button class="submit" id="submitBtn">שליחת דרישה</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <script>
+    // The /exec URL is injected at serve time by the Node frontend from .env (never hardcoded
+    // here, never committed). For local static testing, the server replaces __EXEC_URL__.
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+
+    const houseSelect = document.getElementById('house');
+    const msg = document.getElementById('msg');
+    const btn = document.getElementById('submitBtn');
+
+    // Populate houses from the live feed confirmed in increment 1.
+    async function loadHouses() {
+      try {
+        const res = await fetch(EXEC_URL + '?action=houses');
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'load failed');
+        houseSelect.innerHTML = '<option value="" disabled selected>בחר/י בית…</option>';
+        json.data.forEach(h => {
+          const o = document.createElement('option');
+          o.value = h.name; o.textContent = h.name;
+          houseSelect.appendChild(o);
+        });
+      } catch (e) {
+        houseSelect.innerHTML = '<option value="" disabled selected>שגיאה בטעינת בתים</option>';
+        showMsg('err', 'לא ניתן לטעון את רשימת הבתים. רענן/י ונסה/י שוב.');
+      }
+    }
+
+    function showMsg(kind, text) {
+      msg.className = 'msg ' + kind;
+      msg.textContent = text;
+    }
+
+    function checked(name) {
+      const el = document.querySelector('input[name="' + name + '"]:checked');
+      return el ? el.value : '';
+    }
+
+    async function submit() {
+      const payload = {
+        created_by: document.getElementById('created_by').value,
+        house: houseSelect.value,
+        category: checked('category'),
+        urgency: checked('urgency'),
+        description: document.getElementById('description').value.trim(),
+        location_in_house: document.getElementById('location_in_house').value.trim(),
+        estimated_cost: document.getElementById('estimated_cost').value, // '' if blank — valid
+      };
+
+      // Client-side mirror of server validation (server is the source of truth).
+      if (!payload.created_by) return showMsg('err', 'יש לבחור מגיש בקשה.');
+      if (!payload.house) return showMsg('err', 'יש לבחור בית.');
+      if (!payload.category) return showMsg('err', 'יש לבחור קטגוריה.');
+      if (!payload.urgency) return showMsg('err', 'יש לבחור דחיפות.');
+
+      btn.disabled = true; btn.textContent = 'שולח…';
+      try {
+        const res = await fetch(EXEC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight to Apps Script
+          body: JSON.stringify({ action: 'createRequest', payload }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'שגיאה');
+        showMsg('ok', 'הדרישה נשלחה בהצלחה. מספר בקשה: ' + json.id);
+        resetForm();
+      } catch (e) {
+        showMsg('err', 'השליחה נכשלה: ' + e.message);
+      } finally {
+        btn.disabled = false; btn.textContent = 'שליחת דרישה';
+      }
+    }
+
+    function resetForm() {
+      document.getElementById('created_by').selectedIndex = 0;
+      houseSelect.selectedIndex = 0;
+      document.querySelectorAll('input[name="category"]').forEach(r => r.checked = false);
+      document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
+      document.getElementById('description').value = '';
+      document.getElementById('location_in_house').value = '';
+      document.getElementById('estimated_cost').value = '';
+    }
+
+    btn.addEventListener('click', submit);
+    loadHouses();
+  </script>
+</body>
+</html>
