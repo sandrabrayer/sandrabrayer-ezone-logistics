@@ -3,6 +3,37 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 6] — Inspection reports + context fields
+
+**What:** A reports page that turns each saved inspection into a clean, printable report (save as
+PDF from the browser), plus background/context fields on the inspection, and two fixes.
+
+**Added**
+- `src/reports.html` — `/reports`: list of past inspections (house, date, inspector, # findings,
+  defect badge) → click opens a formatted report (background block, three domains with summaries and
+  findings grouped by location, defects flagged, links to any request a defect became) → "הדפסה /
+  שמירה כ-PDF" via browser print (works from any computer, no backend).
+
+**Changed**
+- `src/schema.js` + `apps-script/setup.gs` — `Inspections` gains `patient_count`, `staff_present`,
+  `start_time`, `cleaner_present` (the "background" of Olga's report).
+- `apps-script/Code.gs` — `createInspection` persists the new fields.
+- `src/inspection.html` — new fields on the form (patient count = 0–40 dropdown; start time; staff
+  present; cleaner/hours); inspector picker reduced to **אולגה / רועי**; save-validation message now
+  scrolls into view (fixes the "nothing happens when house is empty" confusion).
+- `src/server.js` — serves `/reports`.
+
+**Why:** Olga used to hand-write and email a report; the app now generates it. Context fields make
+the report match what she actually records. PDF (browser print) chosen for now — zero backend, works
+everywhere; Word export can come later if needed.
+
+**Deploy note:** `Inspections` got new columns, and `setupSheet()` now patches missing columns onto
+existing sheets (appends any new schema column it finds absent, without touching data). So: paste the
+updated `Code.gs` + `setup.gs`, run `setupSheet()` once (it adds the four new `Inspections` columns),
+redeploy New Version.
+
+---
+
 ## [Increment 5] — Edit & delete requests
 
 **What:** Roy or Sandra can delete a request (one quick, audited action — for clearing test/junk

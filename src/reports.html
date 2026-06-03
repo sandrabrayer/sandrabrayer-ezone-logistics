@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — דוחות בקרה</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --amber: #e0a23a; --red: #e0584a; --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; background: var(--accent-grad); }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .list-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--card-line); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; transition: border-color .12s; }
+    .list-item:hover { border-color: var(--accent-2); }
+    .list-item .t { font-weight: 700; }
+    .list-item .m { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+    .badge { font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); white-space: nowrap; }
+    .badge.def { background: rgba(224,162,58,.14); color: var(--amber); }
+    button { font-family: inherit; cursor: pointer; }
+    .btn { font-size: .9rem; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .btn.go { background: var(--accent-grad); color: #06201c; border: none; }
+    .back { margin-bottom: 14px; }
+    .empty { color: var(--muted); }
+    .loading { color: var(--muted); }
+    /* ---- Report view ---- */
+    #report { display: none; }
+    .report-actions { display: flex; gap: 10px; margin-bottom: 16px; }
+    .report-doc { background: #fff; color: #1a1a1a; border-radius: 12px; padding: 34px 38px; }
+    .report-doc h2 { font-size: 1.5rem; margin: 0 0 4px; color: #0f766e; }
+    .report-doc .head-meta { color: #555; font-size: .9rem; margin-bottom: 18px; }
+    .report-doc .bg { background: #f3f6f6; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; font-size: .92rem; }
+    .report-doc .bg b { color: #0f766e; }
+    .report-doc h3 { font-size: 1.15rem; color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 4px; margin: 22px 0 10px; }
+    .report-doc .summary { font-style: italic; color: #444; margin: 0 0 10px; }
+    .report-doc ul { margin: 6px 0; padding-inline-start: 22px; }
+    .report-doc li { margin: 4px 0; }
+    .report-doc .defect { color: #b3402f; font-weight: 600; }
+    .report-doc .linked { color: #0f766e; font-size: .82rem; }
+    .report-doc .note { color: #333; }
+    .report-doc .foot { margin-top: 26px; border-top: 1px solid #ddd; padding-top: 10px; color: #888; font-size: .8rem; }
+    @media print {
+      body { background: #fff; }
+      .topbar, .report-actions, #list, h1, .sub { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .report-doc { border-radius: 0; padding: 10px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="tab">דוחות בקרה</div>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>דוחות בקרה</h1>
+    <p class="sub">בקרות שבוצעו — לחיצה על בקרה פותחת דוח מסודר להדפסה / שמירה כ-PDF</p>
+
+    <div id="list"><p class="loading">טוען בקרות…</p></div>
+
+    <div id="report">
+      <div class="report-actions">
+        <button class="btn back" onclick="closeReport()">→ חזרה לרשימה</button>
+        <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
+      </div>
+      <div class="report-doc" id="reportDoc"></div>
+    </div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const DOMAIN_LABELS = { treatment: 'תחום הטיפול', cleanliness: 'ניקיון ואחזקה', kitchen: 'מטבחים ומחסנים' };
+    let inspections = [], findings = [];
+
+    async function load() {
+      try {
+        const [insRes, findRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()),
+        ]);
+        inspections = (insRes.data || []).slice().reverse(); // newest first
+        findings = findRes.data || [];
+        renderList();
+      } catch (e) {
+        document.getElementById('list').innerHTML = '<p class="empty">שגיאה בטעינת הבקרות.</p>';
+      }
+    }
+
+    function findingsFor(id) { return findings.filter(f => String(f.inspection_id) === String(id)); }
+
+    function renderList() {
+      const el = document.getElementById('list');
+      if (inspections.length === 0) { el.innerHTML = '<p class="empty">עדיין לא בוצעו בקרות.</p>'; return; }
+      el.innerHTML = inspections.map(ins => {
+        const fs = findingsFor(ins.id);
+        const defects = fs.filter(f => f.finding_type === 'physical_defect').length;
+        return `<div class="list-item" onclick="openReport('${ins.id}')">
+          <div>
+            <div class="t">${esc(ins.house)} — ${esc(ins.inspection_date)}</div>
+            <div class="m">מבקר/ת: ${esc(ins.inspector)} · ${fs.length} ממצאים${ins.patient_count !== '' ? ' · ' + esc(ins.patient_count) + ' מטופלים' : ''}</div>
+          </div>
+          ${defects ? `<span class="badge def">${defects} ליקויים</span>` : '<span class="badge">תקין</span>'}
+        </div>`;
+      }).join('');
+    }
+
+    window.openReport = (id) => {
+      const ins = inspections.find(x => String(x.id) === String(id));
+      if (!ins) return;
+      const fs = findingsFor(id);
+      const bg = [];
+      if (ins.start_time) bg.push(`<b>שעת התחלה:</b> ${esc(ins.start_time)}`);
+      if (ins.patient_count !== '') bg.push(`<b>מטופלים בבית:</b> ${esc(ins.patient_count)}`);
+      if (ins.staff_present) bg.push(`<b>נוכחים מהצוות:</b> ${esc(ins.staff_present)}`);
+      if (ins.cleaner_present) bg.push(`<b>מנקה:</b> ${esc(ins.cleaner_present)}`);
+
+      const domainBlocks = Object.keys(DOMAIN_LABELS).map(d => {
+        const summary = ins['domain_' + (d === 'treatment' ? 'treatment' : d === 'cleanliness' ? 'cleanliness' : 'kitchen') + '_summary'];
+        const df = fs.filter(f => f.domain === d);
+        if (!summary && df.length === 0) return '';
+        return `<h3>${DOMAIN_LABELS[d]}</h3>
+          ${summary ? `<p class="summary">${esc(summary)}</p>` : ''}
+          ${df.length ? `<ul>${df.map(f => `<li class="${f.finding_type === 'physical_defect' ? 'defect' : 'note'}">${f.finding_type === 'physical_defect' ? '⚠ ' : ''}${f.location_in_house ? '<b>' + esc(f.location_in_house) + ':</b> ' : ''}${esc(f.finding_text)}${f.suggested_category ? ' (' + esc(f.suggested_category) + ')' : ''}${f.linked_request_id ? ' <span class="linked">→ נפתחה דרישה ' + esc(f.linked_request_id) + '</span>' : ''}</li>`).join('')}</ul>` : ''}`;
+      }).join('');
+
+      document.getElementById('reportDoc').innerHTML = `
+        <h2>דוח בקרה — ${esc(ins.house)}</h2>
+        <div class="head-meta">תאריך: ${esc(ins.inspection_date)} · מבקר/ת: ${esc(ins.inspector)}</div>
+        ${bg.length ? `<div class="bg">${bg.join(' &nbsp;•&nbsp; ')}</div>` : ''}
+        ${ins.general_notes ? `<p class="summary">${esc(ins.general_notes)}</p>` : ''}
+        ${domainBlocks || '<p>לא תועדו ממצאים.</p>'}
+        <div class="foot">הופק ממערכת EZone Logistics · ${new Date().toLocaleDateString('he-IL')}</div>`;
+      document.getElementById('list').style.display = 'none';
+      document.getElementById('report').style.display = 'block';
+      window.scrollTo(0, 0);
+    };
+
+    window.closeReport = () => {
+      document.getElementById('report').style.display = 'none';
+      document.getElementById('list').style.display = 'block';
+    };
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    load();
+  </script>
+</body>
+</html>
