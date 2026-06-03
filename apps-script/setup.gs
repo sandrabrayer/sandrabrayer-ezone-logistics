@@ -24,6 +24,7 @@ var HEADERS = {
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
   Inspections: [
     'id', 'house', 'inspection_date', 'inspector', 'started_at',
+    'patient_count', 'staff_present', 'start_time', 'cleaner_present',
     'domain_treatment_summary', 'domain_cleanliness_summary', 'domain_kitchen_summary',
     'general_notes', 'status',
   ],
@@ -80,12 +81,23 @@ function setupSheet() {
     var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
     var headers = HEADERS[name];
 
-    // Write headers only if the first row is empty (don't clobber existing data).
+    // Write headers if the first row is empty...
     var firstCell = sheet.getRange(1, 1).getValue();
     if (firstCell === '' || firstCell === null) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
       sheet.setFrozenRows(1);
+    } else {
+      // ...otherwise, APPEND any new columns that were added to the schema later
+      // (e.g. inspection background fields), so existing sheets gain them without data loss.
+      var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      headers.forEach(function (h) {
+        if (existing.indexOf(h) === -1) {
+          var newCol = sheet.getLastColumn() + 1;
+          sheet.getRange(1, newCol).setValue(h).setFontWeight('bold');
+          existing.push(h);
+        }
+      });
     }
   });
 

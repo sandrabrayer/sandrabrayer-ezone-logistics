@@ -397,6 +397,8 @@ function handleCreateInspection_(p) {
   appendRow_('Inspections', {
     id: id, house: p.house, inspection_date: p.inspection_date, inspector: p.inspector,
     started_at: new Date().toISOString(),
+    patient_count: p.patient_count || '', staff_present: p.staff_present || '',
+    start_time: p.start_time || '', cleaner_present: p.cleaner_present || '',
     domain_treatment_summary: p.domain_treatment_summary || '',
     domain_cleanliness_summary: p.domain_cleanliness_summary || '',
     domain_kitchen_summary: p.domain_kitchen_summary || '',

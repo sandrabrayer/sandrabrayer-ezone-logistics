@@ -73,13 +73,21 @@
       <select id="inspector">
         <option value="אולגה" selected>אולגה</option>
         <option value="רועי">רועי</option>
-        <option value="אורן">אורן</option>
-        <option value="sandra">Sandra</option>
       </select>
       <label>בית</label>
       <select id="house"><option value="" disabled selected>טוען…</option></select>
       <label>תאריך בקרה</label>
       <input id="inspection_date" type="date" />
+      <label>שעת התחלה <span class="opt">(לא חובה)</span></label>
+      <input id="start_time" type="time" />
+      <label>מספר מטופלים בבית בזמן הבקרה</label>
+      <select id="patient_count">
+        <option value="" selected>בחר/י…</option>
+      </select>
+      <label>נוכחים מהצוות <span class="opt">(לא חובה)</span></label>
+      <input id="staff_present" type="text" placeholder="למשל: אורן רכזת + מדריכה, עידו מנהל" />
+      <label>נוכחות מנקה / שעות <span class="opt">(לא חובה)</span></label>
+      <input id="cleaner_present" type="text" placeholder="למשל: מנקה 8:00–13:00" />
     </div>
 
     <div id="domains"></div>
@@ -97,10 +105,13 @@
     let checklist = [];
     const msg = document.getElementById('msg');
 
-    function showMsg(k, t) { msg.className = 'msg ' + k; msg.textContent = t; }
+    function showMsg(k, t) { msg.className = 'msg ' + k; msg.textContent = t; msg.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
     async function init() {
       document.getElementById('inspection_date').value = new Date().toISOString().slice(0, 10);
+      // patient count menu 0–40
+      const pc = document.getElementById('patient_count');
+      for (let i = 0; i <= 40; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = String(i); pc.appendChild(o); }
       try {
         const [houseRes, clRes] = await Promise.all([
           fetch(EXEC_URL + '?action=houses').then(r => r.json()),
@@ -178,6 +189,10 @@
         const sum = (d) => document.querySelector(`[data-summary="${d}"]`)?.value.trim() || '';
         const insRes = await post('createInspection', {
           house, inspector, inspection_date: date,
+          start_time: document.getElementById('start_time').value,
+          patient_count: document.getElementById('patient_count').value,
+          staff_present: document.getElementById('staff_present').value.trim(),
+          cleaner_present: document.getElementById('cleaner_present').value.trim(),
           domain_treatment_summary: sum('treatment'),
           domain_cleanliness_summary: sum('cleanliness'),
           domain_kitchen_summary: sum('kitchen'),
