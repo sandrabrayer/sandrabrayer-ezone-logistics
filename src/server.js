@@ -24,10 +24,13 @@ const PORT = process.env.PORT || 3000;
 const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
 
 const server = createServer((req, res) => {
-  if (req.url === '/' || req.url === '/index.html') {
-    let html = readFileSync(join(__dirname, 'index.html'), 'utf8');
-    // Inject the exec URL as a window global; replaces the __EXEC_URL__ placeholder.
-    const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
+  const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
+  let file = null;
+  if (req.url === '/' || req.url === '/index.html') file = 'index.html';
+  else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
+
+  if (file) {
+    let html = readFileSync(join(__dirname, file), 'utf8');
     html = html.replace('</head>', inject + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(html);

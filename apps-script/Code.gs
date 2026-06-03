@@ -141,17 +141,26 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
-  // Whitelist: only known actions are accepted. 2a exposes request creation only.
-  if (body.action !== 'createRequest') {
-    return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
+  // Whitelisted actions only.
+  switch (body.action) {
+    case 'createRequest': return handleCreateRequest_(body.payload || {});
+    case 'approve':       return handleApprove_(body.payload || {});
+    case 'reject':        return handleReject_(body.payload || {});
+    case 'defer':         return handleDefer_(body.payload || {});
+    case 'assign':        return handleAssign_(body.payload || {});
+    case 'setStatus':     return handleSetStatus_(body.payload || {});
+    default:
+      return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
+}
 
-  var input = body.payload || {};
+function handleCreateRequest_(input) {
   var validationError = validateNewRequest_(input);
   if (validationError) return jsonOut_({ ok: false, error: validationError });
-
   // Server owns id, status, created_at — the client never supplies them.
   var row = buildNewRequest_(input);
+  // Stamp the derived approval_required flag (§6).
+  row.approval_required = approvalRequired_(row.estimated_cost, row.urgency);
   appendRequest(row);
   return jsonOut_({ ok: true, id: row.id });
 }
@@ -200,4 +209,152 @@ function jsonOut_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===== Approval engine + status transitions (increment 3) =====
+// Mirrors src/approval.js. Statuses mirror src/schema.js STATUSES.
+
+var ST = {
+  REQUEST: 'דרישה', PENDING: 'ממתין לאישור', APPROVED: 'מאושר',
+  NOT_APPROVED: 'לא מאושר', DEFERRED: 'נדחה לתאריך', IN_PROGRESS: 'בביצוע',
+  COMPLETED: 'הושלם', CLOSED: 'סגור',
+};
+var APPROVER_ROY = 'רועי';
+var APPROVER_SANDRA = 'sandra';
+
+function costIsBlank_(c) { return c === '' || c === null || c === undefined; }
+
+function approvalRequired_(cost, urgency) {
+  if (urgency === 'חירום') return false;
+  if (costIsBlank_(cost)) return false;
+  var t = Number(getConfig('approval_threshold'));
+  return Number(cost) > t;
+}
+
+function whoApproves_(cost, urgency) {
+  if (urgency === 'חירום') return 'auto';
+  if (costIsBlank_(cost)) return 'roy';
+  var t = Number(getConfig('approval_threshold'));
+  return Number(cost) > t ? 'sandra' : 'roy';
+}
+
+function canApprove_(approver, cost, urgency) {
+  var who = whoApproves_(cost, urgency);
+  if (who === 'auto') return true;
+  if (who === 'sandra') return approver === APPROVER_SANDRA;
+  return approver === APPROVER_ROY || approver === APPROVER_SANDRA;
+}
+
+var TRANSITIONS_ = {};
+TRANSITIONS_[ST.REQUEST]  = [ST.PENDING, ST.APPROVED, ST.NOT_APPROVED, ST.DEFERRED];
+TRANSITIONS_[ST.PENDING]  = [ST.APPROVED, ST.NOT_APPROVED, ST.DEFERRED];
+TRANSITIONS_[ST.DEFERRED] = [ST.APPROVED, ST.NOT_APPROVED, ST.DEFERRED];
+TRANSITIONS_[ST.APPROVED] = [ST.IN_PROGRESS];
+TRANSITIONS_[ST.IN_PROGRESS] = [ST.COMPLETED];
+TRANSITIONS_[ST.COMPLETED]   = [ST.CLOSED];
+TRANSITIONS_[ST.NOT_APPROVED] = [];
+TRANSITIONS_[ST.CLOSED]       = [];
+
+function canTransition_(from, to) {
+  var allowed = TRANSITIONS_[from];
+  return !!allowed && allowed.indexOf(to) !== -1;
+}
+
+/** Update specific fields of a request row by id, and write an audit entry. */
+function updateRequest_(id, fields, fromStatus, toStatus, by, note) {
+  var sheet = getSheet_('Requests');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][headers.indexOf('id')]) === String(id)) {
+      for (var key in fields) {
+        var col = headers.indexOf(key);
+        if (col !== -1) sheet.getRange(r + 1, col + 1).setValue(fields[key]);
+      }
+      writeAuditEntry(id, fromStatus, toStatus, by, note || '');
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleApprove_(p) {
+  if (!p.id || !p.by) return jsonOut_({ ok: false, error: 'Missing id or by' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (!canTransition_(req.status, ST.APPROVED)) {
+    return jsonOut_({ ok: false, error: 'Cannot approve from status "' + req.status + '"' });
+  }
+  if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
+    return jsonOut_({ ok: false, error: 'Not authorized for this amount (above threshold requires Sandra)' });
+  }
+  updateRequest_(p.id,
+    { status: ST.APPROVED, approved_by: p.by, approved_at: new Date().toISOString() },
+    req.status, ST.APPROVED, p.by, p.note || '');
+  return jsonOut_({ ok: true });
+}
+
+function handleReject_(p) {
+  if (!p.id || !p.by) return jsonOut_({ ok: false, error: 'Missing id or by' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (!canTransition_(req.status, ST.NOT_APPROVED)) {
+    return jsonOut_({ ok: false, error: 'Cannot reject from status "' + req.status + '"' });
+  }
+  if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
+    return jsonOut_({ ok: false, error: 'Not authorized for this amount' });
+  }
+  updateRequest_(p.id,
+    { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },
+    req.status, ST.NOT_APPROVED, p.by, p.reason || '');
+  return jsonOut_({ ok: true });
+}
+
+function handleDefer_(p) {
+  if (!p.id || !p.by || !p.deferred_until) {
+    return jsonOut_({ ok: false, error: 'Missing id, by, or deferred_until' });
+  }
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (!canTransition_(req.status, ST.DEFERRED)) {
+    return jsonOut_({ ok: false, error: 'Cannot defer from status "' + req.status + '"' });
+  }
+  // Defer is Roy at any amount — a "this can wait" call, not financial (§6).
+  updateRequest_(p.id,
+    { status: ST.DEFERRED, deferred_until: p.deferred_until },
+    req.status, ST.DEFERRED, p.by, 'נדחה ל-' + p.deferred_until);
+  return jsonOut_({ ok: true });
+}
+
+function handleAssign_(p) {
+  if (!p.id || !p.by || !p.assigned_to) {
+    return jsonOut_({ ok: false, error: 'Missing id, by, or assigned_to' });
+  }
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  // Approved → in progress (no separate "assigned" status, §5). Assignment sets the lead.
+  if (!canTransition_(req.status, ST.IN_PROGRESS)) {
+    return jsonOut_({ ok: false, error: 'Can only assign an approved request' });
+  }
+  updateRequest_(p.id,
+    { status: ST.IN_PROGRESS, assigned_to: p.assigned_to, assignment_type: p.assignment_type || '' },
+    req.status, ST.IN_PROGRESS, p.by, 'הוקצה ל-' + p.assigned_to);
+  return jsonOut_({ ok: true });
+}
+
+function handleSetStatus_(p) {
+  if (!p.id || !p.by || !p.to) return jsonOut_({ ok: false, error: 'Missing id, by, or to' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (!canTransition_(req.status, p.to)) {
+    return jsonOut_({ ok: false, error: 'Illegal transition ' + req.status + ' → ' + p.to });
+  }
+  var fields = { status: p.to };
+  if (p.to === ST.COMPLETED) {
+    fields.completed_at = new Date().toISOString();
+    if (p.actual_cost != null) fields.actual_cost = p.actual_cost;
+    if (p.completion_notes) fields.completion_notes = p.completion_notes;
+  }
+  updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
+  return jsonOut_({ ok: true });
 }

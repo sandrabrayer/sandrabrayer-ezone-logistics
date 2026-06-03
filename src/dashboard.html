@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — לוח בקרה</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --go: #14b8a6; --go-press: #0f9488; --amber: #e0a23a; --red: #e0584a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--ink);
+      background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg);
+      font-family: 'Heebo', sans-serif; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--card-line);
+      background: linear-gradient(180deg, var(--bg2), transparent);
+    }
+    .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; border: none; background: var(--accent-grad); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 4px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    /* identity + filters bar */
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+    .controls label { font-size: .8rem; color: var(--muted); margin-inline-end: 4px; }
+    select { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
+    select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+    select option { background: #161a20; color: var(--ink); }
+    /* summary counters */
+    .counters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+    .counter { flex: 1; min-width: 130px; background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 14px 16px; }
+    .counter .n { font-size: 1.8rem; font-weight: 800; color: var(--accent-2); }
+    .counter .l { font-size: .82rem; color: var(--muted); }
+    /* status column groups */
+    .group { margin-bottom: 26px; }
+    .group h2 { font-size: 1.05rem; font-weight: 800; margin: 0 0 10px; display: flex; align-items: center; gap: 9px; }
+    .group h2 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+    .req {
+      background: var(--card);
+      background: linear-gradient(var(--card), var(--card)) padding-box, var(--accent-grad) border-box;
+      border: 1px solid transparent; border-radius: 14px; padding: 14px 16px; margin-bottom: 10px;
+      box-shadow: 0 0 26px -10px var(--glow);
+    }
+    .req .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .req .title { font-weight: 700; }
+    .req .meta { color: var(--muted); font-size: .82rem; margin-top: 3px; }
+    .req .cost { font-weight: 800; color: var(--accent-2); white-space: nowrap; }
+    .pill { font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; display: inline-block; }
+    .pill.urgent { background: rgba(224,162,58,.14); color: var(--amber); }
+    .pill.emergency { background: rgba(224,88,74,.16); color: var(--red); }
+    .pill.normal { background: var(--accent-soft); color: var(--accent-2); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    button.act { font-family: inherit; font-size: .85rem; font-weight: 700; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); cursor: pointer; transition: all .12s; }
+    button.act:hover { border-color: var(--accent-2); }
+    button.act.go { background: var(--go); color: #06201c; border: none; }
+    button.act.go:hover { background: var(--go-press); }
+    button.act.danger { color: var(--red); border-color: rgba(224,88,74,.4); }
+    button.act:disabled { opacity: .4; cursor: default; }
+    .empty { color: var(--muted); font-size: .9rem; padding: 8px 2px; }
+    .msg { padding: 11px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 16px; display: none; }
+    .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
+    .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
+    .loading { color: var(--muted); }
+    @media (max-width: 600px) { .counter { min-width: 45%; } }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="tab">לוח בקרה</div>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>לוח בקרה</h1>
+    <p class="sub">ניהול דרישות — אישור, הקצאה ומעקב</p>
+
+    <div class="controls">
+      <span><label>משתמש:</label>
+        <select id="who">
+          <option value="רועי">רועי</option>
+          <option value="sandra">Sandra</option>
+        </select>
+      </span>
+      <span><label>בית:</label>
+        <select id="filterHouse"><option value="">כל הבתים</option></select>
+      </span>
+      <span><label>אחראי:</label>
+        <select id="filterLead">
+          <option value="">הכל</option>
+          <option value="רמי">רמי</option>
+          <option value="צחי">צחי</option>
+        </select>
+      </span>
+    </div>
+
+    <div class="msg" id="msg"></div>
+    <div class="counters" id="counters"></div>
+    <div id="board"><p class="loading">טוען דרישות…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const THRESHOLD_DEFAULT = 3000;
+
+    const ST = {
+      REQUEST: 'דרישה', PENDING: 'ממתין לאישור', APPROVED: 'מאושר',
+      NOT_APPROVED: 'לא מאושר', DEFERRED: 'נדחה לתאריך', IN_PROGRESS: 'בביצוע',
+      COMPLETED: 'הושלם', CLOSED: 'סגור',
+    };
+    // Display order of status groups on the board.
+    const GROUPS = [
+      { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING] },
+      { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED] },
+      { key: 'approved', title: 'מאושר — להקצאה', statuses: [ST.APPROVED] },
+      { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS] },
+      { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED] },
+      { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED] },
+    ];
+
+    let allRequests = [];
+    let threshold = THRESHOLD_DEFAULT;
+    const msg = document.getElementById('msg');
+    const board = document.getElementById('board');
+
+    function showMsg(kind, text) { msg.className = 'msg ' + kind; msg.textContent = text; setTimeout(() => { if (kind === 'ok') msg.className = 'msg'; }, 4000); }
+    function who() { return document.getElementById('who').value; }
+    function blank(c) { return c === '' || c === null || c === undefined; }
+    function num(c) { return blank(c) ? null : Number(c); }
+
+    function whoApproves(cost, urgency) {
+      if (urgency === 'חירום') return 'auto';
+      if (blank(cost)) return 'roy';
+      return Number(cost) > threshold ? 'sandra' : 'roy';
+    }
+    function canApprove(approver, cost, urgency) {
+      const w = whoApproves(cost, urgency);
+      if (w === 'auto') return true;
+      if (w === 'sandra') return approver === 'sandra';
+      return approver === 'רועי' || approver === 'sandra';
+    }
+
+    async function load() {
+      try {
+        const [reqRes, cfgRes, houseRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+          fetch(EXEC_URL + '?action=config').then(r => r.json()),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+        ]);
+        if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
+        allRequests = reqRes.data || [];
+        if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
+          threshold = Number(cfgRes.data.approval_threshold);
+        }
+        if (houseRes.ok) {
+          const sel = document.getElementById('filterHouse');
+          houseRes.data.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+        }
+        render();
+      } catch (e) {
+        board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';
+        showMsg('err', 'לא ניתן לטעון את הדרישות.');
+      }
+    }
+
+    function filtered() {
+      const h = document.getElementById('filterHouse').value;
+      const lead = document.getElementById('filterLead').value;
+      return allRequests.filter(r => (!h || r.house === h) && (!lead || r.assigned_to === lead));
+    }
+
+    function render() {
+      const reqs = filtered();
+      // counters
+      const open = reqs.filter(r => ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(r.status)).length;
+      const pending = reqs.filter(r => [ST.REQUEST, ST.PENDING].includes(r.status)).length;
+      const deferred = reqs.filter(r => r.status === ST.DEFERRED).length;
+      const closed = reqs.filter(r => [ST.CLOSED, ST.COMPLETED].includes(r.status)).length;
+      document.getElementById('counters').innerHTML = [
+        ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
+      ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+      board.innerHTML = GROUPS.map(g => {
+        const items = reqs.filter(r => g.statuses.includes(r.status));
+        if (items.length === 0) return '';
+        return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
+      }).join('') || '<p class="empty">אין דרישות להצגה.</p>';
+    }
+
+    function urgencyPill(u) {
+      if (u === 'חירום') return '<span class="pill emergency">חירום</span>';
+      if (u === 'דחוף') return '<span class="pill urgent">דחוף</span>';
+      return '<span class="pill normal">רגיל</span>';
+    }
+
+    function card(r) {
+      const cost = blank(r.estimated_cost) ? 'לא ידוע' : '₪' + r.estimated_cost;
+      const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
+      return `<div class="req">
+        <div class="head">
+          <div>
+            <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
+            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.assigned_to ? ' · אחראי: ' + escapeHtml(r.assigned_to) : ''}${r.deferred_until ? ' · נדחה ל-' + escapeHtml(r.deferred_until) : ''}</div>
+          </div>
+          <div class="cost">${cost}</div>
+        </div>
+        <div class="actions">${actionsFor(r)}</div>
+      </div>`;
+    }
+
+    function actionsFor(r) {
+      const s = r.status, id = r.id;
+      const btns = [];
+      if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
+        const allowed = canApprove(who(), r.estimated_cost, r.urgency);
+        const needSandra = whoApproves(r.estimated_cost, r.urgency) === 'sandra';
+        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}')">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
+        btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
+        btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
+      } else if (s === ST.APPROVED) {
+        btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+      } else if (s === ST.IN_PROGRESS) {
+        btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+      } else if (s === ST.COMPLETED) {
+        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+      } else {
+        btns.push('<span class="empty">—</span>');
+      }
+      return btns.join('');
+    }
+
+    async function post(action, payload) {
+      try {
+        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'שגיאה');
+        showMsg('ok', 'בוצע.');
+        await load();
+      } catch (e) { showMsg('err', 'הפעולה נכשלה: ' + e.message); }
+    }
+
+    window.doApprove = (id) => post('approve', { id, by: who() });
+    window.doReject = (id) => { const reason = prompt('סיבת הדחייה:') || ''; post('reject', { id, by: who(), reason }); };
+    window.doDefer = (id) => { const d = prompt('דחה עד תאריך (YYYY-MM-DD):'); if (d) post('defer', { id, by: who(), deferred_until: d }); };
+    window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
+    window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
+    window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
+
+    function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+    document.getElementById('who').addEventListener('change', render);
+    document.getElementById('filterHouse').addEventListener('change', render);
+    document.getElementById('filterLead').addEventListener('change', render);
+    load();
+  </script>
+</body>
+</html>
