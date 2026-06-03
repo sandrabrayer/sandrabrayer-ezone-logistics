@@ -3,6 +3,67 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 5] — Edit & delete requests
+
+**What:** Roy or Sandra can delete a request (one quick, audited action — for clearing test/junk
+rows), and anyone can edit a request's details before it's approved.
+
+**Added**
+- `src/edit.js` — pure rules: `canDelete` (Roy/Sandra only), `canEdit` (only `דרישה` /
+  `ממתין לאישור`), editable-fields whitelist.
+- `test/edit.test.js` — delete authority, edit-only-before-approval, editable-fields whitelist.
+- `apps-script/Code.gs` — `deleteRequest` (authorized, audit-logged before row removal) and
+  `editRequest` (pre-approval only; revalidates vocabularies; recomputes `approval_required`).
+- `src/dashboard.html` — "עריכה" button (pre-approval requests) and "מחיקה" button (Roy/Sandra),
+  with a confirm on delete.
+
+**Why:** the lifecycle was forward-only with no way to fix a typo or remove test data. Edit is
+locked after approval so cost/scope can't be changed to bypass the §6 routing; delete is owner-only
+and audit-logged so there's still a record of what was removed.
+
+**Security:** delete authorized server-side (Roy/Sandra); deletion audit-logged before removal;
+edit revalidates against controlled vocabularies and recomputes the approval flag, and is rejected
+once a request is approved.
+
+---
+
+## [Increment 4] — Inspections module (בקרות, §13)
+
+**What:** Olga's on-site inspection brought into the app as a checklist, with physical defects
+routed into the existing request pipeline via suggest-then-confirm.
+
+**Added**
+- `src/schema.js` — three new sheets (`Inspections`, `InspectionFindings`, `ChecklistItems`),
+  inspection vocabularies (domains, finding types, severity), and a seeded fixed checklist drafted
+  from Olga's real report (16 items across treatment / cleanliness / kitchen).
+- `src/inspection.js` — pure logic: validate inspection + findings, `canBecomeRequest` (only
+  unlinked physical defects), `findingToRequestPayload` (blank cost → routes to Roy).
+- `test/inspection.test.js` — 10 tests: validation, finding-type rules, process-note can't convert,
+  defect→request payload shape.
+- `src/inspection.html` — teal RTL checklist screen: inspector/house/date, three domain cards with
+  fixed checklist items + per-domain summary + ad-hoc findings (process_note vs physical_defect,
+  location, suggested category).
+- `apps-script/Code.gs` — read actions (`checklist`, `inspections`, `findings`) and write handlers
+  (`createInspection`, `addFinding`, `confirmFinding`). `confirmFinding` creates a request through
+  the SAME `buildNewRequest_`/approval path and links the finding ↔ request, audit-logged.
+- `apps-script/setup.gs` — provisions + seeds the three new sheets (checklist seeded).
+- `src/server.js` — serves `/inspection`.
+- `src/dashboard.html` — "ליקויים מבקרות — לאישור לדרישה" section: unconfirmed physical defects
+  with a "פתח דרישה" button (Roy confirms → request created via the pipeline).
+
+**Why:** Inspection defects are repair/replacement requests; suggest-then-confirm lets Olga flag
+them and Roy decide which become tracked requests, all flowing through the existing §6 approval
+rule (origin doesn't change the rules). Ad-hoc inspections, in-app record (no .docx). Email alerts
+for problem findings are deferred to the notifications increment (data carries severity/type ready).
+
+**Security:** all inspection inputs validated + vocabularies whitelisted server-side; a defect can
+only convert once (linked_request_id guard); request creation reuses the audited pipeline.
+
+**Deploy note:** the updated `Code.gs` and `setup.gs` must be pasted into Apps Script; run
+`setupSheet()` once to add the three new sheets + checklist, then redeploy as a New Version.
+
+---
+
 ## [Increment 3 · step 2] — Roy/Sandra dashboard (board + actions)
 
 **What:** The dashboard where Roy and Sandra see requests by status and act on them. Wires to the
@@ -84,11 +145,6 @@ request-creation logic. A submitted request lands as a `דרישה` row. No appr
 - `apps-script/Code.gs` — `createRequest` now owns `id`, `status` (`דרישה`), and `created_at`
   server-side; the client no longer sends them. `validateNewRequest_` hardened against the
   controlled vocabularies (category, urgency, created_by). `approval_required` still left blank.
-- `package.json` — added a `start` script (`node src/server.js`) so Railway can boot the
-  frontend. `APPS_SCRIPT_EXEC_URL` (the form's submit target) is read from the environment at
-  serve time and must be set as a Railway env var; it is already documented in `.env.example`.
-- `src/index.html` — UI restyled to match the EZone family dark theme (cement-gray signature accent, amber/red urgency color-coding). Style/markup only; no JavaScript or form logic changed.
-- `src/index.html` — Changed Logistics signature accent from cement-gray to teal. Style/markup only; no JavaScript or form logic changed.
 
 **Why:** Requests must exist before approval routing can be meaningfully built or tested, so the
 form precedes approval (inc. 3). Server-owned id/status removes collision risk and prevents the

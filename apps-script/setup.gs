@@ -22,6 +22,17 @@ var HEADERS = {
   Config: ['key', 'value'],
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+  Inspections: [
+    'id', 'house', 'inspection_date', 'inspector', 'started_at',
+    'domain_treatment_summary', 'domain_cleanliness_summary', 'domain_kitchen_summary',
+    'general_notes', 'status',
+  ],
+  InspectionFindings: [
+    'id', 'inspection_id', 'domain', 'location_in_house', 'finding_text',
+    'finding_type', 'severity', 'suggested_category',
+    'linked_request_id', 'confirmed_by', 'confirmed_at',
+  ],
+  ChecklistItems: ['domain', 'item_text', 'active'],
 };
 
 var SEED_HOUSES = [
@@ -43,6 +54,25 @@ var SEED_CONFIG = [
   ['emergency_bypasses_approval', 'TRUE'],
 ];
 
+var SEED_CHECKLIST = [
+  ['treatment', 'תיקים ממוחשבים מסודרים ומעודכנים', 'TRUE'],
+  ['treatment', 'אינטייקים סרוקים ומצורפים', 'TRUE'],
+  ['treatment', 'כל המטופלים רשומים במערכת', 'TRUE'],
+  ['treatment', 'סטנדרטים טיפוליים נשמרים', 'TRUE'],
+  ['cleanliness', 'נראות כללית וניקיון שטחים ציבוריים', 'TRUE'],
+  ['cleanliness', 'ברזים, מקלחונים ומראות נקיים מאבנית', 'TRUE'],
+  ['cleanliness', 'חדרי שינה נקיים ומאווררים', 'TRUE'],
+  ['cleanliness', 'מסילות חלונות, מעקות ודלתות נקיים', 'TRUE'],
+  ['cleanliness', 'חדר כביסה נקי ונעול', 'TRUE'],
+  ['cleanliness', 'תאורה תקינה בכל החדרים', 'TRUE'],
+  ['cleanliness', 'חצר/בריכה נקיים ובטיחותיים', 'TRUE'],
+  ['cleanliness', 'פערי תחזוקה (צבע, פאנלים, מזגנים)', 'TRUE'],
+  ['kitchen', 'ניקיון מטבח וציוד מטבח', 'TRUE'],
+  ['kitchen', 'מוצרי חשמל תקינים ובמקומם', 'TRUE'],
+  ['kitchen', 'אחסון מזון תקין ובטיחותי', 'TRUE'],
+  ['kitchen', 'בדיקת מחסן ומלאים', 'TRUE'],
+];
+
 function setupSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -62,6 +92,7 @@ function setupSheet() {
   seedIfEmpty_(ss.getSheetByName('Houses'), SEED_HOUSES);
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('Config'), SEED_CONFIG);
+  seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');

@@ -42,6 +42,27 @@ export const HEADERS = {
 
   // Every status transition, for full traceability. §8, §9.
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+
+  // ---- Inspections module (§13, increment 4) ----
+  // One row per inspection visit (Olga's בקרה).
+  Inspections: [
+    'id', 'house', 'inspection_date', 'inspector', 'started_at',
+    'domain_treatment_summary', 'domain_cleanliness_summary', 'domain_kitchen_summary',
+    'general_notes', 'status',   // in-progress / submitted
+  ],
+
+  // One row per finding within an inspection.
+  InspectionFindings: [
+    'id', 'inspection_id', 'domain',           // treatment / cleanliness / kitchen
+    'location_in_house', 'finding_text',
+    'finding_type',                            // process_note / physical_defect
+    'severity',                                // low / medium / high
+    'suggested_category',                      // תיקון / החלפה (for defects)
+    'linked_request_id', 'confirmed_by', 'confirmed_at',
+  ],
+
+  // The fixed core checklist Olga fills per visit. Ad-hoc additions are stored as findings.
+  ChecklistItems: ['domain', 'item_text', 'active'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -101,4 +122,48 @@ export const SEED_TECHNICIANS = [
 export const SEED_CONFIG = [
   { key: 'approval_threshold', value: '3000' },
   { key: 'emergency_bypasses_approval', value: 'TRUE' },
+];
+
+// ---- Inspection vocabularies + seed (§13) ----
+
+export const INSPECTION_DOMAINS = {
+  TREATMENT: 'treatment',     // תחום הטיפול
+  CLEANLINESS: 'cleanliness', // ניקיון ואחזקה
+  KITCHEN: 'kitchen',         // מטבחים ומחסנים
+};
+
+export const FINDING_TYPE = {
+  PROCESS_NOTE: 'process_note',     // stays a note (not a request)
+  PHYSICAL_DEFECT: 'physical_defect', // can become a repair/replacement request
+};
+
+export const SEVERITY = { LOW: 'low', MEDIUM: 'medium', HIGH: 'high' };
+
+export const INSPECTION_STATUS = { IN_PROGRESS: 'in-progress', SUBMITTED: 'submitted' };
+
+// Who may view/run inspections (§13). Controlled list, like the submitter picker.
+export const INSPECTION_USERS = ['רועי', 'אולגה', 'אורן', 'sandra'];
+
+// Fixed core checklist, drafted from Olga's real report (recurring items per domain).
+// Olga confirms/adjusts; ad-hoc items are recorded as findings, not added here.
+export const SEED_CHECKLIST_ITEMS = [
+  // תחום הטיפול
+  { domain: 'treatment', item_text: 'תיקים ממוחשבים מסודרים ומעודכנים', active: 'TRUE' },
+  { domain: 'treatment', item_text: 'אינטייקים סרוקים ומצורפים', active: 'TRUE' },
+  { domain: 'treatment', item_text: 'כל המטופלים רשומים במערכת', active: 'TRUE' },
+  { domain: 'treatment', item_text: 'סטנדרטים טיפוליים נשמרים', active: 'TRUE' },
+  // ניקיון ואחזקה
+  { domain: 'cleanliness', item_text: 'נראות כללית וניקיון שטחים ציבוריים', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'ברזים, מקלחונים ומראות נקיים מאבנית', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'חדרי שינה נקיים ומאווררים', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'מסילות חלונות, מעקות ודלתות נקיים', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'חדר כביסה נקי ונעול', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'תאורה תקינה בכל החדרים', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'חצר/בריכה נקיים ובטיחותיים', active: 'TRUE' },
+  { domain: 'cleanliness', item_text: 'פערי תחזוקה (צבע, פאנלים, מזגנים)', active: 'TRUE' },
+  // מטבחים ומחסנים
+  { domain: 'kitchen', item_text: 'ניקיון מטבח וציוד מטבח', active: 'TRUE' },
+  { domain: 'kitchen', item_text: 'מוצרי חשמל תקינים ובמקומם', active: 'TRUE' },
+  { domain: 'kitchen', item_text: 'אחסון מזון תקין ובטיחותי', active: 'TRUE' },
+  { domain: 'kitchen', item_text: 'בדיקת מחסן ומלאים', active: 'TRUE' },
 ];

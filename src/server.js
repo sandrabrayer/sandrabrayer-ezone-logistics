@@ -28,6 +28,7 @@ const server = createServer((req, res) => {
   let file = null;
   if (req.url === '/' || req.url === '/index.html') file = 'index.html';
   else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
+  else if (req.url === '/inspection' || req.url === '/inspection.html') file = 'inspection.html';
 
   if (file) {
     let html = readFileSync(join(__dirname, file), 'utf8');
