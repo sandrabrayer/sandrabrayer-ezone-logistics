@@ -3,6 +3,22 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 8] — Navigation bar
+
+**What:** A shared top navigation linking all four pages, so the app feels like one product
+instead of separate URLs.
+
+**Changed**
+- `src/index.html`, `src/dashboard.html`, `src/inspection.html`, `src/reports.html` — each page's
+  single tab label replaced with a nav (דרישה חדשה / לוח בקרה / בקרה / דוחות), current page marked
+  active in the teal accent. Frontend-only; no backend, schema, or test changes.
+
+**Why:** the app had grown to multiple pages with no menu between them — users had to type
+`/dashboard`, `/inspection`, `/reports` by hand. The nav makes every page reachable from every
+other.
+
+---
+
 ## [Increment 7] — Real submitters + report recommendations summary
 
 **What:** Corrected who submits requests (the house coordinators, not maintenance leads) with
