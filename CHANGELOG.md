@@ -3,6 +3,27 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 9] — In-app attention panel (notifications)
+
+**What:** A per-user "דורש את תשומת לבך" panel at the top of the dashboard surfacing what the
+logged-in user (Roy or Sandra) needs to act on. In-app only — no email.
+
+**Changed**
+- `src/dashboard.html` — new attention panel that computes, for the selected user: requests
+  awaiting their approval (by the §6 routing — Sandra sees >threshold, Roy the rest), new requests
+  just received (Roy), deferral reminders whose date has arrived/passed, and pending inspection
+  defects awaiting confirmation into a request (Roy). Shows a count badge per item, or "אין פעולות
+  הממתינות לך כרגע ✓" when clear. Updates live when the user picker or filters change.
+
+**Why:** the board showed everything but didn't tell each person what was *theirs* to do. The panel
+turns the dashboard from a list you scan into one that says "here's what needs you." In-app chosen
+first (zero setup, immediate); email delivery can follow as a later increment.
+
+**Note:** frontend-only — no backend, schema, or test changes; reuses the existing data feeds and
+the client-side §6 routing mirror.
+
+---
+
 ## [Increment 8] — Navigation bar
 
 **What:** A shared top navigation linking all four pages, so the app feels like one product

@@ -41,6 +41,17 @@
     select { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
     select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
     select option { background: #161a20; color: var(--ink); }
+    /* attention / notifications panel */
+    .attention { background: linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 16px 18px; margin-bottom: 20px; box-shadow: 0 0 30px -12px var(--glow); }
+    .attention h2 { font-size: 1.05rem; font-weight: 800; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+    .attention .who { color: var(--muted); font-weight: 500; font-size: .85rem; }
+    .attn-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: .92rem; }
+    .attn-item:last-child { border-bottom: none; }
+    .attn-badge { font-size: .78rem; font-weight: 800; min-width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 0 7px; }
+    .attn-badge.act { background: var(--accent-soft); color: var(--accent-2); }
+    .attn-badge.warn { background: rgba(224,162,58,.16); color: var(--amber); }
+    .attn-badge.due { background: rgba(224,88,74,.16); color: var(--red); }
+    .attn-none { color: var(--muted); font-size: .9rem; }
     /* summary counters */
     .counters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
     .counter { flex: 1; min-width: 130px; background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 14px 16px; }
@@ -112,6 +123,7 @@
     </div>
 
     <div class="msg" id="msg"></div>
+    <div id="attention"></div>
     <div class="counters" id="counters"></div>
     <div id="board"><p class="loading">טוען דרישות…</p></div>
   </div>
@@ -191,6 +203,7 @@
 
     function render() {
       const reqs = filtered();
+      renderAttention(reqs);
       // counters
       const open = reqs.filter(r => ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(r.status)).length;
       const pending = reqs.filter(r => [ST.REQUEST, ST.PENDING].includes(r.status)).length;
@@ -205,6 +218,45 @@
         if (items.length === 0) return '';
         return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
       }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
+    }
+
+    // Per-user attention panel: what the logged-in user needs to act on.
+    function renderAttention(reqs) {
+      const u = who();
+      const today = new Date().toISOString().slice(0, 10);
+      const items = [];
+
+      // Requests awaiting THIS user's approval (by the §6 routing).
+      const awaiting = reqs.filter(r => {
+        if (![ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(r.status)) return false;
+        const w = whoApproves(r.estimated_cost, r.urgency);
+        if (w === 'auto') return false;
+        return w === 'sandra' ? u === 'sandra' : u === 'רועי';
+      });
+      if (awaiting.length) items.push(['act', awaiting.length, 'דרישות ממתינות לאישורך']);
+
+      // New requests (status דרישה) — Roy should act / route them.
+      if (u === 'רועי') {
+        const fresh = reqs.filter(r => r.status === ST.REQUEST);
+        if (fresh.length) items.push(['act', fresh.length, 'דרישות חדשות שהתקבלו']);
+      }
+
+      // Deferral reminders due today (or overdue).
+      const dueDefers = reqs.filter(r => r.status === ST.DEFERRED && r.deferred_until && r.deferred_until <= today);
+      if (dueDefers.length) items.push(['due', dueDefers.length, 'תזכורות דחייה שהגיע מועדן']);
+
+      // Pending inspection defects awaiting confirmation into a request (Roy acts).
+      if (u === 'רועי') {
+        const pendingDefects = allFindings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
+        if (pendingDefects.length) items.push(['warn', pendingDefects.length, 'ליקויים מבקרות לאישור לדרישה']);
+      }
+
+      document.getElementById('attention').innerHTML = `<div class="attention">
+        <h2>🔔 דורש את תשומת לבך <span class="who">— ${escapeHtml(u)}</span></h2>
+        ${items.length
+          ? items.map(([k, n, t]) => `<div class="attn-item"><span class="attn-badge ${k}">${n}</span>${t}</div>`).join('')
+          : '<div class="attn-none">אין פעולות הממתינות לך כרגע ✓</div>'}
+      </div>`;
     }
 
     // Suggested physical defects from inspections, not yet confirmed into requests.
