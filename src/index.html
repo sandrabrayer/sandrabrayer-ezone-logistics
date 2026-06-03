@@ -115,11 +115,15 @@
     .msg.ok { display: block; background: rgba(52,194,126,.12); color: #5fd79b; border: 1px solid rgba(52,194,126,.35); }
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .loading { color: var(--muted); font-size: .85rem; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <div class="tab">לוגיסטיקה</div>
+    <nav class="nav"><a href="/" class="active">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
