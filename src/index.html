@@ -133,10 +133,12 @@
         <label for="created_by">מגיש הבקשה</label>
         <select id="created_by" required>
           <option value="" disabled selected>בחר/י…</option>
-          <option value="רמי">רמי</option>
-          <option value="צחי">צחי</option>
+          <option value="שירה">שירה (קיסריה עפרוני)</option>
+          <option value="יעקב">יעקב (ריהאב)</option>
+          <option value="אורן">אורן (רעננה)</option>
+          <option value="אביב">אביב (רמות השבים)</option>
+          <option value="צחי">צחי (צפון)</option>
           <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
         </select>
       </div>
 
@@ -214,6 +216,24 @@
       }
     }
 
+    // Each coordinator handles one house → auto-fill + lock. צחי (north) and רועי file anywhere.
+    const COORDINATOR_HOUSE = {
+      'שירה': 'קיסריה עפרוני',
+      'יעקב': 'ריהאב',
+      'אורן': 'רעננה',
+      'אביב': 'רמות השבים',
+    };
+    function onSubmitterChange() {
+      const who = document.getElementById('created_by').value;
+      const house = COORDINATOR_HOUSE[who];
+      if (house) {
+        houseSelect.value = house;
+        houseSelect.disabled = true;   // locked to their house
+      } else {
+        houseSelect.disabled = false;  // צחי / רועי choose freely
+      }
+    }
+
     function showMsg(kind, text) {
       msg.className = 'msg ' + kind;
       msg.textContent = text;
@@ -261,6 +281,7 @@
 
     function resetForm() {
       document.getElementById('created_by').selectedIndex = 0;
+      houseSelect.disabled = false;
       houseSelect.selectedIndex = 0;
       document.querySelectorAll('input[name="category"]').forEach(r => r.checked = false);
       document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
@@ -269,6 +290,7 @@
       document.getElementById('estimated_cost').value = '';
     }
 
+    document.getElementById('created_by').addEventListener('change', onSubmitterChange);
     btn.addEventListener('click', submit);
     loadHouses();
   </script>

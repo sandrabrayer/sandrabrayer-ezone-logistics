@@ -11,7 +11,7 @@ const valid = {
   house: 'רעננה',
   category: CATEGORY.REPAIR,
   urgency: URGENCY.NORMAL,
-  created_by: 'רמי',
+  created_by: 'אורן',
   description: 'ברז דולף',
   location_in_house: 'מטבח',
   estimated_cost: 250,
