@@ -3,6 +3,31 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 7] — Real submitters + report recommendations summary
+
+**What:** Corrected who submits requests (the house coordinators, not maintenance leads) with
+house auto-lock, and added a consolidated recommendations section to the inspection report.
+
+**Changed**
+- `src/index.html` — submitter picker is now the house coordinators: שירה (עפרוני), יעקב (ריהאב),
+  אורן (רעננה), אביב (רמות), צחי (צפון), plus רועי. **רמי removed** (he executes, doesn't submit).
+  Selecting a single-house coordinator auto-fills and **locks** their house; צחי and רועי choose
+  freely (north covers two houses / Roy files anywhere).
+- `src/request.js` + `apps-script/Code.gs` — `SUBMITTERS` updated to the coordinator list.
+- `test/request.test.js` — fixture uses a valid coordinator.
+- `src/reports.html` — report now ends with **ריכוז המלצות לטיפול**: all physical defects as one
+  to-do list, each showing its category and either the request already opened for it or a
+  "פתח דרישה" button to open one from the report (button hidden when printing to PDF).
+
+**Why:** the request originators are the per-house רכזים, and locking their house prevents
+wrong-house filing. The report needed a closing action list so a defect found in a בקרה turns
+directly into a tracked request.
+
+**Spec:** §-form submitter list changed from the maintenance leads to the coordinators — update the
+project-knowledge spec accordingly.
+
+---
+
 ## [Increment 6] — Inspection reports + context fields
 
 **What:** A reports page that turns each saved inspection into a clean, printable report (save as

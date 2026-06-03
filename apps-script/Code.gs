@@ -133,7 +133,7 @@ function doGet(e) {
 // Controlled vocabularies (mirror of src/schema.js + src/request.js).
 var VALID_CATEGORIES = ['רכישה', 'תיקון', 'החלפה'];
 var VALID_URGENCIES = ['רגיל', 'דחוף', 'חירום'];
-var SUBMITTERS = ['רמי', 'צחי', 'רועי', 'sandra'];
+var SUBMITTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי'];
 var STATUS_REQUEST = 'דרישה';
 
 function doPost(e) {

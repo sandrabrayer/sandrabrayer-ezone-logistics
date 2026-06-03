@@ -53,6 +53,11 @@
     .report-doc .linked { color: #0f766e; font-size: .82rem; }
     .report-doc .note { color: #333; }
     .report-doc .foot { margin-top: 26px; border-top: 1px solid #ddd; padding-top: 10px; color: #888; font-size: .8rem; }
+    .report-doc .rec-list { list-style: none; padding-inline-start: 0; }
+    .report-doc .rec-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
+    .report-doc .rec-cat { color: #0f766e; font-weight: 600; }
+    .report-doc .rec-btn { font-family: inherit; font-size: .82rem; font-weight: 700; padding: 5px 12px; border: none; border-radius: 7px; background: #0f766e; color: #fff; cursor: pointer; }
+    @media print { .report-doc .rec-btn { display: none; } }
     @media print {
       body { background: #fff; }
       .topbar, .report-actions, #list, h1, .sub { display: none !important; }
@@ -143,10 +148,42 @@
         ${bg.length ? `<div class="bg">${bg.join(' &nbsp;•&nbsp; ')}</div>` : ''}
         ${ins.general_notes ? `<p class="summary">${esc(ins.general_notes)}</p>` : ''}
         ${domainBlocks || '<p>לא תועדו ממצאים.</p>'}
+        ${recommendations(fs)}
         <div class="foot">הופק ממערכת EZone Logistics · ${new Date().toLocaleDateString('he-IL')}</div>`;
       document.getElementById('list').style.display = 'none';
       document.getElementById('report').style.display = 'block';
       window.scrollTo(0, 0);
+    };
+
+    // Closing "ריכוז המלצות" — consolidated to-do from physical defects, each linked to a request
+    // (or a button to open one). Cleanliness/maintenance defects are the actionable items.
+    function recommendations(fs) {
+      const defects = fs.filter(f => f.finding_type === 'physical_defect');
+      if (defects.length === 0) return '';
+      const rows = defects.map(f => {
+        const where = f.location_in_house ? `<b>${esc(f.location_in_house)}:</b> ` : '';
+        const cat = f.suggested_category ? ` <span class="rec-cat">(${esc(f.suggested_category)})</span>` : '';
+        const status = f.linked_request_id
+          ? `<span class="linked">✓ נפתחה דרישה ${esc(f.linked_request_id)}</span>`
+          : `<button class="rec-btn" onclick="confirmFromReport('${esc(f.id)}')">פתח דרישה</button>`;
+        return `<li>${where}${esc(f.finding_text)}${cat} — ${status}</li>`;
+      }).join('');
+      const open = defects.filter(f => !f.linked_request_id).length;
+      return `<h3>ריכוז המלצות לטיפול</h3>
+        <p class="summary">${defects.length} ליקויים לטיפול${open ? `, מתוכם ${open} ממתינים לפתיחת דרישה` : ' — כולם טופלו'}.</p>
+        <ul class="rec-list">${rows}</ul>`;
+    }
+
+    window.confirmFromReport = async (fid) => {
+      if (!confirm('לפתוח דרישת תיקון מהממצא הזה?')) return;
+      try {
+        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'confirmFinding', payload: { finding_id: fid, by: 'רועי' } }) });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'שגיאה');
+        alert('נפתחה דרישה: ' + json.request_id);
+        await load();  // refresh so the report reflects the new link
+      } catch (e) { alert('הפעולה נכשלה: ' + e.message); }
     };
 
     window.closeReport = () => {
