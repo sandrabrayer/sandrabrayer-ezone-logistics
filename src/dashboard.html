@@ -132,6 +132,7 @@
     ];
 
     let allRequests = [];
+    let allFindings = [];
     let threshold = THRESHOLD_DEFAULT;
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
@@ -155,13 +156,15 @@
 
     async function load() {
       try {
-        const [reqRes, cfgRes, houseRes] = await Promise.all([
+        const [reqRes, cfgRes, houseRes, findRes] = await Promise.all([
           fetch(EXEC_URL + '?action=requests').then(r => r.json()),
           fetch(EXEC_URL + '?action=config').then(r => r.json()),
           fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
         ]);
         if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
         allRequests = reqRes.data || [];
+        allFindings = (findRes && findRes.ok) ? (findRes.data || []) : [];
         if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
           threshold = Number(cfgRes.data.approval_threshold);
         }
@@ -193,11 +196,29 @@
         ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
 
-      board.innerHTML = GROUPS.map(g => {
+      board.innerHTML = renderSuggestedDefects() + (GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
         if (items.length === 0) return '';
         return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
-      }).join('') || '<p class="empty">אין דרישות להצגה.</p>';
+      }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
+    }
+
+    // Suggested physical defects from inspections, not yet confirmed into requests.
+    function renderSuggestedDefects() {
+      const h = document.getElementById('filterHouse').value;
+      const pending = allFindings.filter(f =>
+        f.finding_type === 'physical_defect' && !f.linked_request_id);
+      if (pending.length === 0) return '';
+      return `<div class="group"><h2><span class="dot" style="background:var(--amber)"></span>ליקויים מבקרות — לאישור לדרישה <span style="color:var(--muted);font-weight:500">(${pending.length})</span></h2>${pending.map(f => `
+        <div class="req" style="background:linear-gradient(var(--card),var(--card)) padding-box, linear-gradient(120deg,#e0a23a,#f0c674) border-box">
+          <div class="head"><div>
+            <div class="title">${escapeHtml(f.finding_text)} <span class="pill urgent">${f.suggested_category || 'תיקון'}</span></div>
+            <div class="meta">מבקרה${f.location_in_house ? ' · ' + escapeHtml(f.location_in_house) : ''}</div>
+          </div></div>
+          <div class="actions">
+            <button class="act go" onclick="doConfirmFinding('${f.id}')">פתח דרישה</button>
+          </div>
+        </div>`).join('')}</div>`;
     }
 
     function urgencyPill(u) {
@@ -239,6 +260,13 @@
       } else {
         btns.push('<span class="empty">—</span>');
       }
+      // Edit only before approval; delete always available to Roy/Sandra.
+      if ([ST.REQUEST, ST.PENDING].includes(s)) {
+        btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
+      }
+      if (who() === 'רועי' || who() === 'sandra') {
+        btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
+      }
       return btns.join('');
     }
 
@@ -258,6 +286,16 @@
     window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
     window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
     window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
+    window.doConfirmFinding = (fid) => post('confirmFinding', { finding_id: fid, by: who() });
+    window.doDelete = (id) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }); };
+    window.doEdit = (id) => {
+      const r = allRequests.find(x => String(x.id) === String(id));
+      if (!r) return;
+      const description = prompt('תיאור:', r.description || ''); if (description === null) return;
+      const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
+      const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
+      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost });
+    };
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 

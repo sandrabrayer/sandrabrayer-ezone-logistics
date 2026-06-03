@@ -121,6 +121,9 @@ function doGet(e) {
     case 'technicians': result = getTechnicians(); break;
     case 'requests':    result = getRequests(); break;
     case 'config':      result = getAllConfig(); break;
+    case 'checklist':   result = readObjects_('ChecklistItems'); break;
+    case 'inspections': result = readObjects_('Inspections'); break;
+    case 'findings':    result = readObjects_('InspectionFindings'); break;
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
   }
@@ -149,6 +152,11 @@ function doPost(e) {
     case 'defer':         return handleDefer_(body.payload || {});
     case 'assign':        return handleAssign_(body.payload || {});
     case 'setStatus':     return handleSetStatus_(body.payload || {});
+    case 'createInspection': return handleCreateInspection_(body.payload || {});
+    case 'addFinding':       return handleAddFinding_(body.payload || {});
+    case 'confirmFinding':   return handleConfirmFinding_(body.payload || {});
+    case 'deleteRequest':    return handleDeleteRequest_(body.payload || {});
+    case 'editRequest':      return handleEditRequest_(body.payload || {});
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -356,5 +364,170 @@ function handleSetStatus_(p) {
     if (p.completion_notes) fields.completion_notes = p.completion_notes;
   }
   updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
+  return jsonOut_({ ok: true });
+}
+
+// ===== Inspections module (increment 4, §13) =====
+// Mirrors src/inspection.js. Findings of type physical_defect can be confirmed into requests
+// that flow through the SAME approval pipeline (handleCreateRequest_ / approval engine).
+
+var INSPECTION_USERS_ = ['רועי', 'אולגה', 'אורן', 'sandra'];
+var DOMAINS_ = ['treatment', 'cleanliness', 'kitchen'];
+var FINDING_TYPES_ = ['process_note', 'physical_defect'];
+
+function genId_(prefix) {
+  var stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  return prefix + '-' + stamp + '-' + String(Math.floor(Math.random() * 1e4)).padStart(4, '0');
+}
+
+function appendRow_(sheetName, obj) {
+  var sheet = getSheet_(sheetName);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var row = headers.map(function (h) {
+    return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
+  });
+  sheet.appendRow(row);
+}
+
+function handleCreateInspection_(p) {
+  if (!p.house) return jsonOut_({ ok: false, error: 'Missing house' });
+  if (INSPECTION_USERS_.indexOf(p.inspector) === -1) return jsonOut_({ ok: false, error: 'Invalid inspector' });
+  if (!p.inspection_date) return jsonOut_({ ok: false, error: 'Missing inspection_date' });
+  var id = genId_('INS');
+  appendRow_('Inspections', {
+    id: id, house: p.house, inspection_date: p.inspection_date, inspector: p.inspector,
+    started_at: new Date().toISOString(),
+    domain_treatment_summary: p.domain_treatment_summary || '',
+    domain_cleanliness_summary: p.domain_cleanliness_summary || '',
+    domain_kitchen_summary: p.domain_kitchen_summary || '',
+    general_notes: p.general_notes || '', status: 'in-progress',
+  });
+  return jsonOut_({ ok: true, id: id });
+}
+
+function handleAddFinding_(p) {
+  if (!p.inspection_id) return jsonOut_({ ok: false, error: 'Missing inspection_id' });
+  if (DOMAINS_.indexOf(p.domain) === -1) return jsonOut_({ ok: false, error: 'Invalid domain' });
+  if (!p.finding_text) return jsonOut_({ ok: false, error: 'Missing finding_text' });
+  if (FINDING_TYPES_.indexOf(p.finding_type) === -1) return jsonOut_({ ok: false, error: 'Invalid finding_type' });
+  if (p.finding_type === 'physical_defect' && p.suggested_category &&
+      ['תיקון', 'החלפה'].indexOf(p.suggested_category) === -1) {
+    return jsonOut_({ ok: false, error: 'suggested_category must be תיקון or החלפה' });
+  }
+  var id = genId_('FND');
+  appendRow_('InspectionFindings', {
+    id: id, inspection_id: p.inspection_id, domain: p.domain,
+    location_in_house: p.location_in_house || '', finding_text: p.finding_text,
+    finding_type: p.finding_type, severity: p.severity || '',
+    suggested_category: p.suggested_category || '',
+    linked_request_id: '', confirmed_by: '', confirmed_at: '',
+  });
+  return jsonOut_({ ok: true, id: id });
+}
+
+/** Roy confirms a physical-defect finding → creates a request via the SAME pipeline, links both. */
+function handleConfirmFinding_(p) {
+  if (!p.finding_id || !p.by) return jsonOut_({ ok: false, error: 'Missing finding_id or by' });
+  var findings = readObjects_('InspectionFindings');
+  var finding = null;
+  for (var i = 0; i < findings.length; i++) {
+    if (String(findings[i].id) === String(p.finding_id)) { finding = findings[i]; break; }
+  }
+  if (!finding) return jsonOut_({ ok: false, error: 'Finding not found' });
+  if (finding.finding_type !== 'physical_defect') return jsonOut_({ ok: false, error: 'Only a physical defect can become a request' });
+  if (finding.linked_request_id) return jsonOut_({ ok: false, error: 'Finding already linked to a request' });
+
+  // Parent inspection (for house).
+  var inspections = readObjects_('Inspections');
+  var insp = null;
+  for (var j = 0; j < inspections.length; j++) {
+    if (String(inspections[j].id) === String(finding.inspection_id)) { insp = inspections[j]; break; }
+  }
+  if (!insp) return jsonOut_({ ok: false, error: 'Parent inspection not found' });
+
+  // Build the request via the SAME path as a normal submission (cost blank → routes to Roy).
+  var row = buildNewRequest_({
+    created_by: p.by, house: insp.house,
+    category: finding.suggested_category || 'תיקון',
+    description: finding.finding_text, location_in_house: finding.location_in_house || '',
+    urgency: 'רגיל', estimated_cost: '',
+  });
+  row.approval_required = approvalRequired_(row.estimated_cost, row.urgency);
+  appendRequest(row);
+  writeAuditEntry(row.id, '', row.status, p.by, 'נוצר מבקרה (finding ' + finding.id + ')');
+
+  // Link the finding back to the request.
+  updateFinding_(finding.id, { linked_request_id: row.id, confirmed_by: p.by, confirmed_at: new Date().toISOString() });
+  return jsonOut_({ ok: true, request_id: row.id });
+}
+
+function updateFinding_(id, fields) {
+  var sheet = getSheet_('InspectionFindings');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][headers.indexOf('id')]) === String(id)) {
+      for (var key in fields) {
+        var col = headers.indexOf(key);
+        if (col !== -1) sheet.getRange(r + 1, col + 1).setValue(fields[key]);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// ===== Delete + edit requests (increment 5) =====
+// Delete: Roy or Sandra, one quick action, audit-logged before removal. Hard delete (row removed).
+// Edit: only BEFORE approval (דרישה / ממתין לאישור) so the §6 routing can't be bypassed by
+// editing cost after approval. Editable fields are recomputed for approval_required.
+
+var DELETERS_ = ['רועי', 'sandra'];
+var EDITABLE_STATUSES_ = ['דרישה', 'ממתין לאישור'];
+var EDITABLE_FIELDS_ = ['description', 'location_in_house', 'category', 'urgency', 'estimated_cost', 'house'];
+
+function handleDeleteRequest_(p) {
+  if (!p.id || !p.by) return jsonOut_({ ok: false, error: 'Missing id or by' });
+  if (DELETERS_.indexOf(p.by) === -1) return jsonOut_({ ok: false, error: 'Not authorized to delete' });
+  var sheet = getSheet_('Requests');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(p.id)) {
+      // Audit the deletion BEFORE removing the row (keeps a record of what was deleted).
+      writeAuditEntry(p.id, data[r][headers.indexOf('status')], 'נמחק', p.by, p.note || 'נמחק ע"י ' + p.by);
+      sheet.deleteRow(r + 1);
+      return jsonOut_({ ok: true });
+    }
+  }
+  return jsonOut_({ ok: false, error: 'Request not found' });
+}
+
+function handleEditRequest_(p) {
+  if (!p.id || !p.by) return jsonOut_({ ok: false, error: 'Missing id or by' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (EDITABLE_STATUSES_.indexOf(req.status) === -1) {
+    return jsonOut_({ ok: false, error: 'ניתן לערוך רק לפני אישור (status: ' + req.status + ')' });
+  }
+  var fields = {};
+  for (var i = 0; i < EDITABLE_FIELDS_.length; i++) {
+    var f = EDITABLE_FIELDS_[i];
+    if (Object.prototype.hasOwnProperty.call(p, f)) fields[f] = p[f];
+  }
+  // Validate the merged result against the controlled vocabularies.
+  var merged = {
+    house: fields.house != null ? fields.house : req.house,
+    category: fields.category != null ? fields.category : req.category,
+    urgency: fields.urgency != null ? fields.urgency : req.urgency,
+    created_by: req.created_by,
+    estimated_cost: fields.estimated_cost != null ? fields.estimated_cost : req.estimated_cost,
+  };
+  var err = validateNewRequest_(merged);
+  if (err) return jsonOut_({ ok: false, error: err });
+  // Recompute approval_required from the (possibly new) cost/urgency.
+  fields.approval_required = approvalRequired_(merged.estimated_cost, merged.urgency);
+  updateRequest_(p.id, fields, req.status, req.status, p.by, 'נערך ע"י ' + p.by);
   return jsonOut_({ ok: true });
 }

@@ -5,8 +5,11 @@ import {
   HEADERS, SHEET_NAMES, SEED_HOUSES, SEED_TECHNICIANS, SEED_CONFIG, CLUSTERS,
 } from '../src/schema.js';
 
-test('all five sheets are defined', () => {
-  assert.deepEqual(SHEET_NAMES.sort(), ['AuditLog', 'Config', 'Houses', 'Requests', 'Technicians']);
+test('all sheets are defined (core + inspection module)', () => {
+  assert.deepEqual(SHEET_NAMES.sort(), [
+    'AuditLog', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
+    'Inspections', 'Requests', 'Technicians',
+  ]);
 });
 
 test('Requests sheet has all 22 spec columns in order', () => {
