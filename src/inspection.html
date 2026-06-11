@@ -37,8 +37,9 @@
     h2 { font-size: 1.1rem; font-weight: 800; margin: 4px 0 12px; }
     .domain-title { color: var(--accent-2); }
     .check { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
-    .check input[type=checkbox] { width: 20px; height: 20px; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--accent); }
     .check .t { flex: 1; }
+    .check .rating { width: auto; min-width: 120px; margin: 0; flex-shrink: 0; padding: 7px 10px; font-size: .9rem; }
+    .check .rating[data-low="1"] { border-color: var(--amber); color: var(--amber); }
     .finding-row { background: #161a20; border: 1px solid var(--card-line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
     .finding-row .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .seg { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -136,7 +137,7 @@
         const items = byDomain[d] || [];
         return `<div class="card" data-domain="${d}">
           <h2 class="domain-title">${DOMAIN_LABELS[d]}</h2>
-          ${items.map((c, i) => `<div class="check"><input type="checkbox" id="${d}_${i}"><div class="t"><label for="${d}_${i}" style="font-weight:500;margin:0">${esc(c.item_text)}</label></div></div>`).join('')}
+          ${items.map((c, i) => `<div class="check"><div class="t"><label for="${d}_${i}" style="font-weight:500;margin:0">${esc(c.item_text)}</label></div><select class="rating" id="${d}_${i}" data-rating="${d}" data-item="${esc(c.item_text)}"><option value="">—</option><option value="5">5 · מצוין</option><option value="4">4 · טוב</option><option value="3">3 · סביר</option><option value="2">2 · טעון שיפור</option><option value="1">1 · ליקוי</option></select></div>`).join('')}
           <textarea data-summary="${d}" placeholder="סיכום תחום ${DOMAIN_LABELS[d]} (לא חובה)" style="margin-top:12px"></textarea>
           <div class="findings" data-findings="${d}"></div>
           <button class="add" onclick="addFinding('${d}')">+ הוסף ממצא ב${DOMAIN_LABELS[d]}</button>
@@ -180,6 +181,30 @@
       return out;
     }
 
+    // Collect every checklist rating the inspector set. Returns [{domain, item, score}].
+    function collectRatings() {
+      const out = [];
+      document.querySelectorAll('select.rating').forEach(sel => {
+        const score = sel.value;
+        if (score === '') return; // not rated → skip
+        out.push({ domain: sel.getAttribute('data-rating'), item: sel.getAttribute('data-item'), score: Number(score) });
+      });
+      return out;
+    }
+
+    // A checklist item scored 1 or 2 is a ליקוי → becomes a physical-defect finding (Roy referral),
+    // exactly like a manually-added defect. 3–5 are just recorded as ratings.
+    function ratingsToFindings(ratings) {
+      return ratings.filter(r => r.score <= 2).map(r => ({
+        domain: r.domain,
+        finding_text: r.item + ' — דירוג ' + r.score + ' (ליקוי מצ\'קליסט)',
+        finding_type: 'physical_defect',
+        location_in_house: '',
+        suggested_category: 'תיקון',
+        _from_rating: true,
+      }));
+    }
+
     async function submit() {
       const inspector = document.getElementById('inspector').value;
       const house = document.getElementById('house').value;
@@ -191,6 +216,7 @@
       btn.disabled = true; btn.textContent = 'שומר…';
       try {
         const sum = (d) => document.querySelector(`[data-summary="${d}"]`)?.value.trim() || '';
+        const ratings = collectRatings();
         const insRes = await post('createInspection', {
           house, inspector, inspection_date: date,
           start_time: document.getElementById('start_time').value,
@@ -201,9 +227,11 @@
           domain_cleanliness_summary: sum('cleanliness'),
           domain_kitchen_summary: sum('kitchen'),
           general_notes: document.getElementById('general_notes').value.trim(),
+          ratings, // [{domain,item,score}] — stored for the report; 1–2 also become findings below
         });
         const inspectionId = insRes.id;
-        const findings = collectFindings();
+        // Manual findings + auto-findings from low (1–2) checklist ratings.
+        const findings = collectFindings().concat(ratingsToFindings(ratings));
         let defects = 0;
         for (const f of findings) {
           await post('addFinding', { inspection_id: inspectionId, ...f });
