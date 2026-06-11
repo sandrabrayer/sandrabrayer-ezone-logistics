@@ -42,6 +42,31 @@ export function canBecomeRequest(finding) {
   return finding.finding_type === FINDING_TYPE.PHYSICAL_DEFECT && !finding.linked_request_id;
 }
 
+// A checklist rating of 1 or 2 (out of 5) counts as a ליקוי. Anything 3+ is just recorded.
+export const RATING_DEFECT_THRESHOLD = 2;
+
+/** True when a 1–5 checklist score should auto-create a physical-defect finding. */
+export function ratingIsDefect(score) {
+  const n = Number(score);
+  return Number.isFinite(n) && n >= 1 && n <= RATING_DEFECT_THRESHOLD;
+}
+
+/**
+ * Turn a rated checklist row into a physical-defect finding payload (suggested category = repair).
+ * Returns null when the score is fine (3–5) or blank — only 1–2 produce a finding.
+ * @param {{domain:string,item:string,score:number}} rating
+ */
+export function ratingToFinding(rating) {
+  if (!rating || !ratingIsDefect(rating.score)) return null;
+  return {
+    domain: rating.domain,
+    finding_text: `${rating.item} — דירוג ${Number(rating.score)} (ליקוי מצ'קליסט)`,
+    finding_type: FINDING_TYPE.PHYSICAL_DEFECT,
+    location_in_house: '',
+    suggested_category: CATEGORY.REPAIR,
+  };
+}
+
 /**
  * Build a request payload from a confirmed inspection finding. The resulting request is then
  * created and routed by the EXISTING approval pipeline (same §6 threshold rule) — origin doesn't
