@@ -1,7 +1,47 @@
+[CHANGELOG (6).md](https://github.com/user-attachments/files/28850758/CHANGELOG.6.md)
 # Changelog
 
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
+
+## [Increment 10] — Roy-only approval, checklist ratings, calendar deferral, lead roll-up
+
+**Request form (`src/index.html`)**
+- Removed the עלות משוערת (estimated cost) field. Requests no longer carry a cost; everything
+  routes to Roy (consistent with Roy-only approval below).
+
+**Dashboard (`src/dashboard.html`)**
+- Removed Sandra from the user picker — **Roy approves alone**; `whoApproves`/`canApprove`
+  simplified (emergencies still auto-approve). Delete button is Roy-only.
+- Reject button relabelled **לא אושר** (was דחייה); prompt reworded to "סיבת אי-האישור".
+- **Deferral is now a calendar modal** — date picker + "תזכורת כמה ימים לפני" (default 7) with a
+  live hint of the computed reminder date. Sends `deferred_until`, `remind_days`, `remind_on`.
+
+**Inspection (`src/inspection.html`, `src/inspection.js`)**
+- Each checklist item now has a **1–5 rating** dropdown (5 מצוין … 1 ליקוי) instead of a checkbox.
+- **A rating of 1 or 2 auto-creates a physical-defect finding → Roy referral**, flowing through the
+  same suggest-then-confirm pipeline as manual defects. 3–5 are recorded as ratings only.
+- `inspection.js`: added `ratingIsDefect`, `ratingToFinding`, `RATING_DEFECT_THRESHOLD` (testable).
+
+**Reports (`src/reports.html`)**
+- New **"ריכוז ליקויים פתוחים לפי איש אחזקה"** section: all open (unlinked) defects grouped by the
+  house's maintenance lead (Rami/Tzachi), and within each lead by house — a work list per lead.
+  Loads `houses` to map house → lead.
+
+**Backend (`apps-script/Code.gs`, `apps-script/setup.gs`)**
+- `setup.gs`: Requests gains `remind_on`, `remind_days`, `reminder_fired`; new `InspectionRatings`
+  sheet (`id, inspection_id, domain, item_text, score`). Re-running `setupSheet()` appends the new
+  columns/sheet without data loss.
+- `Code.gs`: `defer` stores remind fields; `createInspection` persists the ratings array; new
+  `ratings` GET action; **daily reminder trigger** — `installDeferralReminderTrigger()` (run once)
+  schedules `checkDeferralReminders()` which stamps `reminder_fired` + writes an AuditLog entry when
+  a deferred request reaches its `remind_on` date.
+
+**Tests** — `test/rating.test.js` (1–2 → defect, 3–5 → none) and `test/defer.test.js`
+(7-days-before math, rollover, due-check). Suite: 60 pass.
+
+**DEPLOY NOTES (Apps Script):** paste `Code.gs` + `setup.gs`, run `setupSheet()` once (adds the new
+columns/sheet), run `installDeferralReminderTrigger()` once, then redeploy as a **New Version**.
 
 ## [Increment 9] — In-app attention panel (notifications)
 
