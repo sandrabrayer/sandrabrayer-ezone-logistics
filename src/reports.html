@@ -68,6 +68,13 @@
     .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
     .nav a:hover { color: var(--ink); border-color: var(--card-line); }
     .nav a.active { color: #14171c; background: var(--accent-grad); }
+    .rollup-card { background: var(--card); background: linear-gradient(var(--card), var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 20px 18px; margin-bottom: 22px; box-shadow: 0 0 30px -10px var(--glow); }
+    .rollup-lead { margin-bottom: 16px; }
+    .rollup-lead-name { font-weight: 800; font-size: 1rem; margin-bottom: 8px; }
+    .rollup-house { background: #161a20; border: 1px solid var(--card-line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+    .rollup-house-name { font-weight: 700; margin-bottom: 4px; }
+    .rollup-house ul { margin: 4px 0 0; padding-inline-start: 20px; }
+    .rollup-house li { margin: 3px 0; font-size: .9rem; }
   </style>
 </head>
 <body>
@@ -93,16 +100,20 @@
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
     const DOMAIN_LABELS = { treatment: 'תחום הטיפול', cleanliness: 'ניקיון ואחזקה', kitchen: 'מטבחים ומחסנים' };
-    let inspections = [], findings = [];
+    let inspections = [], findings = [], houses = [];
+    const houseLead = {}; // house name -> maintenance lead (רמי / צחי)
 
     async function load() {
       try {
-        const [insRes, findRes] = await Promise.all([
+        const [insRes, findRes, houseRes] = await Promise.all([
           fetch(EXEC_URL + '?action=inspections').then(r => r.json()),
           fetch(EXEC_URL + '?action=findings').then(r => r.json()),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
         ]);
         inspections = (insRes.data || []).slice().reverse(); // newest first
         findings = findRes.data || [];
+        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
+        houses.forEach(h => { houseLead[h.name] = h.technician || '—'; });
         renderList();
       } catch (e) {
         document.getElementById('list').innerHTML = '<p class="empty">שגיאה בטעינת הבקרות.</p>';
@@ -111,10 +122,17 @@
 
     function findingsFor(id) { return findings.filter(f => String(f.inspection_id) === String(id)); }
 
+    // House for a finding = its inspection's house (findings carry inspection_id).
+    function houseForFinding(f) {
+      const ins = inspections.find(x => String(x.id) === String(f.inspection_id));
+      return ins ? ins.house : '';
+    }
+
     function renderList() {
       const el = document.getElementById('list');
       if (inspections.length === 0) { el.innerHTML = '<p class="empty">עדיין לא בוצעו בקרות.</p>'; return; }
-      el.innerHTML = inspections.map(ins => {
+      const summary = renderLeadRollup();
+      const items = inspections.map(ins => {
         const fs = findingsFor(ins.id);
         const defects = fs.filter(f => f.finding_type === 'physical_defect').length;
         return `<div class="list-item" onclick="openReport('${ins.id}')">
@@ -125,6 +143,40 @@
           ${defects ? `<span class="badge def">${defects} ליקויים</span>` : '<span class="badge">תקין</span>'}
         </div>`;
       }).join('');
+      el.innerHTML = summary + `<h2 style="font-size:1.05rem;margin:24px 0 10px">בקרות אחרונות</h2>` + items;
+    }
+
+    // Consolidated open ליקויים (unlinked physical defects), grouped by maintenance lead, then house.
+    // This is Rami's / Tzachi's work list across all inspections.
+    function renderLeadRollup() {
+      const open = findings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
+      if (open.length === 0) return '';
+      // group: lead -> house -> [findings]
+      const byLead = {};
+      open.forEach(f => {
+        const house = houseForFinding(f);
+        const lead = houseLead[house] || '—';
+        ((byLead[lead] = byLead[lead] || {})[house] = (byLead[lead][house] || [])).push(f);
+      });
+      const leadOrder = Object.keys(byLead).sort();
+      const blocks = leadOrder.map(lead => {
+        const houseMap = byLead[lead];
+        const total = Object.values(houseMap).reduce((s, arr) => s + arr.length, 0);
+        const houseBlocks = Object.keys(houseMap).sort().map(house => {
+          const arr = houseMap[house];
+          const lis = arr.map(f => `<li>${f.location_in_house ? '<b>' + esc(f.location_in_house) + ':</b> ' : ''}${esc(f.finding_text)}${f.suggested_category ? ' (' + esc(f.suggested_category) + ')' : ''}</li>`).join('');
+          return `<div class="rollup-house"><div class="rollup-house-name">${esc(house)} <span class="badge def">${arr.length}</span></div><ul>${lis}</ul></div>`;
+        }).join('');
+        return `<div class="rollup-lead">
+          <div class="rollup-lead-name">איש אחזקה: ${esc(lead)} <span class="badge def">${total} ליקויים פתוחים</span></div>
+          ${houseBlocks}
+        </div>`;
+      }).join('');
+      return `<div class="rollup-card">
+        <h2 style="font-size:1.15rem;margin:0 0 12px;color:var(--accent-2)">ריכוז ליקויים פתוחים לפי איש אחזקה</h2>
+        <p class="empty" style="margin:0 0 14px">משימות שטרם נפתחה להן דרישה, מקובצות לפי האחראי ובתוך כל אחראי לפי בית.</p>
+        ${blocks}
+      </div>`;
     }
 
     window.openReport = (id) => {
