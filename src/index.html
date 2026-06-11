@@ -182,12 +182,6 @@
         <input id="location_in_house" type="text" placeholder="למשל: מטבח, חדר 4, גינה" />
       </div>
 
-      <div class="field">
-        <label for="estimated_cost">עלות משוערת (₪) <span class="opt">(לא חובה — אפשר להשאיר ריק)</span></label>
-        <input id="estimated_cost" type="number" min="0" step="any" inputmode="decimal" placeholder="אם לא ידוע, השאר/י ריק" />
-        <div class="hint">אם העלות לא ידועה, אפשר להשאיר ריק — הבקשה תטופל בהתאם.</div>
-      </div>
-
       <button class="submit" id="submitBtn">שליחת דרישה</button>
       <div class="msg" id="msg"></div>
     </div>
@@ -256,7 +250,6 @@
         urgency: checked('urgency'),
         description: document.getElementById('description').value.trim(),
         location_in_house: document.getElementById('location_in_house').value.trim(),
-        estimated_cost: document.getElementById('estimated_cost').value, // '' if blank — valid
       };
 
       // Client-side mirror of server validation (server is the source of truth).
@@ -291,7 +284,6 @@
       document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
       document.getElementById('description').value = '';
       document.getElementById('location_in_house').value = '';
-      document.getElementById('estimated_cost').value = '';
     }
 
     document.getElementById('created_by').addEventListener('change', onSubmitterChange);
