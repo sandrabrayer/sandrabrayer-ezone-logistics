@@ -92,6 +92,17 @@
     .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
     .nav a:hover { color: var(--ink); border-color: var(--card-line); }
     .nav a.active { color: #14171c; background: var(--accent-grad); }
+    /* Deferral modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: var(--card); border: 1px solid var(--card-line); border-radius: 14px; padding: 22px; width: 320px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal-title { margin: 0 0 16px; font-size: 1.1rem; color: var(--accent-2); }
+    .modal-field { margin-bottom: 14px; }
+    .modal-field label { display: block; font-weight: 700; font-size: .85rem; margin-bottom: 6px; }
+    .modal-field input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 10px 12px; }
+    .modal-field input:focus { outline: none; border-color: var(--accent-2); }
+    .modal-hint { color: var(--muted); font-size: .78rem; margin-top: 5px; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -107,7 +118,6 @@
       <span><label>משתמש:</label>
         <select id="who">
           <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
         </select>
       </span>
       <span><label>בית:</label>
@@ -126,6 +136,26 @@
     <div id="attention"></div>
     <div class="counters" id="counters"></div>
     <div id="board"><p class="loading">טוען דרישות…</p></div>
+  </div>
+
+  <!-- Deferral modal: calendar date picker + reminder-days-before -->
+  <div class="modal-overlay" id="deferModal">
+    <div class="modal-box">
+      <h3 class="modal-title">דחיית דרישה לתאריך</h3>
+      <div class="modal-field">
+        <label for="deferDate">דחה עד תאריך</label>
+        <input type="date" id="deferDate" />
+      </div>
+      <div class="modal-field">
+        <label for="deferRemind">תזכורת כמה ימים לפני</label>
+        <input type="number" id="deferRemind" min="0" step="1" value="7" />
+        <div class="modal-hint" id="remindHint"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="act" id="deferCancel">ביטול</button>
+        <button class="act go" id="deferConfirm">אישור דחייה</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -158,16 +188,13 @@
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
+    // Roy approves alone — emergencies auto-approve; no Sandra tier.
     function whoApproves(cost, urgency) {
       if (urgency === 'חירום') return 'auto';
-      if (blank(cost)) return 'roy';
-      return Number(cost) > threshold ? 'sandra' : 'roy';
+      return 'roy';
     }
     function canApprove(approver, cost, urgency) {
-      const w = whoApproves(cost, urgency);
-      if (w === 'auto') return true;
-      if (w === 'sandra') return approver === 'sandra';
-      return approver === 'רועי' || approver === 'sandra';
+      return true;
     }
 
     async function load() {
@@ -302,10 +329,8 @@
       const s = r.status, id = r.id;
       const btns = [];
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
-        const allowed = canApprove(who(), r.estimated_cost, r.urgency);
-        const needSandra = whoApproves(r.estimated_cost, r.urgency) === 'sandra';
-        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}')">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
-        btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
+        btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
+        btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
         btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
         btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
@@ -320,7 +345,7 @@
       if ([ST.REQUEST, ST.PENDING].includes(s)) {
         btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
       }
-      if (who() === 'רועי' || who() === 'sandra') {
+      if (who() === 'רועי') {
         btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
       }
       return btns.join('');
@@ -337,8 +362,45 @@
     }
 
     window.doApprove = (id) => post('approve', { id, by: who() });
-    window.doReject = (id) => { const reason = prompt('סיבת הדחייה:') || ''; post('reject', { id, by: who(), reason }); };
-    window.doDefer = (id) => { const d = prompt('דחה עד תאריך (YYYY-MM-DD):'); if (d) post('defer', { id, by: who(), deferred_until: d }); };
+    window.doReject = (id) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }); };
+
+    // Deferral via calendar modal + reminder N days before (default 7).
+    let _deferId = null;
+    const deferModal = document.getElementById('deferModal');
+    const deferDate = document.getElementById('deferDate');
+    const deferRemind = document.getElementById('deferRemind');
+    const remindHint = document.getElementById('remindHint');
+
+    function reminderDate(deferUntil, daysBefore) {
+      if (!deferUntil) return '';
+      const d = new Date(deferUntil + 'T00:00:00');
+      if (isNaN(d.getTime())) return '';
+      d.setDate(d.getDate() - (Number(daysBefore) || 0));
+      return d.toISOString().slice(0, 10);
+    }
+    function updateRemindHint() {
+      const rd = reminderDate(deferDate.value, deferRemind.value);
+      remindHint.textContent = rd ? ('התזכורת תופיע ב-' + rd) : '';
+    }
+    deferDate.addEventListener('change', updateRemindHint);
+    deferRemind.addEventListener('input', updateRemindHint);
+
+    window.doDefer = (id) => {
+      _deferId = id;
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      deferDate.value = tomorrow.toISOString().slice(0, 10);
+      deferDate.min = new Date().toISOString().slice(0, 10);
+      deferRemind.value = 7;
+      updateRemindHint();
+      deferModal.classList.add('open');
+    };
+    document.getElementById('deferCancel').addEventListener('click', () => { deferModal.classList.remove('open'); _deferId = null; });
+    document.getElementById('deferConfirm').addEventListener('click', () => {
+      if (!_deferId || !deferDate.value) { deferModal.classList.remove('open'); return; }
+      const remind_days = Number(deferRemind.value) || 0;
+      post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) });
+      deferModal.classList.remove('open'); _deferId = null;
+    });
     window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
     window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
     window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
