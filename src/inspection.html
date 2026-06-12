@@ -63,6 +63,27 @@
   </style>
 </head>
 <body>
+  <script>
+    // Staff PIN gate (Roy & Olga). Coordinators never reach here — this page is staff-only.
+    // The shared PIN is injected by the server from the STAFF_PIN env var. If no PIN is set,
+    // the gate is disabled (open) so nothing breaks before you configure it.
+    (function staffGate() {
+      var required = window.__STAFF_PIN__ || '';
+      if (!required) return; // PIN not configured → leave open
+      try {
+        if (sessionStorage.getItem('ezone_staff_ok') === '1') return; // already entered this session
+      } catch (e) {}
+      var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+      if (entered === required) {
+        try { sessionStorage.setItem('ezone_staff_ok', '1'); } catch (e) {}
+        return;
+      }
+      // Wrong or cancelled → send back to the request form.
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+    })();
+  </script>
+
   <div class="topbar">
     <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection" class="active">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
