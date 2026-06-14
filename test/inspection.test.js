@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validateInspection, validateFinding, canBecomeRequest, findingToRequestPayload,
+  nextInspectionDate, DEFAULT_REINSPECT_MONTHS, consolidateDefectsByHouse,
 } from '../src/inspection.js';
 import { FINDING_TYPE, INSPECTION_DOMAINS, CATEGORY } from '../src/schema.js';
 
@@ -78,4 +79,55 @@ test('findingToRequestPayload builds a request that will route to Roy (blank cos
 test('process note cannot be converted to a request', () => {
   const f = { id: 'F-2', finding_type: FINDING_TYPE.PROCESS_NOTE, finding_text: 'note' };
   assert.throws(() => findingToRequestPayload(f, inspection, 'רועי'), /physical defect/);
+});
+
+// ---- Follow-up re-inspection ----
+
+test('default re-inspection is one month out', () => {
+  assert.equal(DEFAULT_REINSPECT_MONTHS, 1);
+  assert.equal(nextInspectionDate('2026-05-18'), '2026-06-18');
+});
+
+test('nextInspectionDate accepts a custom month offset', () => {
+  assert.equal(nextInspectionDate('2026-01-15', 3), '2026-04-15');
+});
+
+test('nextInspectionDate clamps end-of-month overflow', () => {
+  // Jan 31 + 1 month → Feb 28 (2026 is not a leap year), not an invalid Feb 31.
+  assert.equal(nextInspectionDate('2026-01-31', 1), '2026-02-28');
+});
+
+test('nextInspectionDate rolls over the year', () => {
+  assert.equal(nextInspectionDate('2026-12-10', 1), '2027-01-10');
+});
+
+test('nextInspectionDate returns empty for bad input', () => {
+  assert.equal(nextInspectionDate(''), '');
+  assert.equal(nextInspectionDate(null), '');
+  assert.equal(nextInspectionDate('nope'), '');
+});
+
+// ---- Per-house defect consolidation ----
+
+test('consolidateDefectsByHouse de-duplicates same defect across inspections', () => {
+  const inspections = [
+    { id: 'I1', house: 'רעננה' },
+    { id: 'I2', house: 'רעננה' },
+    { id: 'I3', house: 'ריהאב' },
+  ];
+  const findings = [
+    { id: 'F1', inspection_id: 'I1', finding_type: 'physical_defect', linked_request_id: '', finding_text: 'נזילה במקלחת', location_in_house: 'חדר 2' },
+    { id: 'F2', inspection_id: 'I2', finding_type: 'physical_defect', linked_request_id: '', finding_text: '  נזילה במקלחת ', location_in_house: '' }, // dup (spacing)
+    { id: 'F3', inspection_id: 'I3', finding_type: 'physical_defect', linked_request_id: '', finding_text: 'דלת שבורה' },
+    { id: 'F4', inspection_id: 'I1', finding_type: 'process_note', linked_request_id: '', finding_text: 'הערה' }, // not a defect
+    { id: 'F5', inspection_id: 'I1', finding_type: 'physical_defect', linked_request_id: 'R9', finding_text: 'כבר דרישה' }, // linked → excluded
+  ];
+  const out = consolidateDefectsByHouse(findings, inspections);
+  const raanana = out.find((h) => h.house === 'רעננה');
+  assert.equal(raanana.items.length, 1);          // the two נזילה rows merged
+  assert.equal(raanana.items[0].count, 2);
+  assert.equal(raanana.items[0].location_in_house, 'חדר 2'); // first non-blank location kept
+  assert.deepEqual(raanana.items[0].ids.sort(), ['F1', 'F2']);
+  const rehab = out.find((h) => h.house === 'ריהאב');
+  assert.equal(rehab.items.length, 1);
 });

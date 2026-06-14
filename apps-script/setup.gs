@@ -26,7 +26,7 @@ var HEADERS = {
     'id', 'house', 'inspection_date', 'inspector', 'started_at',
     'patient_count', 'staff_present', 'start_time', 'cleaner_present',
     'domain_treatment_summary', 'domain_cleanliness_summary', 'domain_kitchen_summary',
-    'general_notes', 'status',
+    'general_notes', 'reinspect_date', 'status',
   ],
   InspectionFindings: [
     'id', 'inspection_id', 'domain', 'location_in_house', 'finding_text',

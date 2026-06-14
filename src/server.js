@@ -33,6 +33,7 @@ const server = createServer((req, res) => {
   else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
   else if (req.url === '/inspection' || req.url === '/inspection.html') file = 'inspection.html';
   else if (req.url === '/reports' || req.url === '/reports.html') file = 'reports.html';
+  else if (req.url === '/workorders' || req.url === '/workorders.html') file = 'workorders.html';
 
   if (file) {
     let html = readFileSync(join(__dirname, file), 'utf8');

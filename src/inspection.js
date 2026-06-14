@@ -78,6 +78,80 @@ export function ratingToFinding(rating) {
  * @param {string} confirmedBy who confirmed (Roy)
  * @returns {object} a request payload ready for the createRequest pipeline
  */
+// ---- Follow-up re-inspection (בקרה חוזרת) ----
+// Every report proposes a re-inspection date. Default is one month after the inspection date;
+// Roy/Olga can override before saving. Pure date math so it's testable and timezone-stable.
+
+export const DEFAULT_REINSPECT_MONTHS = 1;
+
+/**
+ * Compute a follow-up date `months` after an ISO date string (YYYY-MM-DD).
+ * Clamps end-of-month overflow (e.g. Jan 31 + 1mo → Feb 28/29) so the date stays valid.
+ * @param {string} isoDate  base date, "YYYY-MM-DD"
+ * @param {number} [months] months to add (default 1)
+ * @returns {string} "YYYY-MM-DD", or '' if input is unusable
+ */
+export function nextInspectionDate(isoDate, months = DEFAULT_REINSPECT_MONTHS) {
+  if (!isoDate || typeof isoDate !== 'string') return '';
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const target = new Date(Date.UTC(y, mo + Number(months), 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+// ---- Per-house defect consolidation (ריכוז ליקויים פר בית) ----
+// Roll up open physical-defect findings into one clean list per house, with no duplicates.
+// "Duplicate" = same house + same normalized finding text (case/space-insensitive). When the
+// same defect is found across inspections, it appears once with a count of how many times it
+// was seen — so nobody opens two requests for the same broken tap.
+
+function normalizeText_(s) {
+  return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * Consolidate open physical defects per house, de-duplicated by normalized text.
+ * @param {Array} findings    inspection-finding rows
+ * @param {Array} inspections inspection rows (to resolve each finding's house)
+ * @returns {Array<{house:string, items:Array<{finding_text:string, location_in_house:string, suggested_category:string, count:number, ids:string[]}>}>}
+ */
+export function consolidateDefectsByHouse(findings, inspections) {
+  const insById = {};
+  (inspections || []).forEach((i) => { if (i && i.id != null) insById[String(i.id)] = i; });
+
+  const byHouse = {};
+  (findings || []).forEach((f) => {
+    if (!f || f.finding_type !== FINDING_TYPE.PHYSICAL_DEFECT) return;
+    if (f.linked_request_id) return; // already became a request → not "open"
+    const ins = insById[String(f.inspection_id)];
+    const house = ins ? ins.house : '';
+    if (!house) return;
+    const key = normalizeText_(f.finding_text);
+    const bucket = (byHouse[house] = byHouse[house] || {});
+    if (bucket[key]) {
+      bucket[key].count += 1;
+      bucket[key].ids.push(f.id);
+      if (!bucket[key].location_in_house && f.location_in_house) bucket[key].location_in_house = f.location_in_house;
+    } else {
+      bucket[key] = {
+        finding_text: f.finding_text,
+        location_in_house: f.location_in_house || '',
+        suggested_category: f.suggested_category || 'תיקון',
+        count: 1, ids: [f.id],
+      };
+    }
+  });
+
+  return Object.keys(byHouse).sort((a, b) => a.localeCompare(b, 'he')).map((house) => ({
+    house, items: Object.values(byHouse[house]),
+  }));
+}
+
 export function findingToRequestPayload(finding, inspection, confirmedBy) {
   if (!canBecomeRequest(finding)) {
     throw new Error('Only an unlinked physical defect can become a request');
