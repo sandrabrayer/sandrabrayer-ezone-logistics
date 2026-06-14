@@ -179,6 +179,34 @@
     </div>
   </div>
 
+  <!-- Refer / assign modal: internal lead (auto by house) vs external trade -->
+  <div class="modal-overlay" id="referModal">
+    <div class="modal-box">
+      <h3 class="modal-title">להפנות דרישה</h3>
+      <div class="modal-field">
+        <label>סוג הפנייה</label>
+        <div class="seg" style="display:flex;gap:8px">
+          <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="internal" checked style="position:absolute;opacity:0">אחראי בית (פנימי)</label>
+          <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="external" style="position:absolute;opacity:0">בעל מקצוע (חיצוני)</label>
+        </div>
+      </div>
+      <div class="modal-field" id="referInternalField">
+        <label>אחראי הבית</label>
+        <div id="referLeadName" style="font-weight:800;color:var(--accent-2);padding:8px 0"></div>
+        <div class="modal-hint">נקבע אוטומטית לפי הבית של הדרישה</div>
+      </div>
+      <div class="modal-field" id="referExternalField" style="display:none">
+        <label for="referTrade">בעל מקצוע</label>
+        <select id="referTrade"></select>
+        <label style="margin-top:10px"><input type="checkbox" id="referMarkOnly" style="width:auto;margin-inline-end:6px">רק לסמן לאיגום עתידי (לא להפנות עכשיו)</label>
+      </div>
+      <div class="modal-actions">
+        <button class="act" id="referCancel">ביטול</button>
+        <button class="act go" id="referConfirm">הפנה</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
     const THRESHOLD_DEFAULT = 3000;
@@ -201,6 +229,7 @@
     let allRequests = [];
     let allFindings = [];
     let allInspections = [];
+    let allHouses = [];
     let threshold = THRESHOLD_DEFAULT;
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
@@ -236,8 +265,9 @@
           threshold = Number(cfgRes.data.approval_threshold);
         }
         if (houseRes.ok) {
+          allHouses = houseRes.data || [];
           const sel = document.getElementById('filterHouse');
-          houseRes.data.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+          allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
         }
         render();
       } catch (e) {
@@ -264,7 +294,7 @@
         ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
 
-      board.innerHTML = renderHouseConsolidation() + (GROUPS.map(g => {
+      board.innerHTML = renderBatchSuggestions() + renderHouseConsolidation() + (GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
         if (items.length === 0) return '';
         return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
@@ -322,6 +352,43 @@
     // Per-house consolidation of open inspection defects (ליקויים פתוחים), de-duplicated by text,
     // honoring the current house filter. This centralizes faults per house so the same broken
     // item isn't opened twice. Each row links straight to opening a request.
+    // Smart batching: approved EXTERNAL requests sharing trade × cluster → suggest one visit.
+    // A request becomes batchable once Roy marks it external + a trade (status stays מאושר).
+    function renderBatchSuggestions() {
+      const cluster = {};
+      allHouses.forEach(h => { if (h && h.name) cluster[h.name] = h.cluster || ''; });
+      const groups = {};
+      allRequests.forEach(r => {
+        if (r.status !== ST.APPROVED || r.assignment_type !== 'external' || !r.trade || r.batch_id) return;
+        const cl = cluster[r.house] || '';
+        if (!cl) return;
+        const key = r.trade + '|' + cl;
+        (groups[key] = groups[key] || { trade: r.trade, cluster: cl, reqs: [] }).reqs.push(r);
+      });
+      const batches = Object.values(groups).filter(g => g.reqs.length >= 2)
+        .sort((a, b) => b.reqs.length - a.reqs.length);
+      if (batches.length === 0) return '';
+      const clusterHe = { sharon: 'שרון', caesarea: 'קיסריה', north: 'צפון' };
+      const blocks = batches.map(b => {
+        const ids = b.reqs.map(r => r.id);
+        const rows = b.reqs.map(r => `<div class="attn-item"><span>${escapeHtml(r.house)} · ${escapeHtml(r.description || r.id)}</span></div>`).join('');
+        return `<div style="margin-bottom:12px">
+          <div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(b.trade)} · ${clusterHe[b.cluster] || escapeHtml(b.cluster)} <span class="pill normal">${b.reqs.length} עבודות</span></div>
+          ${rows}
+          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)})'>הקצה כביקור מרוכז</button>
+        </div>`;
+      }).join('');
+      return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box">
+        <h2>🔗 הצעות לאיגום ביקורי טכנאי</h2>
+        <p class="attn-none" style="margin:0 0 10px">דרישות חיצוניות מאושרות מאותו מקצוע ואותו אשכול — כדאי לאחד לביקור אחד.</p>
+        ${blocks}
+      </div>`;
+    }
+    window.doAssignBatch = (ids, trade) => {
+      if (!confirm(`להקצות ${ids.length} עבודות כביקור מרוכז אחד (${trade})?`)) return;
+      post('assignBatch', { ids, by: who(), trade });
+    };
+
     function renderHouseConsolidation() {
       const houseFilter = document.getElementById('filterHouse').value;
       const insById = {};
@@ -374,7 +441,8 @@
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
-            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.assigned_to ? ' · אחראי: ' + escapeHtml(r.assigned_to) : ''}${r.deferred_until ? ' · נדחה ל-' + fmtDate(r.deferred_until) : ''}</div>
+            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.deferred_until ? ' · נדחה ל-' + fmtDate(r.deferred_until) : ''}</div>
+            ${r.assigned_to ? `<div class="meta" style="color:var(--accent-2);font-weight:700;margin-top:4px">↩ הופנה ל: ${escapeHtml(r.assigned_to)}${r.assignment_type === 'external' ? ' (בעל מקצוע)' : ' (אחראי בית)'}${r.batch_id ? ' · 🔗 ביקור מרוכז' : ''}</div>` : (r.trade && r.assignment_type === 'external' ? `<div class="meta" style="color:var(--amber);font-weight:700;margin-top:4px">סומן ל: ${escapeHtml(r.trade)} — ממתין לאיגום</div>` : '')}
           </div>
         </div>
         <div class="actions">${actionsFor(r)}</div>
@@ -389,7 +457,7 @@
         btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
         btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
-        btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+        btns.push(`<button class="act go" onclick="doAssign('${id}')">הפנה לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
         btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
@@ -457,7 +525,55 @@
       post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) });
       deferModal.classList.remove('open'); _deferId = null;
     });
-    window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
+    const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
+
+    // "הפנות ל" — modal: internal (lead auto-resolved from the request's house) or external (trade).
+    let _referId = null;
+    const referModal = document.getElementById('referModal');
+    const referTradeSel = document.getElementById('referTrade');
+    TRADES.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; referTradeSel.appendChild(o); });
+
+    function leadForHouse(house) {
+      const h = allHouses.find(x => x.name === house);
+      return h ? (h.technician || '') : '';
+    }
+    function referType() {
+      const el = document.querySelector('input[name="referType"]:checked');
+      return el ? el.value : 'internal';
+    }
+    function syncReferFields() {
+      const ext = referType() === 'external';
+      document.getElementById('referExternalField').style.display = ext ? 'block' : 'none';
+      document.getElementById('referInternalField').style.display = ext ? 'none' : 'block';
+    }
+    document.querySelectorAll('input[name="referType"]').forEach(r => r.addEventListener('change', syncReferFields));
+
+    window.doAssign = (id) => {
+      _referId = id;
+      const r = allRequests.find(x => String(x.id) === String(id));
+      const lead = r ? leadForHouse(r.house) : '';
+      document.getElementById('referLeadName').textContent = lead ? (lead + ' · ' + (r ? r.house : '')) : 'לא הוגדר אחראי לבית זה';
+      document.querySelector('input[name="referType"][value="internal"]').checked = true;
+      document.getElementById('referMarkOnly').checked = false;
+      syncReferFields();
+      referModal.classList.add('open');
+    };
+    document.getElementById('referCancel').addEventListener('click', () => { referModal.classList.remove('open'); _referId = null; });
+    document.getElementById('referConfirm').addEventListener('click', () => {
+      if (!_referId) { referModal.classList.remove('open'); return; }
+      const id = _referId;
+      if (referType() === 'internal') {
+        const r = allRequests.find(x => String(x.id) === String(id));
+        const lead = r ? leadForHouse(r.house) : '';
+        if (!lead) { showMsg('err', 'לא הוגדר אחראי לבית זה.'); return; }
+        post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' });
+      } else {
+        const trade = referTradeSel.value;
+        if (document.getElementById('referMarkOnly').checked) post('markExternal', { id, by: who(), trade });
+        else post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade });
+      }
+      referModal.classList.remove('open'); _referId = null;
+    });
     window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
     window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
     window.doConfirmFinding = (fid) => post('confirmFinding', { finding_id: fid, by: who() });

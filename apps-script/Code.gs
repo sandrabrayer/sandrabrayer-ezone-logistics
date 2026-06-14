@@ -151,6 +151,8 @@ function doPost(e) {
     case 'reject':        return handleReject_(body.payload || {});
     case 'defer':         return handleDefer_(body.payload || {});
     case 'assign':        return handleAssign_(body.payload || {});
+    case 'markExternal':  return handleMarkExternal_(body.payload || {});
+    case 'assignBatch':   return handleAssignBatch_(body.payload || {});
     case 'setStatus':     return handleSetStatus_(body.payload || {});
     case 'createInspection': return handleCreateInspection_(body.payload || {});
     case 'addFinding':       return handleAddFinding_(body.payload || {});
@@ -345,9 +347,49 @@ function handleAssign_(p) {
     return jsonOut_({ ok: false, error: 'Can only assign an approved request' });
   }
   updateRequest_(p.id,
-    { status: ST.IN_PROGRESS, assigned_to: p.assigned_to, assignment_type: p.assignment_type || '' },
-    req.status, ST.IN_PROGRESS, p.by, 'הוקצה ל-' + p.assigned_to);
+    { status: ST.IN_PROGRESS, assigned_to: p.assigned_to, assignment_type: p.assignment_type || '', trade: p.trade || '' },
+    req.status, ST.IN_PROGRESS, p.by, 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : ''));
   return jsonOut_({ ok: true });
+}
+
+// Valid external trades (mirror of src/schema.js TRADES).
+var VALID_TRADES_ = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
+
+/**
+ * Mark an APPROVED request as external work needing a given trade, WITHOUT assigning it yet.
+ * This is what makes a request eligible for smart batching (trade × cluster). Status stays מאושר.
+ */
+function handleMarkExternal_(p) {
+  if (!p.id || !p.by || !p.trade) return jsonOut_({ ok: false, error: 'Missing id, by, or trade' });
+  if (VALID_TRADES_.indexOf(p.trade) === -1) return jsonOut_({ ok: false, error: 'Invalid trade' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  if (req.status !== ST.APPROVED) return jsonOut_({ ok: false, error: 'ניתן לסמן רק דרישה מאושרת' });
+  updateRequest_(p.id,
+    { assignment_type: 'external', trade: p.trade },
+    req.status, req.status, p.by, 'סומן כעבודה חיצונית: ' + p.trade);
+  return jsonOut_({ ok: true });
+}
+
+/**
+ * Assign a whole batch in one visit: every listed approved-external request gets the same batch_id
+ * and moves to בביצוע together. ids must share trade × cluster (the UI builds these groups).
+ */
+function handleAssignBatch_(p) {
+  if (!p.ids || !p.ids.length || !p.by) return jsonOut_({ ok: false, error: 'Missing ids or by' });
+  var batchId = p.batch_id || ('BATCH-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14));
+  var assignedTo = p.assigned_to || (p.trade || 'טכנאי חיצוני');
+  var done = [];
+  for (var i = 0; i < p.ids.length; i++) {
+    var id = p.ids[i];
+    var req = getRequestById(id);
+    if (!req || !canTransition_(req.status, ST.IN_PROGRESS)) continue;
+    updateRequest_(id,
+      { status: ST.IN_PROGRESS, assignment_type: 'external', assigned_to: assignedTo, trade: p.trade || req.trade || '', batch_id: batchId },
+      req.status, ST.IN_PROGRESS, p.by, 'הוקצה בביקור מרוכז ' + batchId);
+    done.push(id);
+  }
+  return jsonOut_({ ok: true, batch_id: batchId, assigned: done });
 }
 
 function handleSetStatus_(p) {

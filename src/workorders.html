@@ -96,6 +96,8 @@
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
     const LEADS = ['רמי', 'צחי'];
+    const EXTERNAL_TAB = 'בעלי מקצוע';
+    const TABS = [...LEADS, EXTERNAL_TAB];
     const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
     let requests = [], findings = [], inspections = [], houses = [];
     let activeLead = LEADS[0];
@@ -123,7 +125,7 @@
     }
 
     function renderTabs() {
-      document.getElementById('leadTabs').innerHTML = LEADS.map(l =>
+      document.getElementById('leadTabs').innerHTML = TABS.map(l =>
         `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
     }
     window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
@@ -168,6 +170,7 @@
     }
 
     function render() {
+      if (activeLead === EXTERNAL_TAB) return renderExternal();
       const items = collectLeadItems(activeLead);
       const groups = buildOrder(items);
       const today = new Date().toLocaleDateString('he-IL');
@@ -183,6 +186,35 @@
         <h2>משימות שבועיות — ${esc(activeLead)}</h2>
         <div class="head-meta">הופק: ${today} · סה"כ ${items.length} משימות ב-${groups.length} בתים · מקובץ לפי בית ולפי דחיפות</div>
         ${houseBlocks}
+      </div>`;
+    }
+
+    // External work for בעלי מקצוע: approved external requests with a trade, not yet assigned.
+    // Grouped by trade (כל החשמל יחד), then by house, then by cluster for batching context.
+    function renderExternal() {
+      const clusterHe = { sharon: 'שרון', caesarea: 'קיסריה', north: 'צפון' };
+      const houseCluster = {}; houses.forEach(h => { if (h && h.name) houseCluster[h.name] = h.cluster || ''; });
+      const ext = requests.filter(r => r && r.status === 'מאושר' && r.assignment_type === 'external' && r.trade && !r.assigned_to);
+      const today = new Date().toLocaleDateString('he-IL');
+      if (ext.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — בעלי מקצוע</h2><div class="head-meta">${today}</div><p>אין כרגע עבודות חיצוניות מאושרות הממתינות להפניה ✓</p></div>`;
+        return;
+      }
+      const byTrade = {};
+      ext.forEach(r => { (byTrade[r.trade] = byTrade[r.trade] || []).push(r); });
+      const blocks = Object.keys(byTrade).sort((a, b) => a.localeCompare(b, 'he')).map(trade => {
+        const rows = byTrade[trade].slice()
+          .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency))
+          .map(r => {
+            const cl = clusterHe[houseCluster[r.house]] || '';
+            return `<li><b>${esc(r.house)}</b>${cl ? ' <span class="u normal">' + esc(cl) + '</span>' : ''}: ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}${r.category ? ' <span class="u normal">' + esc(r.category) + '</span>' : ''}</li>`;
+          }).join('');
+        return `<div class="order-house"><div class="order-house-name">${esc(trade)} <span class="count-badge">${byTrade[trade].length} עבודות</span></div><ul>${rows}</ul></div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>משימות שבועיות — בעלי מקצוע</h2>
+        <div class="head-meta">הופק: ${today} · סה"כ ${ext.length} עבודות חיצוניות · מקובץ לפי מקצוע</div>
+        ${blocks}
       </div>`;
     }
 
