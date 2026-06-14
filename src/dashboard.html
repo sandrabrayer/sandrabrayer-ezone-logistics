@@ -133,7 +133,7 @@
   </div>
   <div class="wrap">
     <h1>לוח בקרה</h1>
-    <p class="sub">ניהול דרישות — אישור, הקצאה ומעקב</p>
+    <p class="sub">ניהול דרישות — אישור, הפניה ומעקב</p>
 
     <div class="controls">
       <span><label>משתמש:</label>
@@ -218,12 +218,12 @@
     };
     // Display order of status groups on the board.
     const GROUPS = [
-      { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING] },
-      { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED] },
-      { key: 'approved', title: 'מאושר וממתין להקצאה לאחראי', statuses: [ST.APPROVED] },
-      { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS] },
-      { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED] },
-      { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED] },
+      { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING], color: '#2dd4bf' },
+      { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED], color: '#e0a23a' },
+      { key: 'approved', title: 'מאושר — להפניה לביצוע', statuses: [ST.APPROVED], color: '#60a5fa' },
+      { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS], color: '#34d399' },
+      { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED], color: '#8b93a0' },
+      { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED], color: '#e0584a' },
     ];
 
     let allRequests = [];
@@ -297,7 +297,7 @@
       board.innerHTML = renderBatchSuggestions() + renderHouseConsolidation() + (GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
         if (items.length === 0) return '';
-        return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
+        return `<div class="group"><h2><span class="dot" style="background:${g.color}"></span><span style="border-inline-start:4px solid ${g.color};padding-inline-start:8px">${g.title}</span> <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(r => card(r, g.color)).join('')}</div>`;
       }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
     }
 
@@ -435,9 +435,9 @@
       return '<span class="pill normal">רגיל</span>';
     }
 
-    function card(r) {
+    function card(r, color) {
       const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
-      return `<div class="req">
+      return `<div class="req" style="border-inline-start:4px solid ${color || 'var(--card-line)'}">
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
