@@ -38,15 +38,31 @@ export function houseLeadMap(houses) {
  * Normalize the two open-item sources into one flat list of work items for a given lead.
  * Each work item: { source, id, house, title, urgency, category, location, _ref }.
  *
+ * A lead's worklist = requests Roy REFERRED to them (assigned_to === lead) that are still open
+ * (not הושלם/סגור). Referred work lands here and carries forward until completed.
+ *
  * @param {object} args
  * @param {Array} args.requests   all request rows
- * @param {Array} args.findings   all inspection-finding rows
- * @param {Array} args.inspections all inspection rows (to resolve a finding's house)
- * @param {Object<string,string>} args.houseLead  house → lead map
  * @param {string} args.lead      the maintenance lead to build for (רמי / צחי)
- * @returns {Array} flat work items belonging to that lead
+ * @returns {Array} flat work items referred to that lead and still open
  */
-export function collectLeadItems({ requests, findings, inspections, houseLead, lead }) {
+export function collectLeadItems({ requests, lead }) {
+  const DONE = ['הושלם', 'סגור'];
+  const items = [];
+  (requests || []).forEach((r) => {
+    if (!r || r.assigned_to !== lead) return;     // only what Roy referred to this lead
+    if (DONE.indexOf(r.status) !== -1) return;     // still open
+    items.push({
+      source: 'request', id: r.id, house: r.house,
+      title: r.description || r.id, urgency: r.urgency || 'רגיל',
+      category: r.category || '', location: r.location_in_house || '', status: r.status, _ref: r,
+    });
+  });
+  return items;
+}
+
+// eslint-disable-next-line no-unused-vars
+function _legacyCollectLeadItems({ requests, findings, inspections, houseLead, lead }) {
   const items = [];
 
   // 1) Approved, not-yet-assigned requests whose house is covered by this lead.
@@ -108,9 +124,8 @@ export function buildWeeklyOrder(items) {
  * Convenience: full pipeline for one lead — collect, then group.
  * @returns {{lead:string, groups:Array, total:number}}
  */
-export function weeklyOrderForLead({ requests, findings, inspections, houses, lead }) {
-  const houseLead = houseLeadMap(houses);
-  const items = collectLeadItems({ requests, findings, inspections, houseLead, lead });
+export function weeklyOrderForLead({ requests, lead }) {
+  const items = collectLeadItems({ requests, lead });
   const groups = buildWeeklyOrder(items);
   return { lead, groups, total: items.length };
 }

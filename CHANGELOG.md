@@ -3,6 +3,31 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 15] — Referral destination + status colors + wording
+
+**Referred tasks now land in the right person's worklist (`src/workorders.html`, `src/workorders.js`)**
+- A lead's weekly tab (רמי / צחי) now shows the requests Roy actually REFERRED to them
+  (`assigned_to === lead`) that are still open (not הושלם/סגור) — previously it showed
+  house-mapped, *unreferred* work, so a task vanished the moment Roy referred it. Now referred
+  work appears for the assignee and carries forward week to week until completed.
+- The pure `workorders.js` module was aligned to the same model and its tests rewritten so the
+  module and the page can't drift.
+
+**Dashboard clarity (`src/dashboard.html`)**
+- Distinct color per status group (and a matching colored bar on each card): ממתין לאישור (teal),
+  נדחה לתאריך (amber), מאושר—להפניה (blue), בביצוע (green), הושלם/סגור (grey), לא מאושר (red).
+- Renamed the approved group to **"מאושר — להפניה לביצוע"**; removed all remaining "הקצאה"
+  wording (now "הפניה"). Roy's referral happens on the approved card via "הפנה לביצוע" → modal
+  (רמי / צחי / בעל מקצוע), exactly as before.
+
+**Tests:** full suite green (10 files).
+
+**Deploy notes:**
+1. Frontend-only — Railway redeploys from main automatically. No Apps Script change, no
+   `setupSheet()` needed.
+
+---
+
 ## [Increment 14] — Roy-alone approval + live external worklist
 
 **What:** Roy approves alone at any amount (Sandra was removed from approval in Inc 10), and the

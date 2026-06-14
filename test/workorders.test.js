@@ -27,26 +27,25 @@ test('houseLeadMap maps house name to its lead', () => {
   assert.equal(m['ריהאב'], 'צחי');
 });
 
-test('collectLeadItems takes only approved-unassigned requests for the lead', () => {
+test('collectLeadItems shows only requests referred to the lead and still open', () => {
   const requests = [
-    { id: 'R1', status: 'מאושר', assigned_to: '', house: 'רעננה', urgency: 'דחוף', description: 'ברז' },
-    { id: 'R2', status: 'מאושר', assigned_to: 'רמי', house: 'רעננה', urgency: 'רגיל', description: 'כבר הוקצה' },
-    { id: 'R3', status: 'דרישה', assigned_to: '', house: 'רעננה', urgency: 'רגיל', description: 'עוד לא אושר' },
-    { id: 'R4', status: 'מאושר', assigned_to: '', house: 'ריהאב', urgency: 'רגיל', description: 'של צחי' },
+    { id: 'R1', status: 'בביצוע', assigned_to: 'רמי', house: 'רעננה', urgency: 'דחוף', description: 'ברז' },
+    { id: 'R2', status: 'מאושר', assigned_to: '', house: 'רעננה', urgency: 'רגיל', description: 'לא הופנה עדיין' },
+    { id: 'R3', status: 'הושלם', assigned_to: 'רמי', house: 'רעננה', urgency: 'רגיל', description: 'כבר הושלם' },
+    { id: 'R4', status: 'בביצוע', assigned_to: 'צחי', house: 'ריהאב', urgency: 'רגיל', description: 'של צחי' },
+    { id: 'R5', status: 'סגור', assigned_to: 'רמי', house: 'רעננה', urgency: 'רגיל', description: 'נסגר' },
   ];
-  const items = collectLeadItems({ requests, findings: [], inspections: [], houseLead: houseLeadMap(HOUSES), lead: 'רמי' });
-  assert.deepEqual(items.map((i) => i.id), ['R1']); // only R1: approved, unassigned, Rami's house
+  const items = collectLeadItems({ requests, lead: 'רמי' });
+  assert.deepEqual(items.map((i) => i.id), ['R1']); // referred to Rami, not done; R3/R5 done, R2 unreferred, R4 Tzachi's
 });
 
-test('collectLeadItems includes open inspection defects for the lead', () => {
-  const inspections = [{ id: 'INS1', house: 'רמות השבים' }];
-  const findings = [
-    { id: 'F1', inspection_id: 'INS1', finding_type: 'physical_defect', linked_request_id: '', finding_text: 'נזילה', suggested_category: 'תיקון' },
-    { id: 'F2', inspection_id: 'INS1', finding_type: 'process_note', linked_request_id: '', finding_text: 'הערה' },
-    { id: 'F3', inspection_id: 'INS1', finding_type: 'physical_defect', linked_request_id: 'R9', finding_text: 'כבר דרישה' },
+test('collectLeadItems carries in-progress work forward (not just one status)', () => {
+  const requests = [
+    { id: 'A', status: 'בביצוע', assigned_to: 'צחי', house: 'ריהאב', urgency: 'רגיל', description: 'a' },
+    { id: 'B', status: 'בביצוע', assigned_to: 'צחי', house: 'קיסריה עפרוני', urgency: 'חירום', description: 'b' },
   ];
-  const items = collectLeadItems({ requests: [], findings, inspections, houseLead: houseLeadMap(HOUSES), lead: 'רמי' });
-  assert.deepEqual(items.map((i) => i.id), ['F1']); // only the open physical defect
+  const items = collectLeadItems({ requests, lead: 'צחי' });
+  assert.equal(items.length, 2);
 });
 
 test('buildWeeklyOrder groups by house, urgent items first within a house', () => {
@@ -70,19 +69,17 @@ test('buildWeeklyOrder floats the hottest house to the top', () => {
   assert.equal(groups[1].house, 'רעננה');
 });
 
-test('weeklyOrderForLead end-to-end: only that lead, bundled by house', () => {
+test('weeklyOrderForLead end-to-end: only referred-to-lead, bundled by house', () => {
   const requests = [
-    { id: 'R1', status: 'מאושר', assigned_to: '', house: 'רעננה', urgency: 'רגיל', description: 'ברז' },
-    { id: 'R2', status: 'מאושר', assigned_to: '', house: 'קיסריה עפרוני', urgency: 'חירום', description: 'של צחי' },
+    { id: 'R1', status: 'בביצוע', assigned_to: 'רמי', house: 'רעננה', urgency: 'רגיל', description: 'ברז' },
+    { id: 'R2', status: 'בביצוע', assigned_to: 'רמי', house: 'רעננה', urgency: 'דחוף', description: 'דלת' },
+    { id: 'R3', status: 'בביצוע', assigned_to: 'צחי', house: 'קיסריה עפרוני', urgency: 'חירום', description: 'של צחי' },
+    { id: 'R4', status: 'הושלם', assigned_to: 'רמי', house: 'רעננה', urgency: 'רגיל', description: 'הושלם' },
   ];
-  const inspections = [{ id: 'INS1', house: 'רעננה' }];
-  const findings = [
-    { id: 'F1', inspection_id: 'INS1', finding_type: 'physical_defect', linked_request_id: '', finding_text: 'נזילה' },
-  ];
-  const out = weeklyOrderForLead({ requests, findings, inspections, houses: HOUSES, lead: 'רמי' });
+  const out = weeklyOrderForLead({ requests, lead: 'רמי' });
   assert.equal(out.lead, 'רמי');
-  assert.equal(out.total, 2);           // R1 + F1, both Rami / רעננה; R2 is Tzachi's
-  assert.equal(out.groups.length, 1);   // bundled into one house
+  assert.equal(out.total, 2);           // R1 + R2 (Rami, open); R3 Tzachi's, R4 done
+  assert.equal(out.groups.length, 1);   // both in רעננה → one house bundle
   assert.equal(out.groups[0].house, 'רעננה');
   assert.equal(out.groups[0].items.length, 2);
 });

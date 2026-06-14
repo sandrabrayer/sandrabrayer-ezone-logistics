@@ -131,22 +131,15 @@
     window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
 
     // Collect this lead's open items (approved-unassigned requests + open inspection defects).
+    // A lead's weekly worklist = requests Roy REFERRED to them (assigned_to === lead) that are
+    // still open (not הושלם/סגור). Referred work lands here and carries forward until completed.
     function collectLeadItems(lead) {
-      const hl = houseLeadMap();
+      const DONE = ['הושלם', 'סגור'];
       const items = [];
       requests.forEach(r => {
-        if (!r || r.status !== 'מאושר' || r.assigned_to) return;
-        if ((hl[r.house] || '') !== lead) return;
-        items.push({ source: 'request', house: r.house, title: r.description || r.id, urgency: r.urgency || 'רגיל', category: r.category || '', location: r.location_in_house || '' });
-      });
-      const insById = {};
-      inspections.forEach(i => { if (i && i.id != null) insById[String(i.id)] = i; });
-      findings.forEach(f => {
-        if (!f || f.finding_type !== 'physical_defect' || f.linked_request_id) return;
-        const ins = insById[String(f.inspection_id)];
-        const house = ins ? ins.house : '';
-        if (!house || (hl[house] || '') !== lead) return;
-        items.push({ source: 'finding', house, title: f.finding_text, urgency: 'רגיל', category: f.suggested_category || 'תיקון', location: f.location_in_house || '' });
+        if (!r || r.assigned_to !== lead) return;
+        if (DONE.indexOf(r.status) !== -1) return;
+        items.push({ source: 'request', house: r.house, title: r.description || r.id, urgency: r.urgency || 'רגיל', category: r.category || '', location: r.location_in_house || '', status: r.status });
       });
       return items;
     }
