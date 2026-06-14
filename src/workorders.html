@@ -189,12 +189,14 @@
       </div>`;
     }
 
-    // External work for בעלי מקצוע: approved external requests with a trade, not yet assigned.
+    // External work for בעלי מקצוע: live worklist of external-trade requests that aren't done yet —
+    // both waiting-to-refer (ממתין) and already-in-progress (בביצוע) so the worklist stays live.
     // Grouped by trade (כל החשמל יחד), then by house, then by cluster for batching context.
     function renderExternal() {
       const clusterHe = { sharon: 'שרון', caesarea: 'קיסריה', north: 'צפון' };
       const houseCluster = {}; houses.forEach(h => { if (h && h.name) houseCluster[h.name] = h.cluster || ''; });
-      const ext = requests.filter(r => r && r.status === 'מאושר' && r.assignment_type === 'external' && r.trade && !r.assigned_to);
+      const DONE = ['הושלם', 'סגור'];
+      const ext = requests.filter(r => r && r.assignment_type === 'external' && r.trade && DONE.indexOf(r.status) === -1);
       const today = new Date().toLocaleDateString('he-IL');
       if (ext.length === 0) {
         document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — בעלי מקצוע</h2><div class="head-meta">${today}</div><p>אין כרגע עבודות חיצוניות מאושרות הממתינות להפניה ✓</p></div>`;
@@ -207,7 +209,8 @@
           .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency))
           .map(r => {
             const cl = clusterHe[houseCluster[r.house]] || '';
-            return `<li><b>${esc(r.house)}</b>${cl ? ' <span class="u normal">' + esc(cl) + '</span>' : ''}: ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}${r.category ? ' <span class="u normal">' + esc(r.category) + '</span>' : ''}</li>`;
+            const statusLabel = r.status === 'בביצוע' ? 'בביצוע' : 'ממתין';
+            return `<li><b>${esc(r.house)}</b>${cl ? ' <span class="u normal">' + esc(cl) + '</span>' : ''}: ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}${r.category ? ' <span class="u normal">' + esc(r.category) + '</span>' : ''} <span class="u normal">${esc(statusLabel)}</span></li>`;
           }).join('');
         return `<div class="order-house"><div class="order-house-name">${esc(trade)} <span class="count-badge">${byTrade[trade].length} עבודות</span></div><ul>${rows}</ul></div>`;
       }).join('');

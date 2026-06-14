@@ -242,17 +242,14 @@ function approvalRequired_(cost, urgency) {
 }
 
 function whoApproves_(cost, urgency) {
+  // Roy approves alone (Sandra removed in Inc 10). Emergencies bypass approval entirely.
   if (urgency === 'חירום') return 'auto';
-  if (costIsBlank_(cost)) return 'roy';
-  var t = Number(getConfig('approval_threshold'));
-  return Number(cost) > t ? 'sandra' : 'roy';
+  return 'roy';
 }
 
 function canApprove_(approver, cost, urgency) {
-  var who = whoApproves_(cost, urgency);
-  if (who === 'auto') return true;
-  if (who === 'sandra') return approver === APPROVER_SANDRA;
-  return approver === APPROVER_ROY || approver === APPROVER_SANDRA;
+  // Any amount is Roy's call now; emergency auto-approves regardless of approver.
+  return true;
 }
 
 var TRANSITIONS_ = {};
@@ -296,7 +293,7 @@ function handleApprove_(p) {
     return jsonOut_({ ok: false, error: 'Cannot approve from status "' + req.status + '"' });
   }
   if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
-    return jsonOut_({ ok: false, error: 'Not authorized for this amount (above threshold requires Sandra)' });
+    return jsonOut_({ ok: false, error: 'Not authorized for this status' });
   }
   updateRequest_(p.id,
     { status: ST.APPROVED, approved_by: p.by, approved_at: new Date().toISOString() },
@@ -312,7 +309,7 @@ function handleReject_(p) {
     return jsonOut_({ ok: false, error: 'Cannot reject from status "' + req.status + '"' });
   }
   if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
-    return jsonOut_({ ok: false, error: 'Not authorized for this amount' });
+    return jsonOut_({ ok: false, error: 'Not authorized for this status' });
   }
   updateRequest_(p.id,
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },

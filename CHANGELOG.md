@@ -3,6 +3,34 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 14] — Roy-alone approval + live external worklist
+
+**What:** Roy approves alone at any amount (Sandra was removed from approval in Inc 10), and the
+בעלי מקצוע weekly worklist now shows live external work — both waiting-to-refer and in-progress —
+instead of only unassigned approved items.
+
+**Changed**
+- `apps-script/Code.gs` — `whoApproves_` returns `'auto'` for emergency, else `'roy'` (no more
+  amount/threshold routing to Sandra); `canApprove_` returns `true` (any amount is Roy's call;
+  emergency auto-approves). The "above threshold requires Sandra" / "Not authorized for this amount"
+  approve/reject errors are now "Not authorized for this status".
+- `src/approval.js` — mirrors the same Roy-alone rules. `whoApproves` → `'auto'`/`'roy'`;
+  `canApprove` → `true`; `validateApproval`'s error no longer mentions Sandra. Function signatures
+  (incl. the `threshold` param) are unchanged for compatibility.
+- `test/approval.test.js` — assertions updated: any amount → `'roy'`; Roy can approve above the
+  old threshold; `validateApproval` of a 4000 request by Roy now returns APPROVED instead of
+  throwing.
+- `src/workorders.html` — `renderExternal()` now lists every external-trade request that isn't
+  done (`הושלם`/`סגור`), regardless of assignment, and shows each row's status (ממתין vs בביצוע).
+
+**Why:** Approval authority consolidated on Roy; the external worklist should reflect live state so
+in-progress jobs stay visible until completed.
+
+**Deploy note:** the updated `apps-script/Code.gs` must be pasted into the Apps Script editor and
+redeployed as a NEW VERSION for the approval change to take effect live.
+
+---
+
 ## [Increment 13] — Refer flow fixes, visible assignee, external weekly tasks
 
 **IMPORTANT — this re-lands Increment 12.** Increment 12 (trade picker + smart batching) was

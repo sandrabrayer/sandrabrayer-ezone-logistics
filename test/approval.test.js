@@ -10,14 +10,14 @@ const T = 3000; // threshold
 
 // ---- whoApproves: routing by amount ----
 
-test('threshold boundary: exactly 3000 → Roy, 3001 → Sandra', () => {
-  assert.equal(whoApproves(3000, URGENCY.NORMAL, T), 'roy');   // ≤ threshold
-  assert.equal(whoApproves(3001, URGENCY.NORMAL, T), 'sandra'); // > threshold
+test('any amount → Roy (Sandra removed from approval in Inc 10)', () => {
+  assert.equal(whoApproves(3000, URGENCY.NORMAL, T), 'roy');
+  assert.equal(whoApproves(3001, URGENCY.NORMAL, T), 'roy');
 });
 
-test('below threshold → Roy, well above → Sandra', () => {
+test('below and well above threshold both → Roy', () => {
   assert.equal(whoApproves(500, URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'sandra');
+  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'roy');
 });
 
 test('emergency bypasses approval regardless of cost', () => {
@@ -42,8 +42,8 @@ test('approval_required: true only when cost > threshold and not emergency', () 
 
 // ---- canApprove: who is authorized ----
 
-test('Roy cannot approve above threshold; Sandra can', () => {
-  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), false);
+test('Roy can approve any amount now', () => {
+  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), true);
   assert.equal(canApprove(APPROVERS.SANDRA, 4000, URGENCY.NORMAL, T), true);
 });
 
@@ -59,12 +59,12 @@ test('emergency can be approved by anyone (already auto-approved)', () => {
 
 // ---- deferred wake-up: amount re-checked ----
 
-test('deferred wake-up re-checks amount: 500 → Roy, 4000 → Sandra', () => {
-  // On wake-up the same routing applies — a small deferred request is Roy's, a large one Sandra's.
+test('deferred wake-up: any amount is still Roy', () => {
+  // On wake-up the same routing applies — Roy alone, at any amount.
   assert.equal(whoApproves(500, URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'sandra');
-  // And authority is enforced the same way on wake-up:
-  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), false);
+  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'roy');
+  // And Roy is authorized at any amount on wake-up:
+  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), true);
 });
 
 // ---- status transitions ----
@@ -88,9 +88,9 @@ test('validateApproval returns APPROVED for an authorized, legal approval', () =
   assert.equal(validateApproval(req, APPROVERS.ROY, T), STATUSES.APPROVED);
 });
 
-test('validateApproval throws when Roy tries to approve above threshold', () => {
+test('validateApproval lets Roy approve above threshold (Roy approves alone now)', () => {
   const req = { status: STATUSES.REQUEST, estimated_cost: 4000, urgency: URGENCY.NORMAL };
-  assert.throws(() => validateApproval(req, APPROVERS.ROY, T), /not authorized/);
+  assert.equal(validateApproval(req, APPROVERS.ROY, T), STATUSES.APPROVED);
 });
 
 test('validateApproval throws on an illegal status transition', () => {
