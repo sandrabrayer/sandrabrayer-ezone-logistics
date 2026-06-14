@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — משימות שבועיות</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --go: #14b8a6; --go-press: #0f9488; --amber: #e0a23a; --red: #e0584a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+    .controls label { font-size: .8rem; color: var(--muted); margin-inline-end: 4px; }
+    select { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
+    select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+    select option { background: #161a20; color: var(--ink); }
+    button { font-family: inherit; cursor: pointer; }
+    .btn { font-size: .9rem; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .btn.go { background: var(--accent-grad); color: #06201c; border: none; }
+    .lead-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .lead-tab { font-weight: 800; padding: 9px 20px; border-radius: 999px; border: 1.5px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .lead-tab.active { background: var(--accent-grad); color: #14171c; border-color: transparent; }
+    .order-doc { background: #fff; color: #1a1a1a; border-radius: 12px; padding: 30px 34px; margin-top: 6px; }
+    .order-doc h2 { font-size: 1.4rem; margin: 0 0 4px; color: #0f766e; }
+    .order-doc .head-meta { color: #555; font-size: .9rem; margin-bottom: 18px; }
+    .order-house { border: 1px solid #e3e8e8; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+    .order-house-name { font-weight: 800; font-size: 1.1rem; color: #0f766e; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .order-house ul { margin: 0; padding-inline-start: 20px; }
+    .order-house li { margin: 6px 0; }
+    .u { font-size: .72rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+    .u.emergency { background: #fde2de; color: #b3402f; }
+    .u.urgent { background: #fbeccd; color: #9a6a12; }
+    .u.normal { background: #d7f2ee; color: #0f766e; }
+    .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
+    .empty { color: var(--muted); }
+    .actions-bar { display: flex; gap: 10px; margin: 14px 0 6px; }
+    .loading { color: var(--muted); }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    @media print {
+      body { background: #fff; }
+      .topbar, .controls, .lead-tabs, .actions-bar, h1, .sub { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .order-doc { border-radius: 0; padding: 8px 0; }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Staff PIN gate (Roy & Olga). Coordinators never reach here — this page is staff-only.
+    (function staffGate() {
+      var required = window.__STAFF_PIN__ || '';
+      if (!required) return;
+      try { if (sessionStorage.getItem('ezone_staff_ok') === '1') return; } catch (e) {}
+      var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+      if (entered === required) { try { sessionStorage.setItem('ezone_staff_ok', '1'); } catch (e) {} return; }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+    })();
+  </script>
+
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/workorders" class="active">משימות שבועיות</a></nav>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>משימות שבועיות לאחראי תחזוקה</h1>
+    <p class="sub">ריכוז חכם של כל מה שפתוח לכל אחראי — מקובץ לפי בית, לפי דחיפות. מוכן להדפסה ושליחה.</p>
+
+    <div class="lead-tabs" id="leadTabs"></div>
+    <div class="actions-bar">
+      <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
+    </div>
+    <div id="out"><p class="loading">טוען…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const LEADS = ['רמי', 'צחי'];
+    const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
+    let requests = [], findings = [], inspections = [], houses = [];
+    let activeLead = LEADS[0];
+
+    function urgencyRank(u) { return Object.prototype.hasOwnProperty.call(URGENCY_RANK, u) ? URGENCY_RANK[u] : 3; }
+    function houseLeadMap() { const m = {}; houses.forEach(h => { if (h && h.name) m[h.name] = h.technician || ''; }); return m; }
+
+    async function load() {
+      try {
+        const [reqRes, findRes, insRes, houseRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        requests = (reqRes.data || []);
+        findings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        inspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
+        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
+        renderTabs();
+        render();
+      } catch (e) {
+        document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
+      }
+    }
+
+    function renderTabs() {
+      document.getElementById('leadTabs').innerHTML = LEADS.map(l =>
+        `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
+    }
+    window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
+
+    // Collect this lead's open items (approved-unassigned requests + open inspection defects).
+    function collectLeadItems(lead) {
+      const hl = houseLeadMap();
+      const items = [];
+      requests.forEach(r => {
+        if (!r || r.status !== 'מאושר' || r.assigned_to) return;
+        if ((hl[r.house] || '') !== lead) return;
+        items.push({ source: 'request', house: r.house, title: r.description || r.id, urgency: r.urgency || 'רגיל', category: r.category || '', location: r.location_in_house || '' });
+      });
+      const insById = {};
+      inspections.forEach(i => { if (i && i.id != null) insById[String(i.id)] = i; });
+      findings.forEach(f => {
+        if (!f || f.finding_type !== 'physical_defect' || f.linked_request_id) return;
+        const ins = insById[String(f.inspection_id)];
+        const house = ins ? ins.house : '';
+        if (!house || (hl[house] || '') !== lead) return;
+        items.push({ source: 'finding', house, title: f.finding_text, urgency: 'רגיל', category: f.suggested_category || 'תיקון', location: f.location_in_house || '' });
+      });
+      return items;
+    }
+
+    // Group by house (bundle a trip), urgent items first within a house, hottest house on top.
+    function buildOrder(items) {
+      const byHouse = {};
+      items.forEach(it => { (byHouse[it.house] = byHouse[it.house] || []).push(it); });
+      const groups = Object.keys(byHouse).map(house => {
+        const list = byHouse[house].slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency));
+        const topRank = list.reduce((m, it) => Math.min(m, urgencyRank(it.urgency)), 99);
+        return { house, topRank, items: list };
+      });
+      groups.sort((a, b) => (a.topRank - b.topRank) || a.house.localeCompare(b.house, 'he'));
+      return groups;
+    }
+
+    function uPill(u) {
+      const cls = u === 'חירום' ? 'emergency' : u === 'דחוף' ? 'urgent' : 'normal';
+      return `<span class="u ${cls}">${esc(u)}</span>`;
+    }
+
+    function render() {
+      const items = collectLeadItems(activeLead);
+      const groups = buildOrder(items);
+      const today = new Date().toLocaleDateString('he-IL');
+      if (items.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — ${esc(activeLead)}</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות עבור ${esc(activeLead)} ✓</p></div>`;
+        return;
+      }
+      const houseBlocks = groups.map(g => {
+        const lis = g.items.map(it => `<li>${it.location ? '<b>' + esc(it.location) + ':</b> ' : ''}${esc(it.title)} ${uPill(it.urgency)}${it.category ? ' <span class="u normal">' + esc(it.category) + '</span>' : ''}</li>`).join('');
+        return `<div class="order-house"><div class="order-house-name">${esc(g.house)} <span class="count-badge">${g.items.length} משימות</span></div><ul>${lis}</ul></div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>משימות שבועיות — ${esc(activeLead)}</h2>
+        <div class="head-meta">הופק: ${today} · סה"כ ${items.length} משימות ב-${groups.length} בתים · מקובץ לפי בית ולפי דחיפות</div>
+        ${houseBlocks}
+      </div>`;
+    }
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    load();
+  </script>
+</body>
+</html>

@@ -402,7 +402,7 @@ function handleCreateInspection_(p) {
     domain_treatment_summary: p.domain_treatment_summary || '',
     domain_cleanliness_summary: p.domain_cleanliness_summary || '',
     domain_kitchen_summary: p.domain_kitchen_summary || '',
-    general_notes: p.general_notes || '', status: 'in-progress',
+    general_notes: p.general_notes || '', reinspect_date: p.reinspect_date || '', status: 'in-progress',
   });
   return jsonOut_({ ok: true, id: id });
 }

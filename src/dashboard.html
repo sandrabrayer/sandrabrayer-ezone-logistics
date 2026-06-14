@@ -128,7 +128,7 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/workorders">משימות שבועיות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
@@ -192,7 +192,7 @@
     const GROUPS = [
       { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING] },
       { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED] },
-      { key: 'approved', title: 'מאושר — להקצאה', statuses: [ST.APPROVED] },
+      { key: 'approved', title: 'מאושר וממתין להקצאה לאחראי', statuses: [ST.APPROVED] },
       { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS] },
       { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED] },
       { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED] },
@@ -200,6 +200,7 @@
 
     let allRequests = [];
     let allFindings = [];
+    let allInspections = [];
     let threshold = THRESHOLD_DEFAULT;
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
@@ -220,15 +221,17 @@
 
     async function load() {
       try {
-        const [reqRes, cfgRes, houseRes, findRes] = await Promise.all([
+        const [reqRes, cfgRes, houseRes, findRes, insRes] = await Promise.all([
           fetch(EXEC_URL + '?action=requests').then(r => r.json()),
           fetch(EXEC_URL + '?action=config').then(r => r.json()),
           fetch(EXEC_URL + '?action=houses').then(r => r.json()),
           fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
         ]);
         if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
         allRequests = reqRes.data || [];
         allFindings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        allInspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
         if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
           threshold = Number(cfgRes.data.approval_threshold);
         }
@@ -261,7 +264,7 @@
         ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
 
-      board.innerHTML = renderSuggestedDefects() + (GROUPS.map(g => {
+      board.innerHTML = renderHouseConsolidation() + (GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
         if (items.length === 0) return '';
         return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
@@ -307,22 +310,56 @@
       </div>`;
     }
 
-    // Suggested physical defects from inspections, not yet confirmed into requests.
-    function renderSuggestedDefects() {
-      const h = document.getElementById('filterHouse').value;
-      const pending = allFindings.filter(f =>
+    // Clean Hebrew date (no ISO timestamp). Accepts "2026-06-13" or a full ISO string.
+    function fmtDate(v) {
+      if (!v) return '';
+      const s = String(v).slice(0, 10);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return escapeHtml(String(v));
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    }
+
+    // Per-house consolidation of open inspection defects (ליקויים פתוחים), de-duplicated by text,
+    // honoring the current house filter. This centralizes faults per house so the same broken
+    // item isn't opened twice. Each row links straight to opening a request.
+    function renderHouseConsolidation() {
+      const houseFilter = document.getElementById('filterHouse').value;
+      const insById = {};
+      allInspections.forEach(i => { if (i && i.id != null) insById[String(i.id)] = i; });
+      const open = allFindings.filter(f =>
         f.finding_type === 'physical_defect' && !f.linked_request_id);
-      if (pending.length === 0) return '';
-      return `<div class="group"><h2><span class="dot" style="background:var(--amber)"></span>ליקויים מבקרות — לאישור לדרישה <span style="color:var(--muted);font-weight:500">(${pending.length})</span></h2>${pending.map(f => `
-        <div class="req" style="background:linear-gradient(var(--card),var(--card)) padding-box, linear-gradient(120deg,#e0a23a,#f0c674) border-box">
-          <div class="head"><div>
-            <div class="title">${escapeHtml(f.finding_text)} <span class="pill urgent">${f.suggested_category || 'תיקון'}</span></div>
-            <div class="meta">מבקרה${f.location_in_house ? ' · ' + escapeHtml(f.location_in_house) : ''}</div>
-          </div></div>
-          <div class="actions">
-            <button class="act go" onclick="doConfirmFinding('${f.id}')">פתח דרישה</button>
-          </div>
-        </div>`).join('')}</div>`;
+      if (open.length === 0) return '';
+
+      // group: house -> normalized text -> {text, location, category, count, ids}
+      const byHouse = {};
+      open.forEach(f => {
+        const ins = insById[String(f.inspection_id)];
+        const house = ins ? ins.house : '';
+        if (!house) return;
+        if (houseFilter && house !== houseFilter) return;
+        const key = String(f.finding_text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        const bucket = (byHouse[house] = byHouse[house] || {});
+        if (bucket[key]) { bucket[key].count++; bucket[key].ids.push(f.id); }
+        else bucket[key] = { text: f.finding_text, location: f.location_in_house || '', category: f.suggested_category || 'תיקון', count: 1, ids: [f.id] };
+      });
+      const houses = Object.keys(byHouse).sort((a, b) => a.localeCompare(b, 'he'));
+      if (houses.length === 0) return '';
+
+      const blocks = houses.map(house => {
+        const rows = Object.values(byHouse[house]).map(it => `
+          <div class="attn-item" style="justify-content:space-between">
+            <span>${it.location ? '<b>' + escapeHtml(it.location) + ':</b> ' : ''}${escapeHtml(it.text)}
+              <span class="pill urgent">${escapeHtml(it.category)}</span>${it.count > 1 ? ' <span class="pill normal">×' + it.count + '</span>' : ''}</span>
+            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}')">פתח דרישה</button>
+          </div>`).join('');
+        return `<div style="margin-bottom:14px"><div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(house)}</div>${rows}</div>`;
+      }).join('');
+
+      return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, linear-gradient(120deg,#e0a23a,#f0c674) border-box">
+        <h2>🛠 ריכוז ליקויים פתוחים לפי בית</h2>
+        <p class="attn-none" style="margin:0 0 10px">ממצאים מבקרות שטרם נפתחה להם דרישה — מקובצים לפי בית, ללא כפילויות.</p>
+        ${blocks}
+      </div>`;
     }
 
     function urgencyPill(u) {
@@ -332,15 +369,13 @@
     }
 
     function card(r) {
-      const cost = blank(r.estimated_cost) ? 'לא ידוע' : '₪' + r.estimated_cost;
       const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
       return `<div class="req">
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
-            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.assigned_to ? ' · אחראי: ' + escapeHtml(r.assigned_to) : ''}${r.deferred_until ? ' · נדחה ל-' + escapeHtml(r.deferred_until) : ''}</div>
+            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.assigned_to ? ' · אחראי: ' + escapeHtml(r.assigned_to) : ''}${r.deferred_until ? ' · נדחה ל-' + fmtDate(r.deferred_until) : ''}</div>
           </div>
-          <div class="cost">${cost}</div>
         </div>
         <div class="actions">${actionsFor(r)}</div>
       </div>`;

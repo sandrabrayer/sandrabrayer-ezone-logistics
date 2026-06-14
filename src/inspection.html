@@ -85,7 +85,7 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection" class="active">בקרה</a><a href="/reports">דוחות</a></nav>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection" class="active">בקרה</a><a href="/reports">דוחות</a><a href="/workorders">משימות שבועיות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
@@ -104,6 +104,8 @@
       <select id="house"><option value="" disabled selected>טוען…</option></select>
       <label>תאריך בקרה</label>
       <input id="inspection_date" type="date" />
+      <label>תאריך בקרה חוזרת <span class="opt">(ברירת מחדל: חודש קדימה — ניתן לשינוי)</span></label>
+      <input id="reinspect_date" type="date" />
       <label>שעת התחלה <span class="opt">(לא חובה)</span></label>
       <input id="start_time" type="time" />
       <label>מספר מטופלים בבית בזמן הבקרה</label>
@@ -116,6 +118,7 @@
       <input id="cleaner_present" type="text" placeholder="למשל: מנקה 8:00–13:00" />
     </div>
 
+    <div id="checklistIntro"></div>
     <div id="domains"></div>
 
     <div class="card">
@@ -134,7 +137,20 @@
     function showMsg(k, t) { msg.className = 'msg ' + k; msg.textContent = t; msg.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
     async function init() {
-      document.getElementById('inspection_date').value = new Date().toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById('inspection_date').value = today;
+      // Default re-inspection one month out; recompute whenever the inspection date changes,
+      // unless the user has manually overridden it.
+      const reEl = document.getElementById('reinspect_date');
+      const dateEl = document.getElementById('inspection_date');
+      let reTouched = false;
+      reEl.addEventListener('input', () => { reTouched = true; });
+      function syncReinspect() {
+        if (reTouched) return;
+        reEl.value = addMonths(dateEl.value, 1);
+      }
+      dateEl.addEventListener('change', syncReinspect);
+      syncReinspect();
       // patient count menu 0–40
       const pc = document.getElementById('patient_count');
       for (let i = 0; i <= 40; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = String(i); pc.appendChild(o); }
@@ -154,6 +170,14 @@
     function renderDomains() {
       const byDomain = {};
       checklist.forEach(c => { (byDomain[c.domain] = byDomain[c.domain] || []).push(c); });
+
+      // Up-front summary: what this inspection covers, by domain, so Roy & Olga see it before starting.
+      const introBlocks = Object.keys(DOMAIN_LABELS).map(d => {
+        const items = byDomain[d] || [];
+        return `<div style="margin-bottom:10px"><div class="domain-title" style="font-weight:800;margin-bottom:4px">${DOMAIN_LABELS[d]} <span class="pill">${items.length}</span></div><ul style="margin:0;padding-inline-start:20px;color:var(--muted);font-size:.88rem">${items.map(c => `<li>${esc(c.item_text)}</li>`).join('')}</ul></div>`;
+      }).join('');
+      document.getElementById('checklistIntro').innerHTML = `<div class="card"><h2 class="domain-title" style="margin-top:0">מה נבדק בבקרה</h2><p class="sub" style="margin:0 0 12px">צ'קליסט קבוע — לכל פריט תינתן דרגה 1–5. דירוג 1–2 נחשב ליקוי ויופנה אוטומטית לרועי לפתיחת דרישה.</p>${introBlocks}</div>`;
+
       document.getElementById('domains').innerHTML = Object.keys(DOMAIN_LABELS).map(d => {
         const items = byDomain[d] || [];
         return `<div class="card" data-domain="${d}">
@@ -248,6 +272,7 @@
           domain_cleanliness_summary: sum('cleanliness'),
           domain_kitchen_summary: sum('kitchen'),
           general_notes: document.getElementById('general_notes').value.trim(),
+          reinspect_date: document.getElementById('reinspect_date').value,
           ratings, // [{domain,item,score}] — stored for the report; 1–2 also become findings below
         });
         const inspectionId = insRes.id;
@@ -274,6 +299,18 @@
     }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+    // Add N months to YYYY-MM-DD, clamping end-of-month overflow. Mirrors nextInspectionDate in inspection.js.
+    function addMonths(isoDate, months) {
+      if (!isoDate) return '';
+      const m = String(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return '';
+      const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+      const t = new Date(Date.UTC(y, mo + Number(months), 1));
+      const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+      t.setUTCDate(Math.min(d, last));
+      return t.toISOString().slice(0, 10);
+    }
 
     document.getElementById('submitBtn').addEventListener('click', submit);
     init();

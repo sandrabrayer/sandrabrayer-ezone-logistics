@@ -100,7 +100,7 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports" class="active">דוחות</a></nav>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports" class="active">דוחות</a><a href="/workorders">משימות שבועיות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
@@ -158,7 +158,7 @@
         const defects = fs.filter(f => f.finding_type === 'physical_defect').length;
         return `<div class="list-item" onclick="openReport('${ins.id}')">
           <div>
-            <div class="t">${esc(ins.house)} — ${esc(ins.inspection_date)}</div>
+            <div class="t">${esc(ins.house)} — ${fmtDate(ins.inspection_date)}</div>
             <div class="m">מבקר/ת: ${esc(ins.inspector)} · ${fs.length} ממצאים${ins.patient_count !== '' ? ' · ' + esc(ins.patient_count) + ' מטופלים' : ''}</div>
           </div>
           ${defects ? `<span class="badge def">${defects} ליקויים</span>` : '<span class="badge">תקין</span>'}
@@ -221,7 +221,7 @@
 
       document.getElementById('reportDoc').innerHTML = `
         <h2>דוח בקרה — ${esc(ins.house)}</h2>
-        <div class="head-meta">תאריך: ${esc(ins.inspection_date)} · מבקר/ת: ${esc(ins.inspector)}</div>
+        <div class="head-meta">תאריך: ${fmtDate(ins.inspection_date)} · מבקר/ת: ${esc(ins.inspector)}${ins.reinspect_date ? ' · בקרה חוזרת מתוכננת: ' + fmtDate(ins.reinspect_date) : ''}</div>
         ${bg.length ? `<div class="bg">${bg.join(' &nbsp;•&nbsp; ')}</div>` : ''}
         ${ins.general_notes ? `<p class="summary">${esc(ins.general_notes)}</p>` : ''}
         ${domainBlocks || '<p>לא תועדו ממצאים.</p>'}
@@ -269,6 +269,13 @@
     };
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Clean Hebrew date (DD/MM/YYYY). Strips any ISO timestamp tail.
+    function fmtDate(v) {
+      if (!v) return '';
+      const s = String(v).slice(0, 10);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : esc(String(v));
+    }
     load();
   </script>
 </body>

@@ -1,4 +1,62 @@
-[CHANGELOG (6).md](https://github.com/user-attachments/files/28850758/CHANGELOG.6.md)
+# Changelog
+
+All notable changes to EZone Logistics are documented here, per the project working rule
+(documentation for every change and every commit). Newest first.
+
+## [Increment 11] — UI fixes, per-house defect consolidation, weekly work orders
+
+**Repo repair (pre-existing corruption on `main`)**
+- `src/config.js` had been overwritten with the full CHANGELOG text (commit "Update config.js"),
+  breaking `config.test.js`. Restored the correct module from the increment-1 scaffold.
+- `rating.test.js` and `defer.test.js` were committed under a broken nested path
+  `src/test/test/` with wrong import depth. Moved to `test/` (imports now resolve).
+- Removed the stray GitHub attachment link from the top of this CHANGELOG.
+
+**Dashboard (`src/dashboard.html`)**
+- Removed the dead "לא ידוע" cost label from request cards (cost field no longer exists).
+- Renamed the approved group "מאושר — להקצאה" → "מאושר וממתין להקצאה לאחראי".
+- Removed the dead-end suggested-defects board block; replaced with a **per-house consolidation
+  panel** of open inspection defects, de-duplicated by text (no duplicate requests), each row
+  linking straight to opening a request. Now loads inspections to resolve each finding's house.
+- All dates shown as DD/MM/YYYY (new `fmtDate`), no ISO timestamps.
+
+**Inspection (`src/inspection.html`)**
+- Up-front "מה נבדק בבקרה" summary: the fixed checklist is shown by domain before starting.
+- New **בקרה חוזרת** date field: auto-set one month after the inspection date, editable;
+  recomputes if the inspection date changes (unless manually overridden). Sent as `reinspect_date`.
+
+**Reports (`src/reports.html`)**
+- Clean DD/MM/YYYY dates in the list and report header (was the long ISO timestamp).
+- Report header now shows the planned re-inspection date when set.
+
+**Weekly work orders (NEW — `src/workorders.html`, route `/workorders`)**
+- Roy generates a weekly task list per maintenance lead (רמי / צחי): all open items for that
+  lead (approved-unassigned requests + open inspection defects), **bundled by house**, urgent
+  items first within a house, hottest house on top. Printable / save-as-PDF. Staff-PIN gated.
+- Nav link "משימות שבועיות" added across dashboard / inspection / reports / workorders.
+
+**Logic + tests**
+- `src/workorders.js` — pure module: `urgencyRank`, `houseLeadMap`, `collectLeadItems`,
+  `buildWeeklyOrder`, `weeklyOrderForLead`. `test/workorders.test.js` covers lead filtering,
+  the two item sources, house-first grouping, and urgency ordering.
+- `src/inspection.js` — added `nextInspectionDate` (clamps month overflow) and
+  `consolidateDefectsByHouse` (de-dup by normalized text, with counts). Tests added.
+
+**Backend (`apps-script/Code.gs`, `apps-script/setup.gs`, `src/schema.js`)**
+- `Inspections` gains a `reinspect_date` column; `createInspection` persists it.
+
+**Security:** no secrets added; work-orders page is read-only and behind the staff PIN; all
+existing server-side validation/authority/audit rules unchanged.
+
+**Deploy notes:**
+1. Paste `apps-script/Code.gs` into the Apps Script editor and redeploy as a NEW VERSION.
+2. Re-run `setupSheet()` once — it appends the new `reinspect_date` column to Inspections.
+3. Set Railway env vars as before (`APPS_SCRIPT_EXEC_URL`, `STAFF_PIN`).
+4. Confirm your local `src/config.js` is the restored version before merging, so the corruption
+   doesn't return.
+
+---
+
 # Changelog
 
 All notable changes to EZone Logistics are documented here, per the project working rule
