@@ -25,6 +25,7 @@ export const HEADERS = {
     'deferred_until',
     'assigned_to',         // Rami / Tzachi / external technician
     'assignment_type',     // internal / external
+    'trade',               // external work: חשמלאי / אינסטלטור / מזגנים / ... (drives batching)
     'batch_id',            // links requests grouped into one external visit
     'completed_at',
     'actual_cost',
@@ -95,6 +96,20 @@ export const CATEGORY = {
 
 export const CLUSTERS = { SHARON: 'sharon', CAESAREA: 'caesarea', NORTH: 'north' };
 export const HOUSE_STATUS = { OPEN: 'open', PRE_OPENING: 'pre-opening' };
+
+// External-work trades. Assignment to an external technician picks ONE trade; smart batching
+// groups open external requests by trade × cluster (same trade, same proximity cluster → one visit).
+export const TRADES = [
+  'חשמלאי',
+  'אינסטלטור',
+  'איש מזגנים',
+  'צבעי',
+  'איש בריכות',
+  'איש רשתות',
+  'עבודות אלומיניום',
+  'עבודות נגרות',
+  'אחר',
+];
 
 // ---- Seed data ----
 

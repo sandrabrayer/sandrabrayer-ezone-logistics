@@ -3,6 +3,49 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 12] — Trade-based external assignment + smart batching
+
+**Trades, not named technicians**
+- External work is tracked BY TRADE, not by a specific person. New `TRADES` vocabulary in
+  `src/schema.js`: חשמלאי, אינסטלטור, איש מזגנים, צבעי, איש בריכות, איש רשתות, עבודות אלומיניום,
+  עבודות נגרות, אחר.
+- New `trade` column on the `Requests` sheet (`src/schema.js`, `apps-script/setup.gs`).
+
+**Assignment (`src/dashboard.html`)**
+- "הקצאה לביצוע" now asks internal (רמי / צחי) vs external. External assignment picks a trade
+  from the list. Roy can either assign now (single visit) or just mark the trade for future
+  batching (status stays מאושר). Trade + 🔗 batch shown on cards.
+
+**Smart batching (§10) — by trade × cluster**
+- New pure module `src/batching.js`: `houseClusterMap`, `isBatchable`, `suggestBatches`,
+  `makeBatchId`. A request is batchable when approved + external + has a trade + not yet batched.
+  Suggestions group approved external requests sharing the SAME trade AND the SAME proximity
+  cluster (sharon / caesarea / north); single jobs aren't batches; largest batch first.
+- Locked distinction preserved: cluster ≠ maintenance lead. North never batches with Caesarea
+  even though Tzachi covers both.
+- Dashboard shows a "הצעות לאיגום ביקורי טכנאי" panel; one click assigns the whole group under a
+  shared `batch_id` and moves them to בביצוע together.
+
+**Backend (`apps-script/Code.gs`)**
+- `assign` now stores `trade`. New `markExternal` (mark approved request external + trade, no
+  status change) and `assignBatch` (assign a group under one batch_id). Trades validated
+  server-side; batch transitions use the existing legality + audit rules.
+
+**Tests**
+- `test/batching.test.js`: trade×cluster grouping, the negative cases (different cluster / different
+  trade don't batch), single-job exclusion, ordering. `test/schema.test.js` updated for the new
+  column (23). Full suite green (10 files).
+
+**Security:** trades whitelisted server-side; batching is read-only suggestion + audited group
+assign; no secrets added.
+
+**Deploy notes:**
+1. Paste `apps-script/Code.gs` into Apps Script → Deploy → NEW VERSION.
+2. Re-run `setupSheet()` once — appends the new `trade` column to Requests.
+3. No new env vars.
+
+---
+
 ## [Increment 11] — UI fixes, per-house defect consolidation, weekly work orders
 
 **Repo repair (pre-existing corruption on `main`)**

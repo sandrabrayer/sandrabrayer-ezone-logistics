@@ -16,7 +16,7 @@ var HEADERS = {
     'id', 'created_at', 'created_by', 'house', 'category', 'description', 'location_in_house',
     'urgency', 'estimated_cost', 'attachment_url', 'status', 'approval_required', 'approved_by',
     'approved_at', 'rejection_reason', 'deferred_until', 'assigned_to', 'assignment_type',
-    'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
+    'trade', 'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],

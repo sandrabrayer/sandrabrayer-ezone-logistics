@@ -12,12 +12,12 @@ test('all sheets are defined (core + inspection module)', () => {
   ]);
 });
 
-test('Requests sheet has all 22 spec columns in order', () => {
-  assert.equal(HEADERS.Requests.length, 22);
+test('Requests sheet has all 23 spec columns in order', () => {
+  assert.equal(HEADERS.Requests.length, 23);
   assert.equal(HEADERS.Requests[0], 'id');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
-    'deferred_until', 'assigned_to', 'assignment_type', 'batch_id']) {
+    'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
 });
