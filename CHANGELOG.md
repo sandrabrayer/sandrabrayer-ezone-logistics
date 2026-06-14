@@ -3,6 +3,40 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 13] — Refer flow fixes, visible assignee, external weekly tasks
+
+**IMPORTANT — this re-lands Increment 12.** Increment 12 (trade picker + smart batching) was
+pushed to PR #10's branch but only Increment 11 actually merged to `main`; 12's code was never on
+`main`. This increment re-applies 12 and adds the fixes below, so deploying it brings both live.
+
+**Refer / assign (`src/dashboard.html`)**
+- Renamed the action from "הקצאה לאחראי" to **"הפנה"** ("refer to") throughout.
+- Replaced the fragile confirm/prompt chain (which silently did nothing on cancel and let any
+  name be typed) with a proper **modal**:
+  - Internal: the house's maintenance lead is **auto-resolved and shown** (not typed), so a
+    Raanana job can only go to Rami, never Tzachi.
+  - External: a **trade dropdown** (no free text); option to "mark for batching" without assigning.
+- The assignee is now **clearly visible on each card**: "↩ הופך ל: <name> (אחראי בית / בעל מקצוע)",
+  or "סומן ל: <trade> — ממתין לאיגום" when marked but not yet referred.
+
+**Weekly tasks (`src/workorders.html`)**
+- New **"בעלי מקצוע"** tab beside Rami / Tzachi: approved external work grouped **by trade**
+  (all electrical together, all plumbing together), with house + cluster shown. Roy can now hand
+  external task lists too, not just internal leads.
+
+**Why the live test failed before:** the deployed frontend was Increment 11 while batching/trade
+logic was never on `main`, so the trade picker never appeared and approve/refer actions hit a
+mismatched backend. Deploying this increment (frontend + Code.gs from the same commit) resolves it.
+
+**Tests:** full suite green (10 files).
+
+**Deploy notes:**
+1. Paste `apps-script/Code.gs` into Apps Script → Deploy → NEW VERSION.
+2. Re-run `setupSheet()` once — appends the `trade` column (Requests) if not already present.
+3. No new env vars.
+
+---
+
 ## [Increment 12] — Trade-based external assignment + smart batching
 
 **Trades, not named technicians**
