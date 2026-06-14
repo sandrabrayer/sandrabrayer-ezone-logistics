@@ -3,9 +3,9 @@
 // PURE module (no Apps Script APIs) so node:test verifies every rule directly. Code.gs mirrors
 // whoApproves / canApprove and calls these rules, then writes AuditLog + the row.
 //
-// §6 of the spec (locked): routing depends ONLY on amount, every time — first arrival AND
-// deferred wake-up. ≤ threshold → Roy; > threshold → Sandra; emergency bypasses entirely;
-// defer is Roy at any amount; blank cost falls under threshold (Roy).
+// §6 (as of Inc 14): Roy approves alone at any amount — Sandra was removed from approval in
+// Inc 10. Emergency bypasses approval entirely (auto). Defer is Roy at any amount. The threshold
+// param is retained on whoApproves/canApprove for signature compatibility but no longer routes.
 
 import { STATUSES, URGENCY } from './schema.js';
 
@@ -23,9 +23,10 @@ function costIsBlank(cost) {
  * @returns {'auto'|'roy'|'sandra'} 'auto' = emergency bypass (no human approval needed)
  */
 export function whoApproves(cost, urgency, threshold) {
+  // Roy approves alone (Sandra removed in Inc 10). Emergencies bypass approval entirely.
+  // threshold param kept for signature compatibility.
   if (urgency === URGENCY.EMERGENCY) return 'auto';
-  if (costIsBlank(cost)) return 'roy';          // unknown cost → under threshold → Roy
-  return Number(cost) > Number(threshold) ? 'sandra' : 'roy';
+  return 'roy';
 }
 
 /**
@@ -38,14 +39,11 @@ export function approvalRequired(cost, urgency, threshold) {
 }
 
 /**
- * Can THIS approver approve THIS request? Roy cannot approve above threshold; Sandra can.
- * Emergency needs no human, but if a human does act, either may (it's already auto-approved).
+ * Can THIS approver approve THIS request? Any amount is Roy's call now (Sandra removed in Inc 10);
+ * emergency auto-approves regardless of approver. threshold param kept for signature compatibility.
  */
 export function canApprove(approver, cost, urgency, threshold) {
-  const who = whoApproves(cost, urgency, threshold);
-  if (who === 'auto') return true;
-  if (who === 'sandra') return approver === APPROVERS.SANDRA;
-  return approver === APPROVERS.ROY || approver === APPROVERS.SANDRA; // Roy's tier; Sandra may too
+  return true;
 }
 
 // ---- Status transition validation ----
@@ -84,7 +82,7 @@ export function validateApproval(req, approver, threshold) {
     throw new Error(`Cannot approve a request in status "${req.status}"`);
   }
   if (!canApprove(approver, req.estimated_cost, req.urgency, threshold)) {
-    throw new Error('Approver not authorized for this amount (above threshold requires Sandra)');
+    throw new Error('Approver not authorized for this status');
   }
   return S.APPROVED;
 }
