@@ -3,6 +3,45 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 16 · Step 1] — Auth hardening: server-side write-token infra (additive)
+
+**Why:** Two auth gaps. (1) The staff PIN was injected into page HTML (`window.__STAFF_PIN__`)
+and compared client-side — visible in View-Source. (2) The public `/exec` endpoint enforced no
+server-side auth, so every write action (approve/reject/defer/assign/setStatus/deleteRequest/
+editRequest/…) was directly callable, bypassing the UI. This is the first of three
+independently-deployable steps that close both, using a single shared staff **write token** kept
+**only in Apps Script Script Properties** (`STAFF_WRITE_TOKEN`) — never in the repo, never in page
+HTML. The staff member types the code; the server verifies it.
+
+**This step is purely additive — no behavior change on live.** It stands up the check and the
+verify endpoint so the frontend (Step 2) can be built against it before enforcement flips on
+(Step 3).
+
+**Added**
+- `src/auth.js` — pure, testable predicate shared by the backend mirror: `STAFF_WRITE_ACTIONS`
+  (every mutating action except the public `createRequest`), `writeRequiresToken(action)`, and
+  `tokenOk(provided, expected)` — a fail-closed constant-time compare (unset server secret, empty
+  client token, or length mismatch all deny).
+- `apps-script/Code.gs` — mirror of `src/auth.js` (`STAFF_WRITE_ACTIONS_`, `writeRequiresToken_`,
+  `getWriteToken_` reading the `STAFF_WRITE_TOKEN` Script Property, `tokenOk_`) plus a new
+  `verifyToken` read action on `doGet` that returns only `{ ok: true, valid: <bool> }` and never
+  echoes the secret. **Writes are NOT yet gated in this step.**
+- `test/auth.test.js` — locks the write set, the public-`createRequest` exemption, exact-match
+  success, and fail-closed behavior on empty/missing secret or token.
+
+**Tests:** full `node --test` suite green (11 files; +1 new). No pre-existing failures.
+
+**Deploy notes:**
+1. **Ops first (no code):** in the Apps Script editor confirm there is exactly **one** live Web-app
+   deployment. Add a strong random `STAFF_WRITE_TOKEN` under Project Settings → Script Properties.
+   Do **not** put it in the repo or Railway (the frontend never holds it).
+2. **Backend:** paste the updated `apps-script/Code.gs` into the Apps Script editor and deploy a
+   **New version of the existing deployment** (keep the `/exec` URL stable — never a new
+   deployment).
+3. Frontend needs no deploy for this step (`Code.gs` never auto-syncs from GitHub).
+
+---
+
 ## [Increment 15] — Referral destination + status colors + wording
 
 **Referred tasks now land in the right person's worklist (`src/workorders.html`, `src/workorders.js`)**
