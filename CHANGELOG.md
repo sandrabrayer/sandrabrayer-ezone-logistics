@@ -3,6 +3,40 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 16 · Step 3] — Auth hardening: enforce the write token on /exec (the flip)
+
+**Fixes Finding 2.** `doPost` now rejects any staff write that does not carry a valid token,
+verified server-side against the `STAFF_WRITE_TOKEN` Script Property — **fail-closed**. The
+world-callable `/exec` no longer executes approve/reject/defer/assign/setStatus/markExternal/
+assignBatch/createInspection/addFinding/confirmFinding/deleteRequest/editRequest without the shared
+staff code. `createRequest` (public intake) stays exempt.
+
+**⚠️ Deploy order — deploy this only after Step 2's frontend is live.** The frontend must already
+be sending `token` on writes (Step 2) or every staff action returns `Unauthorized`.
+
+**Changed**
+- `apps-script/Code.gs` — one gate at the top of `doPost`, before dispatch:
+  `if (writeRequiresToken_(action) && !tokenOk_(body.token, getWriteToken_())) return Unauthorized`.
+  Uses the Step-1 mirror helpers; no other handler changes.
+
+**Note:** the gate is built from `writeRequiresToken_` / `tokenOk_`, whose logic is the mirror of
+`src/auth.js` and is already unit-tested (`test/auth.test.js`). GAS `doPost` itself isn't
+node-testable.
+
+**Tests:** full `node --test` suite green (85 pass / 0 fail). No pre-existing failures.
+
+**Deploy notes:**
+1. **Prerequisite:** Steps 1 & 2 live (frontend sending `token`, Script Property set).
+2. **Backend:** paste updated `apps-script/Code.gs` → **New version of the existing deployment**
+   (keep the `/exec` URL stable — never a new deployment).
+3. **Verify on live:**
+   - From the dashboard, approve/reject/refer a request → succeeds (token attached).
+   - Direct call bypass check: `curl -sX POST "…/exec" -d '{"action":"approve","payload":{"id":"X","by":"רועי"}}'`
+     → `{"ok":false,"error":"Unauthorized"}`. Same call **with** the correct `"token"` → succeeds.
+   - `createRequest` from the public form still works with no token.
+
+---
+
 ## [Increment 16 · Step 2] — Auth hardening: PIN out of HTML, server-verified staff gate
 
 **Fixes Finding 1.** The staff PIN is no longer injected into page source or compared in the

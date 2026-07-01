@@ -185,6 +185,13 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
+  // Fail-closed auth on staff writes: they must carry the shared token, verified server-side
+  // against the STAFF_WRITE_TOKEN Script Property. createRequest (public intake) is exempt.
+  // This is the real gate — the public /exec is world-callable, so never trust the Node layer.
+  if (writeRequiresToken_(body.action) && !tokenOk_((body && body.token) || '', getWriteToken_())) {
+    return jsonOut_({ ok: false, error: 'Unauthorized' });
+  }
+
   // Whitelisted actions only.
   switch (body.action) {
     case 'createRequest': return handleCreateRequest_(body.payload || {});
