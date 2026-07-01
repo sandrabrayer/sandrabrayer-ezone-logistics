@@ -64,24 +64,35 @@
 </head>
 <body>
   <script>
-    // Staff PIN gate (Roy & Olga). Coordinators never reach here — this page is staff-only.
-    // The shared PIN is injected by the server from the STAFF_PIN env var. If no PIN is set,
-    // the gate is disabled (open) so nothing breaks before you configure it.
-    (function staffGate() {
-      var required = window.__STAFF_PIN__ || '';
-      if (!required) return; // PIN not configured → leave open
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. On success the verified token is kept in sessionStorage for this session and sent
+    // as `token` on every staff write. Fail-closed: wrong/blank code, cancel, or no server token →
+    // back to the request form. Invoked below via staffGate().then(init) so no data loads first.
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
       try {
-        if (sessionStorage.getItem('ezone_staff_ok') === '1') return; // already entered this session
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; } // already verified this session
       } catch (e) {}
-      var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
-      if (entered === required) {
-        try { sessionStorage.setItem('ezone_staff_ok', '1'); } catch (e) {}
-        return;
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break; // cancelled
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        // wrong code or network error → re-prompt
       }
-      // Wrong or cancelled → send back to the request form.
       document.documentElement.innerHTML = '';
       window.location.replace('/');
-    })();
+      return new Promise(function () {}); // never resolves → nothing after the gate runs
+    }
   </script>
 
   <div class="topbar">
@@ -292,7 +303,7 @@
     }
 
     async function post(action, payload) {
-      const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
+      const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: window.__STAFF_TOKEN__ || '' }) });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'שגיאה');
       return json;
@@ -313,7 +324,7 @@
     }
 
     document.getElementById('submitBtn').addEventListener('click', submit);
-    init();
+    staffGate().then(init);
   </script>
 </body>
 </html>

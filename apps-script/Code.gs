@@ -111,6 +111,43 @@ function writeAuditEntry(requestId, fromStatus, toStatus, by, note) {
   ]);
 }
 
+// ---- Write authorization (mirror of src/auth.js) ----
+// The shared staff secret lives ONLY in Script Properties (STAFF_WRITE_TOKEN) — never in the
+// repo, never injected into page HTML. The staff member types the code; the frontend verifies
+// it via the verifyToken read action, then sends it as `token` on every staff write. Enforcement
+// on writes is added in a later step; this block only stands up the check + verify endpoint.
+
+// Staff-only write actions. createRequest is deliberately absent (public intake form).
+var STAFF_WRITE_ACTIONS_ = [
+  'approve', 'reject', 'defer', 'assign', 'markExternal', 'assignBatch',
+  'setStatus', 'createInspection', 'addFinding', 'confirmFinding',
+  'deleteRequest', 'editRequest',
+];
+
+function writeRequiresToken_(action) {
+  return STAFF_WRITE_ACTIONS_.indexOf(action) !== -1;
+}
+
+function getWriteToken_() {
+  return PropertiesService.getScriptProperties().getProperty('STAFF_WRITE_TOKEN') || '';
+}
+
+/**
+ * Constant-time equality of the provided token against the server secret. Fail-closed:
+ * false if the server secret is unset/empty, if the provided token is empty, or on length
+ * mismatch — only an exact match returns true.
+ */
+function tokenOk_(provided, expected) {
+  if (typeof expected !== 'string' || expected.length === 0) return false;
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+  if (provided.length !== expected.length) return false;
+  var diff = 0;
+  for (var i = 0; i < expected.length; i++) {
+    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 // ---- HTTP router (stubs; validated, whitelisted) ----
 
 function doGet(e) {
@@ -124,6 +161,10 @@ function doGet(e) {
     case 'checklist':   result = readObjects_('ChecklistItems'); break;
     case 'inspections': result = readObjects_('Inspections'); break;
     case 'findings':    result = readObjects_('InspectionFindings'); break;
+    // Verify a typed staff code against the server secret. Returns only a boolean — never
+    // echoes the secret. The frontend gates the staff pages on { valid: true }.
+    case 'verifyToken':
+      return jsonOut_({ ok: true, valid: tokenOk_((e && e.parameter && e.parameter.token) || '', getWriteToken_()) });
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
   }
@@ -142,6 +183,13 @@ function doPost(e) {
     body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
   } catch (err) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
+  }
+
+  // Fail-closed auth on staff writes: they must carry the shared token, verified server-side
+  // against the STAFF_WRITE_TOKEN Script Property. createRequest (public intake) is exempt.
+  // This is the real gate — the public /exec is world-callable, so never trust the Node layer.
+  if (writeRequiresToken_(body.action) && !tokenOk_((body && body.token) || '', getWriteToken_())) {
+    return jsonOut_({ ok: false, error: 'Unauthorized' });
   }
 
   // Whitelisted actions only.
