@@ -3,6 +3,46 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 16 · Step 2] — Auth hardening: PIN out of HTML, server-verified staff gate
+
+**Fixes Finding 1.** The staff PIN is no longer injected into page source or compared in the
+browser. The server stops emitting `window.__STAFF_PIN__` entirely; the staff pages now prompt for
+the code and verify it **server-side** via the Step-1 `verifyToken` endpoint. The verified token is
+kept in `sessionStorage` for the session and attached as `token` to every staff write (so Step 3
+can enforce it). Nothing secret is in the served HTML anymore.
+
+**⚠️ Deploy order — do not deploy this before Step 1 is live.** The staff pages call
+`verifyToken`, which only exists once Step 1's `Code.gs` is deployed **and** `STAFF_WRITE_TOKEN` is
+set in Script Properties. Deploying the frontend first would lock staff out (gate fails closed →
+redirect to `/`).
+
+**Changed**
+- `src/server.js` — stop injecting `window.__STAFF_PIN__`; drop the `STAFF_PIN` env dependency.
+  Only the non-secret `__EXEC_URL__` is exposed to the page.
+- `src/dashboard.html`, `src/inspection.html`, `src/reports.html`, `src/workorders.html` —
+  replaced the client-side PIN compare with an async `staffGate()` that verifies the typed code via
+  `?action=verifyToken`, stores the verified token in `sessionStorage` (`ezone_staff_token`), and
+  gates page init behind it (`staffGate().then(load/init)`) so no data loads before verification.
+  Fail-closed: wrong/blank code, cancel, or unset server token → wipe + redirect to `/`.
+- Writes on the three pages with staff actions now send `token: window.__STAFF_TOKEN__` (dashboard
+  `post`, inspection `post`, reports confirmFinding). `createRequest` (public intake) is untouched.
+
+**Note:** this step is frontend wiring only; the testable auth predicate is already covered by
+`test/auth.test.js` from Step 1. No new pure module to unit-test.
+
+**Tests:** full `node --test` suite green (85 pass / 0 fail). No pre-existing failures.
+
+**Deploy notes:**
+1. **Prerequisite:** Step 1 deployed on Apps Script + `STAFF_WRITE_TOKEN` set in Script Properties,
+   verified live (`?action=verifyToken`).
+2. **Frontend:** merge to `main` → Railway redeploys automatically. Hard-refresh with `?v=` to bust
+   cache. No `Code.gs` change in this step.
+3. **Verify on live:** open `/dashboard` → prompt appears → wrong code redirects to `/`; correct
+   code loads the board and persists for the session; approve/reject still work (writes now carry
+   the token; backend still ignores it until Step 3).
+
+---
+
 ## [Increment 16 · Step 1] — Auth hardening: server-side write-token infra (additive)
 
 **Why:** Two auth gaps. (1) The staff PIN was injected into page HTML (`window.__STAFF_PIN__`)

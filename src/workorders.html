@@ -66,16 +66,33 @@
 </head>
 <body>
   <script>
-    // Staff PIN gate (Roy & Olga). Coordinators never reach here — this page is staff-only.
-    (function staffGate() {
-      var required = window.__STAFF_PIN__ || '';
-      if (!required) return;
-      try { if (sessionStorage.getItem('ezone_staff_ok') === '1') return; } catch (e) {}
-      var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
-      if (entered === required) { try { sessionStorage.setItem('ezone_staff_ok', '1'); } catch (e) {} return; }
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. Verified token kept in sessionStorage for the session. Fail-closed: wrong/blank
+    // code, cancel, or no server token → back to the request form. Invoked via staffGate().then(load).
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; }
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break;
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+      }
       document.documentElement.innerHTML = '';
       window.location.replace('/');
-    })();
+      return new Promise(function () {});
+    }
   </script>
 
   <div class="topbar">
@@ -215,7 +232,7 @@
     }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-    load();
+    staffGate().then(load);
   </script>
 </body>
 </html>

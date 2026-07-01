@@ -22,12 +22,12 @@ loadEnv();
 
 const PORT = process.env.PORT || 3000;
 const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
-// Shared staff PIN for Roy & Olga, read from env (never committed). Set STAFF_PIN in Railway.
-const STAFF_PIN = process.env.STAFF_PIN || '';
+// The staff access code is NOT injected here anymore — it is never sent to the browser. Staff type
+// it and the Apps Script backend verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+// Property. Only the (non-secret) /exec URL is exposed to the page.
 
 const server = createServer((req, res) => {
-  const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};`
-    + `window.__STAFF_PIN__=${JSON.stringify(STAFF_PIN)};</script>`;
+  const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
   let file = null;
   if (req.url === '/' || req.url === '/index.html') file = 'index.html';
   else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
