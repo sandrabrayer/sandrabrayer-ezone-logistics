@@ -26,23 +26,63 @@ const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
 // it and the Apps Script backend verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
 // Property. Only the (non-secret) /exec URL is exposed to the page.
 
-const server = createServer((req, res) => {
-  const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
-  let file = null;
-  if (req.url === '/' || req.url === '/index.html') file = 'index.html';
-  else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
-  else if (req.url === '/inspection' || req.url === '/inspection.html') file = 'inspection.html';
-  else if (req.url === '/reports' || req.url === '/reports.html') file = 'reports.html';
-  else if (req.url === '/workorders' || req.url === '/workorders.html') file = 'workorders.html';
+// PWA head links injected into every served HTML page (kept here, DRY, like __EXEC_URL__).
+const HEAD_INJECT =
+  '<link rel="manifest" href="/manifest.webmanifest">'
+  + '<meta name="theme-color" content="#161a20">'
+  + '<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32-v1.png">'
+  + '<link rel="apple-touch-icon" href="/icons/apple-touch-icon-v1.png">';
 
+const HTML_ROUTES = {
+  '/': 'index.html', '/index.html': 'index.html',
+  '/dashboard': 'dashboard.html', '/dashboard.html': 'dashboard.html',
+  '/inspection': 'inspection.html', '/inspection.html': 'inspection.html',
+  '/reports': 'reports.html', '/reports.html': 'reports.html',
+  '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
+};
+
+function notFound(res) {
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+}
+
+const server = createServer((req, res) => {
+  const path = (req.url || '/').split('?')[0];
+
+  // Static: PWA manifest.
+  if (path === '/manifest.webmanifest') {
+    try {
+      const body = readFileSync(join(__dirname, 'manifest.webmanifest'));
+      res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8' });
+      return res.end(body);
+    } catch (e) { return notFound(res); }
+  }
+
+  // Static: PWA icons. Whitelist the filename (no slashes, no traversal) before touching disk.
+  // Filenames are versioned (…-v1.png), so cache them immutably.
+  if (path.startsWith('/icons/')) {
+    const name = path.slice('/icons/'.length);
+    if (/^[A-Za-z0-9._-]+\.png$/.test(name)) {
+      try {
+        const body = readFileSync(join(__dirname, 'icons', name));
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' });
+        return res.end(body);
+      } catch (e) { /* missing → 404 below */ }
+    }
+    return notFound(res);
+  }
+
+  // HTML routes — inject the non-secret /exec URL global + the PWA head links.
+  const file = HTML_ROUTES[path];
   if (file) {
+    const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>` + HEAD_INJECT;
     let html = readFileSync(join(__dirname, file), 'utf8');
     html = html.replace('</head>', inject + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(html);
   }
-  res.writeHead(404, { 'Content-Type': 'text/plain' });
-  res.end('Not found');
+
+  notFound(res);
 });
 
 server.listen(PORT, () => {

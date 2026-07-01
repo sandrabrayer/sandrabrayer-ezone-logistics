@@ -3,6 +3,42 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 17] — PWA app icons + web manifest + static asset route
+
+**What:** Installable-PWA groundwork — the E-ZONE mark (recolored to Logistics teal `#2dd4bf`) as
+app icons, a web manifest, and the static route needed to serve them. This is icons + manifest
+only; a service worker (offline) is a separate later step.
+
+**Added**
+- `src/manifest.webmanifest` — `EZone Logistics` / `EZone`, `lang: he` + `dir: rtl`, `start_url /`,
+  `display standalone`, dark theme/background `#161a20`, and the three icons: 192 & 512 (`purpose:
+  any`) + 512 (`purpose: maskable`).
+- `test/manifest.test.js` — locks the core fields, the 192/512-any + 512-maskable icon set, and
+  that every icon src is under `/icons/` and versioned.
+
+**Changed**
+- `src/server.js` — the request handler now also serves static assets, since it previously served
+  only specific HTML routes:
+  - `GET /manifest.webmanifest` → `application/manifest+json`.
+  - `GET /icons/<file>.png` → `image/png`, cached immutably (filenames are versioned `-v1`).
+    **Security:** the filename is whitelisted (`^[A-Za-z0-9._-]+\.png$`, no slashes) before any disk
+    read, so the route can't be used for path traversal.
+  - Every served HTML page now gets injected `<link rel="manifest">`, `apple-touch-icon`,
+    `favicon`, and a `theme-color` meta (kept in `server.js`, DRY, like the existing `__EXEC_URL__`
+    injection — one place, all five pages).
+
+**Pending input:** the icon PNGs themselves are not yet committed — place these five files (from the
+provided set) at `src/icons/`: `icon-192-v1.png`, `icon-512-v1.png`, `icon-maskable-512-v1.png`,
+`apple-touch-icon-v1.png`, `favicon-32-v1.png`. Until then the manifest/icon links resolve to 404.
+
+**Tests:** full `node --test` suite green (88 pass / 0 fail; +3 new). No pre-existing failures.
+
+**Deploy notes:**
+1. Frontend-only — Railway redeploys from `main` automatically once the icons are in and this
+   merges. No Apps Script change. Hard-refresh with `?v=` and re-check the install prompt / icon.
+
+---
+
 ## [Increment 16 · Step 3] — Auth hardening: enforce the write token on /exec (the flip)
 
 **Fixes Finding 2.** `doPost` now rejects any staff write that does not carry a valid token,
