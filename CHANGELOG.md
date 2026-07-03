@@ -3,6 +3,42 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 18] — PWA static route: /favicon.ico + content-type regression test
+
+**What:** Close the browser's default `/favicon.ico` request (was 404-ing) and lock the static
+routes' on-the-wire `Content-Type` so an icon can never silently regress to a blank box.
+
+**Context on the reported symptom:** the `/icons/*.png` route already set `Content-Type: image/png`
+explicitly (Increment 17) — verified again at runtime here (`200 image/png`, PNG magic bytes). So the
+committed code was not serving `document/text`; a stale Railway build or a CDN/proxy cache is the
+likely cause of a `document/text` response seen live. This change makes that class of bug
+test-enforced regardless.
+
+**Added**
+- `test/server-static.test.js` — spins the real `requestHandler` on an ephemeral port and asserts:
+  `/icons/*.png` → `200 image/png` with real PNG magic bytes; `/favicon.ico` → `200 image/png`;
+  `/manifest.webmanifest` → `application/manifest+json`; disallowed/missing icon names → `404`.
+
+**Changed**
+- `src/server.js`:
+  - New `GET /favicon.ico` route → serves `src/icons/favicon-32-v1.png` as `image/png` (unversioned
+    URL, so cached modestly `max-age=86400`, not immutably).
+  - Icon serving refactored through one `sendPng()` helper that **always** sets an explicit
+    `image/png` Content-Type (single place, so the header can't drift per-route).
+  - `requestHandler` is now exported and the port bind is guarded to run-as-main only, so the suite
+    can exercise the real routes in-process without binding a fixed port. `npm start` is unchanged.
+  - **Security:** the icon filename whitelist (`^[A-Za-z0-9._-]+\.png$`, no slashes) is unchanged —
+    the disk read still can't be steered outside `src/icons/`; a test now covers the reject path.
+
+**Tests:** full `node --test` suite green (92 pass / 0 fail; +4 new). No pre-existing failures.
+
+**Deploy notes:**
+1. Frontend-only — Railway redeploys from `main` on merge. If the live site still shows the wrong
+   type after merge, confirm the deploy picked up the new commit and hard-refresh / purge cache;
+   verify with `curl -I https://<live>/favicon.ico` → `content-type: image/png`.
+
+---
+
 ## [Increment 17] — PWA app icons + web manifest + static asset route
 
 **What:** Installable-PWA groundwork — the E-ZONE mark (recolored to Logistics teal `#2dd4bf`) as
