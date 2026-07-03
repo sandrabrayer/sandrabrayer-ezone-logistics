@@ -4,7 +4,7 @@
 
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +46,22 @@ function notFound(res) {
   res.end('Not found');
 }
 
-const server = createServer((req, res) => {
+// Serve a PNG from src/icons/ with an EXPLICIT image/png Content-Type — never let it default to a
+// text/document type, or browsers render a blank box instead of the image. Returns false (writing
+// nothing) if the file is missing, so the caller can fall through to 404.
+function sendPng(res, name, cacheControl) {
+  let body;
+  try {
+    body = readFileSync(join(__dirname, 'icons', name));
+  } catch (e) {
+    return false;
+  }
+  res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': cacheControl });
+  res.end(body);
+  return true;
+}
+
+export function requestHandler(req, res) {
   const path = (req.url || '/').split('?')[0];
 
   // Static: PWA manifest.
@@ -58,16 +73,20 @@ const server = createServer((req, res) => {
     } catch (e) { return notFound(res); }
   }
 
+  // Static: the browser's default favicon request → serve the 32px PNG so it stops 404-ing. The URL
+  // is unversioned, so cache it modestly (not immutably) in case the favicon changes later.
+  if (path === '/favicon.ico') {
+    if (sendPng(res, 'favicon-32-v1.png', 'public, max-age=86400')) return;
+    return notFound(res);
+  }
+
   // Static: PWA icons. Whitelist the filename (no slashes, no traversal) before touching disk.
-  // Filenames are versioned (…-v1.png), so cache them immutably.
+  // Filenames are versioned (…-v1.png), so cache them immutably. Always served as image/png.
   if (path.startsWith('/icons/')) {
     const name = path.slice('/icons/'.length);
-    if (/^[A-Za-z0-9._-]+\.png$/.test(name)) {
-      try {
-        const body = readFileSync(join(__dirname, 'icons', name));
-        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' });
-        return res.end(body);
-      } catch (e) { /* missing → 404 below */ }
+    if (/^[A-Za-z0-9._-]+\.png$/.test(name)
+        && sendPng(res, name, 'public, max-age=31536000, immutable')) {
+      return;
     }
     return notFound(res);
   }
@@ -83,9 +102,16 @@ const server = createServer((req, res) => {
   }
 
   notFound(res);
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`EZone Logistics frontend on http://localhost:${PORT}`);
-  if (!EXEC_URL) console.warn('WARNING: APPS_SCRIPT_EXEC_URL not set — form submission will fail.');
-});
+const server = createServer(requestHandler);
+
+// Only bind a port when run directly (node src/server.js / npm start). Importing the module — e.g.
+// from the test suite — gets requestHandler without starting a listener.
+const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
+if (isMain) {
+  server.listen(PORT, () => {
+    console.log(`EZone Logistics frontend on http://localhost:${PORT}`);
+    if (!EXEC_URL) console.warn('WARNING: APPS_SCRIPT_EXEC_URL not set — form submission will fail.');
+  });
+}
