@@ -3,6 +3,35 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 20] — HTML served with Cache-Control: no-cache (stop stale pages across deploys)
+
+**What:** HTML page responses now carry `Cache-Control: no-cache`, so browsers revalidate the
+document on every load instead of serving a cached copy. Fixes phones showing a stale page after
+a deploy.
+
+**Context:** The HTML routes set only `Content-Type` — no cache header — so browsers were free to
+reuse a cached document across deploys. Unlike icons/manifest, HTML has no versioned URL to bust,
+so the reliable fix is to make the document always revalidate. `no-cache` (not `no-store`) still
+lets the browser keep a copy and send `If-None-Match`/`If-Modified-Since`, so a 304 is cheap when
+nothing changed.
+
+**Changed**
+- `src/server.js`: the HTML route's `res.writeHead` header object gains
+  `'Cache-Control': 'no-cache'`. The icon (`max-age=31536000, immutable`), favicon
+  (`max-age=86400`), and manifest headers are untouched — they keep their long-cache behavior.
+
+**Added**
+- `test/server-static.test.js`: new assertion that `GET /` responds `200` `text/html` with
+  `Cache-Control: no-cache`.
+
+**Tests:** full `node --test` suite green (108 pass / 0 fail; +1 new). The 107 pre-existing tests
+stay green.
+
+**Deploy notes:** Frontend-only — Railway redeploys from `main` on merge. After deploy, phones
+revalidate HTML on next load; confirm with `curl -I https://<live>/` → `cache-control: no-cache`.
+
+---
+
 ## [Increment 19] — Mobile-responsive pass (step 1/6): topbar + touch targets + icon cleanup
 
 **What:** First step of a six-part mobile-responsive pass. Every user-facing page now adapts

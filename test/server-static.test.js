@@ -41,6 +41,13 @@ test('GET /manifest.webmanifest serves application/manifest+json', async () => {
   assert.match(res.headers.get('content-type'), /application\/manifest\+json/);
 });
 
+test('GET / serves HTML with Cache-Control: no-cache (revalidate, avoid stale pages across deploys)', async () => {
+  const res = await fetch(`${base}/`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+});
+
 test('icon route returns 404 for disallowed names and missing files (no leak, no traversal)', async () => {
   assert.equal((await fetch(`${base}/icons/nope.txt`)).status, 404);          // extension not allowed
   assert.equal((await fetch(`${base}/icons/does-not-exist-v9.png`)).status, 404); // valid name, missing file

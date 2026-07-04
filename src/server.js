@@ -97,7 +97,9 @@ export function requestHandler(req, res) {
     const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>` + HEAD_INJECT;
     let html = readFileSync(join(__dirname, file), 'utf8');
     html = html.replace('</head>', inject + '</head>');
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    // no-cache: HTML has no versioned URL, so force browsers to revalidate every load —
+    // otherwise phones serve a stale page across deploys. (Icons/manifest keep long-cache.)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
 
