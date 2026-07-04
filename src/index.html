@@ -141,6 +141,16 @@
       button, select, input { min-height: 40px; }
       /* 16px form fields prevent iOS focus zoom */
       input, select, textarea { font-size: 16px; }
+      /* step 2 — intake form polish */
+      /* seg groups stay 3-across but wrap gracefully on ~320px instead of squeezing */
+      .seg { flex-wrap: wrap; }
+      .seg label { min-width: 0; }
+      /* tighter side padding lets the card breathe wider */
+      .wrap { padding-inline: 14px; }
+      /* primary action gets a taller touch target than the 40px default */
+      button.submit { min-height: 48px; }
+      /* larger toast text for readability */
+      .msg { font-size: 1rem; }
     }
   </style>
 </head>
