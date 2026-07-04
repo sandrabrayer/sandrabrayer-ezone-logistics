@@ -3,6 +3,39 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 22] — Mobile-responsive pass (step 2/6): intake form polish (index.html)
+
+**What:** Second step of the six-part mobile-responsive pass. Polishes the "new request" intake
+form on phone-width screens — the two segmented button groups wrap gracefully on very narrow
+devices, the card gets more width, the submit button a bigger touch target, and the status toast
+larger text. Desktop is pixel-identical (everything lives inside the existing media query).
+
+**Context:** At ~320px the `.seg` groups (category רכישה/תיקון/החלפה and urgency רגיל/דחוף/חירום)
+squeezed their 3-across labels rather than wrapping. The form also had more side padding than a
+narrow screen wants, and the primary submit button shared the generic 40px touch-target minimum.
+
+**Changed — CSS (index.html only, no markup, no JS)**
+- Inside the existing `@media (max-width: 640px)` block in `src/index.html`:
+  - `.seg { flex-wrap: wrap; }` + `.seg label { min-width: 0; }` — the button groups keep 3-across
+    where they fit but wrap cleanly on ~320px instead of squeezing.
+  - `.wrap { padding-inline: 14px; }` — reduced side padding (from 18px) so the card breathes wider.
+    Logical property, so RTL is unaffected.
+  - `button.submit { min-height: 48px; }` — the primary action gets a taller target than the 40px
+    default.
+  - `.msg { font-size: 1rem; }` — success/error toast text bumped for readability.
+
+**Changed — tests**
+- `test/mobile-css.test.js`: two new index-specific assertions — the `.seg` wrap/`min-width: 0`
+  rules and the 48px submit target.
+
+**Tests:** full `node --test` suite green (115 pass / 0 fail; +2 new). The 113 pre-existing tests
+stay green.
+
+**Deploy notes:** Frontend-only — Railway redeploys from `main` on merge. No desktop change; verify
+the intake form on a ~320px device (seg groups wrap, submit is comfortably tappable).
+
+---
+
 ## [Increment 21] — Mobile: hard-disable horizontal panning (fix sideways-panned load on Android)
 
 **What:** On mobile (`≤640px`) the page can no longer pan horizontally. Fixes some Android devices
