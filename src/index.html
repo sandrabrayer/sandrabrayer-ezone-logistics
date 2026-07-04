@@ -124,6 +124,8 @@
        Fully scoped to this media query so the desktop layout stays pixel-identical.
        RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
     @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
       /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
       .topbar { flex-wrap: wrap; gap: 10px; }
       .nav {
