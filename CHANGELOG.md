@@ -3,6 +3,12 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Docs] — EZONE-ECOSYSTEM-STATUS.md at repo root
+
+**What:** Added `EZONE-ECOSYSTEM-STATUS.md` at the repo root — the July 4 merged cross-app ecosystem status doc, distributed to the root of all six E-Zone repos so every project/session starts from the true state. Docs-only; no code, schema, or Apps Script change.
+
+---
+
 ## [Increment 22] — Mobile-responsive pass (step 2/6): intake form polish (index.html)
 
 **What:** Second step of the six-part mobile-responsive pass. Polishes the "new request" intake
