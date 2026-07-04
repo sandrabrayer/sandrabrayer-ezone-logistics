@@ -3,6 +3,33 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 21] — Mobile: hard-disable horizontal panning (fix sideways-panned load on Android)
+
+**What:** On mobile (`≤640px`) the page can no longer pan horizontally. Fixes some Android devices
+loading the pages panned sideways even though the layout fits the viewport.
+
+**Context:** A few Android browsers gave the page an initial horizontal scroll offset despite the
+content fitting within the viewport width. Clamping `html, body` to the viewport and hiding
+horizontal overflow removes the pannable area entirely. Content already fits, so nothing is cut off.
+
+**Changed — CSS (no markup, no JS)**
+- `src/index.html`, `src/dashboard.html`, `src/inspection.html`, `src/reports.html`,
+  `src/workorders.html`: inside each page's existing `@media (max-width: 640px)` block, added
+  `html, body { overflow-x: hidden; max-width: 100vw; }`. Scoped to the media query — desktop is
+  untouched.
+
+**Changed — tests**
+- `test/mobile-css.test.js`: one new assertion per page (5 total) that the mobile block contains
+  the `html, body { … overflow-x: hidden … }` rule.
+
+**Tests:** full `node --test` suite green (113 pass / 0 fail; +5 new). The 108 pre-existing tests
+stay green.
+
+**Deploy notes:** Frontend-only — Railway redeploys from `main` on merge. No desktop change; verify
+on an affected Android device that the page no longer loads panned sideways.
+
+---
+
 ## [Increment 20] — HTML served with Cache-Control: no-cache (stop stale pages across deploys)
 
 **What:** HTML page responses now carry `Cache-Control: no-cache`, so browsers revalidate the

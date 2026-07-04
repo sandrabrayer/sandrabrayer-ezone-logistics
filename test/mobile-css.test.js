@@ -27,4 +27,9 @@ for (const page of PAGES) {
     // guards the core intent: the nav row must stay scrollable on small screens
     assert.match(html, /overflow-x:\s*auto/);
   });
+
+  test(`${page} mobile block hard-disables horizontal panning on html/body`, () => {
+    // stops some Android devices from loading the page panned sideways
+    assert.match(html, /html,\s*body\s*\{[^}]*overflow-x:\s*hidden/);
+  });
 }
