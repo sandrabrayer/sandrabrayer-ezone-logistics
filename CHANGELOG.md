@@ -3,6 +3,48 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 19] — Mobile-responsive pass (step 1/6): topbar + touch targets + icon cleanup
+
+**What:** First step of a six-part mobile-responsive pass. Every user-facing page now adapts
+its top navigation and form controls for phone-width screens, and the duplicate browser-download
+icon artifacts are removed from `src/icons/`. Desktop rendering is untouched — all new CSS lives
+inside a `@media (max-width: 640px)` block, so wider viewports are pixel-identical to before.
+
+**Context:** The five pages share a `.topbar` (flex, space-between: brand + RTL Hebrew `.nav` +
+`.tab`) with no mobile handling, and touch targets were ~32–36px — below the ~44px comfortable
+minimum. On a phone the nav links crowded and were awkward to tap.
+
+**Changed — CSS (no markup, no JS)**
+- `src/index.html`, `src/dashboard.html`, `src/inspection.html`, `src/reports.html`,
+  `src/workorders.html`: added one `@media (max-width: 640px)` block each. Within it:
+  - `.topbar` wraps to two rows — brand (and `.tab` where present) on top, `.nav` on its own
+    row below as a horizontally scrollable strip (`overflow-x: auto`, `flex-wrap: nowrap`,
+    `-webkit-overflow-scrolling: touch`, scrollbar hidden) so all links stay reachable.
+  - `.nav a`, `button`, `.tab`, `select`, `input` get `min-height: 40px` (with `padding-block`
+    bumped on nav links) for comfortable touch targets.
+  - `input`, `select`, `textarea` get `font-size: 16px` to stop iOS from zooming on focus.
+  - RTL preserved — only logical properties (`padding-block` / `margin-block`) are used, no
+    physical left/right.
+
+**Removed — icon cleanup**
+- Deleted the five browser re-download duplicates `src/icons/*" (1).png"`
+  (`apple-touch-icon-v1`, `favicon-32-v1`, `icon-192-v1`, `icon-512-v1`,
+  `icon-maskable-512-v1`). The manifest and static routes reference only the clean names, so
+  nothing else changes.
+
+**Added**
+- `test/mobile-css.test.js` (`node:test`) — asserts each of the five pages contains the
+  `max-width: 640px` media block, the `width=device-width` viewport meta, and a scrollable
+  (`overflow-x: auto`) nav.
+
+**Tests:** full `node --test` suite green (107 pass / 0 fail; +15 new — 3 assertions × 5 pages).
+The 92 pre-existing tests stay green.
+
+**Deploy notes:** Frontend-only — Railway redeploys from `main` on merge. No behavioral change on
+desktop; verify on a phone (≤640px) that the nav scrolls and form fields don't trigger focus zoom.
+
+---
+
 ## [Increment 18] — PWA static route: /favicon.ico + content-type regression test
 
 **What:** Close the browser's default `/favicon.ico` request (was 404-ing) and lock the static

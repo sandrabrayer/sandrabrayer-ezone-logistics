@@ -119,6 +119,27 @@
     .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
     .nav a:hover { color: var(--ink); border-color: var(--card-line); }
     .nav a.active { color: #14171c; background: var(--accent-grad); }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+    }
   </style>
 </head>
 <body>
