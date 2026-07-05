@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   urgencyRank, houseLeadMap, collectLeadItems, buildWeeklyOrder, weeklyOrderForLead,
   isExecutionLive, collectExecutionItems, EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER, EXEC_CHOICES,
+  ASSIGN_LEADS, defaultReferLead,
 } from '../src/workorders.js';
 
 const HOUSES = [
@@ -123,4 +124,22 @@ test('collectExecutionItems carries assigned_to and execution_status through', (
   const [it] = collectExecutionItems({ requests });
   assert.equal(it.assigned_to, 'רועי');
   assert.equal(it.execution_status, 'אחר');
+});
+
+// ── Dashboard refer picker: default lead = house lead, override to any of the three. ──
+
+test('ASSIGN_LEADS are exactly רמי / צחי / רועי', () => {
+  assert.deepEqual(ASSIGN_LEADS, ['רמי', 'צחי', 'רועי']);
+});
+
+test('defaultReferLead defaults to the house lead when pickable', () => {
+  assert.equal(defaultReferLead('רמי'), 'רמי');
+  assert.equal(defaultReferLead('צחי'), 'צחי');
+  assert.equal(defaultReferLead('רועי'), 'רועי');
+});
+
+test('defaultReferLead falls back to first option for unknown/blank house lead', () => {
+  assert.equal(defaultReferLead(''), 'רמי');
+  assert.equal(defaultReferLead('מישהו אחר'), 'רמי');
+  assert.equal(defaultReferLead(undefined), 'רמי');
 });

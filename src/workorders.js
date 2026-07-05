@@ -14,6 +14,15 @@
 //
 // Pure JS (no Apps Script, no DOM) so node:test verifies it. Code.gs/workorders.html mirror it.
 
+// Internal leads pickable when referring a request on the dashboard. Default = the house's lead.
+export const ASSIGN_LEADS = ['רמי', 'צחי', 'רועי'];
+
+/** Which lead the refer dropdown should default to: the house's own lead if it's one of the
+ *  pickable three, otherwise the first option (רמי). Never returns something unpickable. */
+export function defaultReferLead(houseLead) {
+  return ASSIGN_LEADS.indexOf(houseLead) !== -1 ? houseLead : ASSIGN_LEADS[0];
+}
+
 export const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
 const STATUS_APPROVED = 'מאושר';
 const FINDING_PHYSICAL_DEFECT = 'physical_defect';
