@@ -121,7 +121,7 @@ function writeAuditEntry(requestId, fromStatus, toStatus, by, note) {
 var STAFF_WRITE_ACTIONS_ = [
   'approve', 'reject', 'defer', 'assign', 'markExternal', 'assignBatch',
   'setStatus', 'createInspection', 'addFinding', 'confirmFinding',
-  'deleteRequest', 'editRequest',
+  'deleteRequest', 'editRequest', 'setExecution',
 ];
 
 function writeRequiresToken_(action) {
@@ -202,6 +202,7 @@ function doPost(e) {
     case 'markExternal':  return handleMarkExternal_(body.payload || {});
     case 'assignBatch':   return handleAssignBatch_(body.payload || {});
     case 'setStatus':     return handleSetStatus_(body.payload || {});
+    case 'setExecution':  return handleSetExecution_(body.payload || {});
     case 'createInspection': return handleCreateInspection_(body.payload || {});
     case 'addFinding':       return handleAddFinding_(body.payload || {});
     case 'confirmFinding':   return handleConfirmFinding_(body.payload || {});
@@ -388,12 +389,20 @@ function handleAssign_(p) {
   var req = getRequestById(p.id);
   if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
   // Approved → in progress (no separate "assigned" status, §5). Assignment sets the lead.
-  if (!canTransition_(req.status, ST.IN_PROGRESS)) {
-    return jsonOut_({ ok: false, error: 'Can only assign an approved request' });
+  // Also allow RE-assigning the lead on a task already בביצוע (the "הפניה לביצוע" tab lets Roy
+  // change רמי/צחי/רועי on a live task) — no status change in that case.
+  var reassigningInProgress = (req.status === ST.IN_PROGRESS);
+  if (!reassigningInProgress && !canTransition_(req.status, ST.IN_PROGRESS)) {
+    return jsonOut_({ ok: false, error: 'Can only assign an approved or in-progress request' });
   }
-  updateRequest_(p.id,
-    { status: ST.IN_PROGRESS, assigned_to: p.assigned_to, assignment_type: p.assignment_type || '', trade: p.trade || '' },
-    req.status, ST.IN_PROGRESS, p.by, 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : ''));
+  var fields = { assigned_to: p.assigned_to };
+  if (p.assignment_type != null) fields.assignment_type = p.assignment_type;
+  if (p.trade != null) fields.trade = p.trade;
+  if (!reassigningInProgress) fields.status = ST.IN_PROGRESS;
+  var note = reassigningInProgress
+    ? 'הופנה מחדש ל-' + p.assigned_to
+    : 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : '');
+  updateRequest_(p.id, fields, req.status, fields.status || req.status, p.by, note);
   return jsonOut_({ ok: true });
 }
 
@@ -452,6 +461,35 @@ function handleSetStatus_(p) {
   }
   updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
   return jsonOut_({ ok: true });
+}
+
+// Execution status set from the /workorders "סטטוס ביצוע" tab. Values: בוצע / לא בוצע / אחר.
+// A task stays LIVE until marked בוצע. לא בוצע and אחר are recorded but keep the task open.
+// בוצע additionally completes the request (בביצוע → הושלם) so it leaves every worklist.
+var VALID_EXECUTION_ = ['בוצע', 'לא בוצע', 'אחר'];
+
+function handleSetExecution_(p) {
+  if (!p.id || !p.by || p.value == null) return jsonOut_({ ok: false, error: 'Missing id, by, or value' });
+  if (VALID_EXECUTION_.indexOf(p.value) === -1) return jsonOut_({ ok: false, error: 'Invalid execution value' });
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+
+  if (p.value === 'בוצע') {
+    // Mark done → complete the request too. Requires it be בביצוע (the only state that → הושלם).
+    if (!canTransition_(req.status, ST.COMPLETED)) {
+      return jsonOut_({ ok: false, error: 'ניתן לסמן בוצע רק למשימה בביצוע' });
+    }
+    updateRequest_(p.id,
+      { execution_status: 'בוצע', status: ST.COMPLETED, completed_at: new Date().toISOString() },
+      req.status, ST.COMPLETED, p.by, 'סומן כבוצע');
+    return jsonOut_({ ok: true, completed: true });
+  }
+
+  // לא בוצע / אחר → record only; status unchanged, task stays live.
+  updateRequest_(p.id,
+    { execution_status: p.value },
+    req.status, req.status, p.by, 'סטטוס ביצוע: ' + p.value);
+  return jsonOut_({ ok: true, completed: false });
 }
 
 // ===== Inspections module (increment 4, §13) =====

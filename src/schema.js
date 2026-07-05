@@ -30,6 +30,7 @@ export const HEADERS = {
     'completed_at',
     'actual_cost',
     'completion_notes',
+    'execution_status',    // סטטוס ביצוע: '' / בוצע / לא בוצע / אחר. בוצע also completes the request.
   ],
 
   // Self-owned house list (NOT fed from Dashboard). §4.
@@ -93,6 +94,23 @@ export const CATEGORY = {
   REPAIR: 'תיקון',
   REPLACEMENT: 'החלפה',
 };
+
+// Execution status set on the /workorders "סטטוס ביצוע" tab. A task stays LIVE (in the worklist)
+// until it is marked בוצע — לא בוצע and אחר keep it live. בוצע also moves the request to הושלם.
+export const EXECUTION_STATUS = {
+  NONE: '',
+  DONE: 'בוצע',
+  NOT_DONE: 'לא בוצע',
+  OTHER: 'אחר',
+};
+// The three pickable values (NONE is the unset default, not offered as a button).
+export const EXECUTION_STATUS_CHOICES = [
+  EXECUTION_STATUS.DONE, EXECUTION_STATUS.NOT_DONE, EXECUTION_STATUS.OTHER,
+];
+
+// Internal leads Roy can refer a task to on the "הפניה לביצוע" tab (per-task dropdown).
+// רועי included so Roy can take a task himself; external work stays on the בעלי מקצוע tab.
+export const ASSIGNABLE_LEADS = ['רמי', 'צחי', 'רועי'];
 
 export const CLUSTERS = { SHARON: 'sharon', CAESAREA: 'caesarea', NORTH: 'north' };
 export const HOUSE_STATUS = { OPEN: 'open', PRE_OPENING: 'pre-opening' };

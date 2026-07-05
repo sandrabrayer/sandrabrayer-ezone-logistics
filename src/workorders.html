@@ -50,6 +50,20 @@
     .u.normal { background: #d7f2ee; color: #0f766e; }
     .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
     .empty { color: var(--muted); }
+    /* interactive per-task rows (הפניה לביצוע / סטטוס ביצוע tabs) */
+    .task-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid #eef1f1; }
+    .task-row:last-child { border-bottom: none; }
+    .task-main { flex: 1 1 240px; min-width: 200px; }
+    .task-house { font-weight: 800; color: #0f766e; }
+    .task-sel { font-family: inherit; font-size: .9rem; color: #1a1a1a; background: #fff; border: 1.5px solid #cbd5d3; border-radius: 8px; padding: 7px 10px; min-width: 130px; }
+    .task-sel:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.15); }
+    .exec-btns { display: inline-flex; gap: 6px; }
+    .exec-btn { font-family: inherit; font-weight: 700; font-size: .85rem; padding: 7px 13px; border-radius: 8px; border: 1.5px solid #cbd5d3; background: #fff; color: #1a1a1a; }
+    .exec-btn.sel-done { background: #0f766e; color: #fff; border-color: #0f766e; }
+    .exec-btn.sel-notdone { background: #e0584a; color: #fff; border-color: #e0584a; }
+    .exec-btn.sel-other { background: #e0a23a; color: #1a1a1a; border-color: #e0a23a; }
+    .save-flash { font-size: .8rem; font-weight: 700; color: #0f766e; }
+    @media print { .task-sel, .exec-btns, .save-flash { display: none !important; } }
     .actions-bar { display: flex; gap: 10px; margin: 14px 0 6px; }
     .loading { color: var(--muted); }
     .nav { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -119,12 +133,12 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">לוח בקרה</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/workorders" class="active">משימות שבועיות</a></nav>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/workorders" class="active">משימות שבועיות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
-    <h1>משימות שבועיות לאחראי תחזוקה</h1>
-    <p class="sub">ריכוז חכם של כל מה שפתוח לכל אחראי — מקובץ לפי בית, לפי דחיפות. מוכן להדפסה ושליחה.</p>
+    <h1>משימות שבועיות</h1>
+    <p class="sub">הפניה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
 
     <div class="lead-tabs" id="leadTabs"></div>
     <div class="actions-bar">
@@ -135,15 +149,27 @@
 
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
-    const LEADS = ['רמי', 'צחי'];
+    const LEADS = ['רמי', 'צחי', 'רועי'];       // pickable internal leads (הפניה לביצוע dropdown)
+    const REFER_TAB = 'הפניה לביצוע';
     const EXTERNAL_TAB = 'בעלי מקצוע';
-    const TABS = [...LEADS, EXTERNAL_TAB];
+    const EXEC_TAB = 'סטטוס ביצוע';
+    const TABS = [REFER_TAB, EXTERNAL_TAB, EXEC_TAB];
+    const EXEC_DONE = 'בוצע', EXEC_NOT_DONE = 'לא בוצע', EXEC_OTHER = 'אחר';
     const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
     let requests = [], findings = [], inspections = [], houses = [];
-    let activeLead = LEADS[0];
+    let activeLead = REFER_TAB;
+
+    // Staff-authenticated POST. Token was verified in staffGate() and kept in window.__STAFF_TOKEN__.
+    async function post(action, payload) {
+      const res = await fetch(EXEC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, token: window.__STAFF_TOKEN__ || '', payload }),
+      });
+      return res.json();
+    }
 
     function urgencyRank(u) { return Object.prototype.hasOwnProperty.call(URGENCY_RANK, u) ? URGENCY_RANK[u] : 3; }
-    function houseLeadMap() { const m = {}; houses.forEach(h => { if (h && h.name) m[h.name] = h.technician || ''; }); return m; }
 
     async function load() {
       try {
@@ -170,33 +196,6 @@
     }
     window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
 
-    // Collect this lead's open items (approved-unassigned requests + open inspection defects).
-    // A lead's weekly worklist = requests Roy REFERRED to them (assigned_to === lead) that are
-    // still open (not הושלם/סגור). Referred work lands here and carries forward until completed.
-    function collectLeadItems(lead) {
-      const DONE = ['הושלם', 'סגור'];
-      const items = [];
-      requests.forEach(r => {
-        if (!r || r.assigned_to !== lead) return;
-        if (DONE.indexOf(r.status) !== -1) return;
-        items.push({ source: 'request', house: r.house, title: r.description || r.id, urgency: r.urgency || 'רגיל', category: r.category || '', location: r.location_in_house || '', status: r.status });
-      });
-      return items;
-    }
-
-    // Group by house (bundle a trip), urgent items first within a house, hottest house on top.
-    function buildOrder(items) {
-      const byHouse = {};
-      items.forEach(it => { (byHouse[it.house] = byHouse[it.house] || []).push(it); });
-      const groups = Object.keys(byHouse).map(house => {
-        const list = byHouse[house].slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency));
-        const topRank = list.reduce((m, it) => Math.min(m, urgencyRank(it.urgency)), 99);
-        return { house, topRank, items: list };
-      });
-      groups.sort((a, b) => (a.topRank - b.topRank) || a.house.localeCompare(b.house, 'he'));
-      return groups;
-    }
-
     function uPill(u) {
       const cls = u === 'חירום' ? 'emergency' : u === 'דחוף' ? 'urgent' : 'normal';
       return `<span class="u ${cls}">${esc(u)}</span>`;
@@ -204,23 +203,102 @@
 
     function render() {
       if (activeLead === EXTERNAL_TAB) return renderExternal();
-      const items = collectLeadItems(activeLead);
-      const groups = buildOrder(items);
+      if (activeLead === EXEC_TAB) return renderExecution();
+      return renderRefer();
+    }
+
+    // A live task = referred to a lead (assigned_to set), not done (not הושלם/סגור) and not marked בוצע.
+    const DONE_STATUSES = ['הושלם', 'סגור'];
+    function isLive(r) {
+      if (!r || !r.assigned_to) return false;
+      if (DONE_STATUSES.indexOf(r.status) !== -1) return false;
+      return r.execution_status !== EXEC_DONE;
+    }
+    function liveReferred() {
+      return requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r))
+        .slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || String(a.house).localeCompare(String(b.house), 'he'));
+    }
+
+    // ── Tab: הפניה לביצוע — per-task lead dropdown (רמי / צחי / רועי), saved to the sheet. ──
+    function renderRefer() {
+      const items = liveReferred();
       const today = new Date().toLocaleDateString('he-IL');
       if (items.length === 0) {
-        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — ${esc(activeLead)}</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות עבור ${esc(activeLead)} ✓</p></div>`;
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>הפניה לביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
         return;
       }
-      const houseBlocks = groups.map(g => {
-        const lis = g.items.map(it => `<li>${it.location ? '<b>' + esc(it.location) + ':</b> ' : ''}${esc(it.title)} ${uPill(it.urgency)}${it.category ? ' <span class="u normal">' + esc(it.category) + '</span>' : ''}</li>`).join('');
-        return `<div class="order-house"><div class="order-house-name">${esc(g.house)} <span class="count-badge">${g.items.length} משימות</span></div><ul>${lis}</ul></div>`;
+      const rows = items.map(r => {
+        const opts = LEADS.map(l => `<option value="${esc(l)}"${l === r.assigned_to ? ' selected' : ''}>${esc(l)}</option>`).join('');
+        return `<div class="task-row">
+          <div class="task-main"><span class="task-house">${esc(r.house)}</span> · ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}</div>
+          <label style="color:#555;font-size:.82rem">אחראי:</label>
+          <select class="task-sel" onchange="reassign('${esc(r.id)}', this.value, this)">${opts}</select>
+          <span class="save-flash" id="flash-${esc(r.id)}"></span>
+        </div>`;
       }).join('');
       document.getElementById('out').innerHTML = `<div class="order-doc">
-        <h2>משימות שבועיות — ${esc(activeLead)}</h2>
-        <div class="head-meta">הופק: ${today} · סה"כ ${items.length} משימות ב-${groups.length} בתים · מקובץ לפי בית ולפי דחיפות</div>
-        ${houseBlocks}
+        <h2>הפניה לביצוע</h2>
+        <div class="head-meta">הופק: ${today} · ${items.length} משימות פתוחות · בחר/י אחראי לכל משימה</div>
+        ${rows}
       </div>`;
     }
+
+    window.reassign = async (id, lead, el) => {
+      el.disabled = true;
+      const flash = document.getElementById('flash-' + id);
+      try {
+        const j = await post('assign', { id, by: window.__STAFF_TOKEN__ || 'staff', assigned_to: lead, assignment_type: 'internal' });
+        if (j && j.ok) {
+          const r = requests.find(x => x && String(x.id) === String(id));
+          if (r) { r.assigned_to = lead; r.assignment_type = 'internal'; if (r.status === 'מאושר') r.status = 'בביצוע'; }
+          if (flash) { flash.textContent = 'נשמר ✓'; setTimeout(() => { if (flash) flash.textContent = ''; }, 1500); }
+        } else if (flash) { flash.textContent = 'שגיאה'; }
+      } catch (e) { if (flash) flash.textContent = 'שגיאה'; }
+      el.disabled = false;
+    };
+
+    // ── Tab: סטטוס ביצוע — per-task בוצע / לא בוצע / אחר. Task stays live until בוצע. ──
+    function renderExecution() {
+      const items = liveReferred();
+      const today = new Date().toLocaleDateString('he-IL');
+      if (items.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>סטטוס ביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
+        return;
+      }
+      const rows = items.map(r => {
+        const cur = r.execution_status || '';
+        const btn = (val, cls, label) => `<button class="exec-btn ${cur === val ? cls : ''}" onclick="setExec('${esc(r.id)}','${esc(val)}',this)">${esc(label)}</button>`;
+        return `<div class="task-row">
+          <div class="task-main"><span class="task-house">${esc(r.house)}</span> · ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')} <span class="u normal">${esc(r.assigned_to)}</span></div>
+          <div class="exec-btns">
+            ${btn(EXEC_DONE, 'sel-done', 'בוצע')}
+            ${btn(EXEC_NOT_DONE, 'sel-notdone', 'לא בוצע')}
+            ${btn(EXEC_OTHER, 'sel-other', 'אחר')}
+          </div>
+          <span class="save-flash" id="eflash-${esc(r.id)}"></span>
+        </div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>סטטוס ביצוע</h2>
+        <div class="head-meta">הופק: ${today} · ${items.length} משימות פתוחות · משימה נשארת פתוחה עד שמסומנת "בוצע"</div>
+        ${rows}
+      </div>`;
+    }
+
+    window.setExec = async (id, value, el) => {
+      const flash = document.getElementById('eflash-' + id);
+      Array.from(el.parentNode.children).forEach(b => b.disabled = true);
+      try {
+        const j = await post('setExecution', { id, by: window.__STAFF_TOKEN__ || 'staff', value });
+        if (j && j.ok) {
+          const r = requests.find(x => x && String(x.id) === String(id));
+          if (r) { r.execution_status = value; if (j.completed) r.status = 'הושלם'; }
+          if (flash) { flash.textContent = 'נשמר ✓'; }
+          if (value === EXEC_DONE) { setTimeout(render, 600); }  // completed → drops off the live list
+          else render();
+        } else if (flash) { flash.textContent = (j && j.error) || 'שגיאה'; Array.from(el.parentNode.children).forEach(b => b.disabled = false); }
+      } catch (e) { if (flash) flash.textContent = 'שגיאה'; Array.from(el.parentNode.children).forEach(b => b.disabled = false); }
+    };
 
     // External work for בעלי מקצוע: live worklist of external-trade requests that aren't done yet —
     // both waiting-to-refer (ממתין) and already-in-progress (בביצוע) so the worklist stays live.
