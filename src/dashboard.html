@@ -162,7 +162,7 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">דשבורד</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/workorders">משימות שבועיות</a></nav>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
@@ -225,9 +225,9 @@
         </div>
       </div>
       <div class="modal-field" id="referInternalField">
-        <label>אחראי הבית</label>
-        <div id="referLeadName" style="font-weight:800;color:var(--accent-2);padding:8px 0"></div>
-        <div class="modal-hint">נקבע אוטומטית לפי הבית של הדרישה</div>
+        <label for="referLeadSel">אחראי הבית</label>
+        <select id="referLeadSel"></select>
+        <div class="modal-hint" id="referLeadHint">ברירת המחדל היא אחראי הבית — ניתן לשנות לרמי / צחי / רועי</div>
       </div>
       <div class="modal-field" id="referExternalField" style="display:none">
         <label for="referTrade">בעל מקצוע</label>
@@ -567,6 +567,11 @@
     const referTradeSel = document.getElementById('referTrade');
     TRADES.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; referTradeSel.appendChild(o); });
 
+    // Internal leads pickable when referring a request (default = the house's own lead).
+    const ASSIGN_LEADS = ['רמי', 'צחי', 'רועי'];
+    const referLeadSel = document.getElementById('referLeadSel');
+    ASSIGN_LEADS.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; referLeadSel.appendChild(o); });
+
     function leadForHouse(house) {
       const h = allHouses.find(x => x.name === house);
       return h ? (h.technician || '') : '';
@@ -586,7 +591,12 @@
       _referId = id;
       const r = allRequests.find(x => String(x.id) === String(id));
       const lead = r ? leadForHouse(r.house) : '';
-      document.getElementById('referLeadName').textContent = lead ? (lead + ' · ' + (r ? r.house : '')) : 'לא הוגדר אחראי לבית זה';
+      // Default the picker to the house's own lead; fall back to first option if unknown.
+      referLeadSel.value = ASSIGN_LEADS.indexOf(lead) !== -1 ? lead : ASSIGN_LEADS[0];
+      const hint = document.getElementById('referLeadHint');
+      if (hint) hint.textContent = lead
+        ? ('אחראי הבית ' + (r ? r.house : '') + ': ' + lead + ' — ניתן לשנות')
+        : 'לא הוגדר אחראי לבית זה — בחר/י ידנית';
       document.querySelector('input[name="referType"][value="internal"]').checked = true;
       document.getElementById('referMarkOnly').checked = false;
       syncReferFields();
@@ -597,9 +607,8 @@
       if (!_referId) { referModal.classList.remove('open'); return; }
       const id = _referId;
       if (referType() === 'internal') {
-        const r = allRequests.find(x => String(x.id) === String(id));
-        const lead = r ? leadForHouse(r.house) : '';
-        if (!lead) { showMsg('err', 'לא הוגדר אחראי לבית זה.'); return; }
+        const lead = referLeadSel.value;
+        if (!lead) { showMsg('err', 'בחר/י אחראי.'); return; }
         post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' });
       } else {
         const trade = referTradeSel.value;

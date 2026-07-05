@@ -3,6 +3,42 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 24] — Dashboard refer picker (רמי/צחי/רועי) + nav rename & reorder
+
+**What:** Two changes, both frontend-only (no schema, no Apps Script, no backend action changes).
+
+1. **Dashboard "הפנה לביצוע" now lets you pick the lead.** In the refer modal on `src/dashboard.html`,
+   the internal-referral path previously showed the house's lead as fixed text ("נקבע אוטומטית לפי
+   הבית"). It is now a **רמי / צחי / רועי** dropdown that **defaults to the house's own lead** and can
+   be overridden. `רועי` is newly selectable. The chosen value is sent through the existing `assign`
+   action (`assignment_type: 'internal'`) — no backend change needed. The external (בעל מקצוע) path
+   is unchanged.
+
+2. **Nav: renamed "משימות שבועיות" → "משימות פתוחות וסטטוס" and moved it next to "דשבורד".**
+   New order on all pages: דרישה חדשה · דשבורד · **משימות פתוחות וסטטוס** · בקרה · דוחות. The link is
+   now also present on `index.html` (previously missing there), so the nav is identical across all
+   five pages. The `/workorders` route is unchanged; the page `<h1>` updated to match the new name.
+
+**Frontend**
+- `src/dashboard.html`: replaced the fixed `#referLeadName` text node with a `#referLeadSel`
+  dropdown; added `ASSIGN_LEADS` + populate; `doAssign` defaults the select to the house lead
+  (falls back to first option) and updates the hint; `referConfirm` reads the selected lead.
+- All five HTML pages: nav rebuilt (rename + reorder + add-to-index). `workorders.html` h1 updated.
+
+**Logic (`src/workorders.js`)** — new pure helper `defaultReferLead(houseLead)` (+ `ASSIGN_LEADS`):
+returns the house lead when it's one of the three, else the first option — never an unpickable value.
+
+**Security** — no new endpoints or tokens; reuses the token-gated `assign` action. The picker is
+whitelist-bound to the three named leads client-side, and `handleAssign_` already validates server-side.
+
+**Tests** — `node --test`: **124 pass / 0 fail** (was 121). Added `ASSIGN_LEADS` + `defaultReferLead`
+default/fallback tests to `workorders.test.js`.
+
+**Deploy** — frontend-only: merge the PR and let Railway redeploy. **No `setupSheet()` and no Apps
+Script redeploy needed** for this increment.
+
+---
+
 ## [Increment 23] — Workorders interactivity: nav rename, per-task lead dropdown, execution-status tab
 
 **What:** Three UI/logic changes to the `/workorders` page plus a supporting schema/backend addition.
