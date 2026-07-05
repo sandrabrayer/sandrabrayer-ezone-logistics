@@ -18,6 +18,38 @@ export const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
 const STATUS_APPROVED = 'מאושר';
 const FINDING_PHYSICAL_DEFECT = 'physical_defect';
 
+// Execution status vocabulary (mirrors src/schema.js EXECUTION_STATUS). Kept inline so this
+// pure module stays dependency-free for node:test. A task is "done" ONLY when marked בוצע.
+export const EXEC_DONE = 'בוצע';
+export const EXEC_NOT_DONE = 'לא בוצע';
+export const EXEC_OTHER = 'אחר';
+export const EXEC_CHOICES = [EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER];
+const DONE_STATUSES = ['הושלם', 'סגור'];
+
+/** True if a request is still live on the worklist: not completed/closed AND not marked בוצע.
+ *  לא בוצע and אחר both keep the task live — only בוצע closes it. */
+export function isExecutionLive(r) {
+  if (!r) return false;
+  if (DONE_STATUSES.indexOf(r.status) !== -1) return false;
+  return r.execution_status !== EXEC_DONE;
+}
+
+/** Build the "סטטוס ביצוע" list: every live, referred (assigned) request, grouped by house.
+ *  Only in-progress/assigned work appears — items Roy has actually referred to a lead. */
+export function collectExecutionItems({ requests }) {
+  const items = [];
+  (requests || []).forEach((r) => {
+    if (!r || !r.assigned_to) return;      // only referred work has an execution status
+    if (!isExecutionLive(r)) return;        // drops בוצע and הושלם/סגור
+    items.push({
+      id: r.id, house: r.house, title: r.description || r.id,
+      urgency: r.urgency || 'רגיל', assigned_to: r.assigned_to,
+      execution_status: r.execution_status || '', status: r.status, _ref: r,
+    });
+  });
+  return items;
+}
+
 /** Numeric urgency rank; unknown/blank sorts last (after רגיל). Lower = more urgent. */
 export function urgencyRank(urgency) {
   return Object.prototype.hasOwnProperty.call(URGENCY_RANK, urgency) ? URGENCY_RANK[urgency] : 3;

@@ -17,6 +17,7 @@ var HEADERS = {
     'urgency', 'estimated_cost', 'attachment_url', 'status', 'approval_required', 'approved_by',
     'approved_at', 'rejection_reason', 'deferred_until', 'assigned_to', 'assignment_type',
     'trade', 'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
+    'execution_status',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],

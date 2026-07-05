@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   urgencyRank, houseLeadMap, collectLeadItems, buildWeeklyOrder, weeklyOrderForLead,
+  isExecutionLive, collectExecutionItems, EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER, EXEC_CHOICES,
 } from '../src/workorders.js';
 
 const HOUSES = [
@@ -82,4 +83,44 @@ test('weeklyOrderForLead end-to-end: only referred-to-lead, bundled by house', (
   assert.equal(out.groups.length, 1);   // both in רעננה → one house bundle
   assert.equal(out.groups[0].house, 'רעננה');
   assert.equal(out.groups[0].items.length, 2);
+});
+
+// ── Execution status ("סטטוס ביצוע" tab): a task stays live until marked בוצע. ──
+
+test('EXEC_CHOICES are exactly בוצע / לא בוצע / אחר', () => {
+  assert.deepEqual(EXEC_CHOICES, [EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER]);
+  assert.deepEqual(EXEC_CHOICES, ['בוצע', 'לא בוצע', 'אחר']);
+});
+
+test('isExecutionLive: only בוצע (or completed/closed) drops a task off the list', () => {
+  const base = { assigned_to: 'רמי', status: 'בביצוע' };
+  assert.equal(isExecutionLive({ ...base, execution_status: '' }), true);          // fresh → live
+  assert.equal(isExecutionLive({ ...base, execution_status: 'לא בוצע' }), true);    // not done → stays live
+  assert.equal(isExecutionLive({ ...base, execution_status: 'אחר' }), true);        // other → stays live
+  assert.equal(isExecutionLive({ ...base, execution_status: 'בוצע' }), false);      // done → gone
+  assert.equal(isExecutionLive({ ...base, status: 'הושלם' }), false);               // completed → gone
+  assert.equal(isExecutionLive({ ...base, status: 'סגור' }), false);                // closed → gone
+  assert.equal(isExecutionLive(null), false);                                        // guard
+});
+
+test('collectExecutionItems returns live referred tasks, drops בוצע and completed', () => {
+  const requests = [
+    { id: 'R1', assigned_to: 'רמי', status: 'בביצוע', execution_status: '', house: 'רעננה', urgency: 'רגיל', description: 'ברז' },
+    { id: 'R2', assigned_to: 'צחי', status: 'בביצוע', execution_status: 'לא בוצע', house: 'ריהאב', urgency: 'דחוף', description: 'דלת' },
+    { id: 'R3', assigned_to: 'רועי', status: 'בביצוע', execution_status: 'אחר', house: 'רעננה', urgency: 'רגיל', description: 'אחר' },
+    { id: 'R4', assigned_to: 'רמי', status: 'בביצוע', execution_status: 'בוצע', house: 'רעננה', urgency: 'רגיל', description: 'בוצע' },
+    { id: 'R5', assigned_to: 'צחי', status: 'הושלם', execution_status: 'בוצע', house: 'ריהאב', urgency: 'רגיל', description: 'הושלם' },
+    { id: 'R6', assigned_to: '', status: 'מאושר', execution_status: '', house: 'רעננה', urgency: 'רגיל', description: 'לא הופנה' },
+  ];
+  const items = collectExecutionItems({ requests });
+  assert.deepEqual(items.map((i) => i.id).sort(), ['R1', 'R2', 'R3']); // בוצע + הושלם + unassigned excluded
+});
+
+test('collectExecutionItems carries assigned_to and execution_status through', () => {
+  const requests = [
+    { id: 'R1', assigned_to: 'רועי', status: 'בביצוע', execution_status: 'אחר', house: 'רעננה', urgency: 'רגיל', description: 'x' },
+  ];
+  const [it] = collectExecutionItems({ requests });
+  assert.equal(it.assigned_to, 'רועי');
+  assert.equal(it.execution_status, 'אחר');
 });

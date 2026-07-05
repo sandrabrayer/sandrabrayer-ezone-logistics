@@ -3,6 +3,61 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 23] — Workorders interactivity: nav rename, per-task lead dropdown, execution-status tab
+
+**What:** Three UI/logic changes to the `/workorders` page plus a supporting schema/backend addition.
+
+1. **Nav rename** — the "לוח בקרה" nav link is now "דשבורד" across all five pages
+   (`index`, `dashboard`, `inspection`, `reports`, `workorders`); the dashboard page `<title>`
+   and `<h1>` updated to match. Label-only; the route stays `/dashboard`.
+
+2. **הפניה לביצוע tab (per-task lead dropdown)** — the workorders page's first tab is now an
+   interactive list of every live referred task, each with a **רמי / צחי / רועי** dropdown. Changing
+   it calls the existing `assign` action and persists `assigned_to` to the sheet. `רועי` is newly
+   selectable so Roy can take a task himself. `handleAssign_` now also permits **re-assigning the
+   lead on a task already בביצוע** (previously only מאושר→בביצוע), with no status change on reassign.
+   The בעלי מקצוע (external) tab is unchanged.
+
+3. **סטטוס ביצוע tab (new)** — a new third tab where each live task has three buttons:
+   **בוצע / לא בוצע / אחר**. A task stays live on the worklist until marked **בוצע**; לא בוצע and
+   אחר are recorded but keep the task open (per Sandra's rule "the task remains live till done is
+   checked"). **בוצע** additionally completes the request (בביצוע→הושלם) so it drops off every
+   worklist. Backed by a new `setExecution` action.
+
+**Schema (APPEND-ONLY)**
+- New `execution_status` column appended as the **last** Requests column (24th) in both
+  `src/schema.js` and `apps-script/setup.gs`. Values: `'' / בוצע / לא בוצע / אחר`. Appended only —
+  no existing column reordered (the sheet is position-mapped). New vocab exports:
+  `EXECUTION_STATUS`, `EXECUTION_STATUS_CHOICES`, `ASSIGNABLE_LEADS`.
+- ⚠️ **Deploy step:** re-run `setupSheet()` after deploying so the new column header is provisioned
+  on the live sheet; then paste `Code.gs` and deploy a **New Version of the existing deployment**.
+
+**Backend (`apps-script/Code.gs`)**
+- Added `setExecution` to the staff-write whitelist and the `doPost` switch (token-gated like all writes).
+- `handleSetExecution_`: validates value ∈ {בוצע, לא בוצע, אחר}; בוצע requires the task be בביצוע
+  and completes it (writes `completed_at`, status→הושלם); לא בוצע/אחר record only. Every change is
+  audit-logged.
+- `handleAssign_`: allows reassignment within בביצוע; only sets status when coming from מאושר.
+
+**Frontend (`src/workorders.html`)**
+- Tab bar changed from per-lead (רמי/צחי/בעלי מקצוע) to three named views
+  (הפניה לביצוע/בעלי מקצוע/סטטוס ביצוע). Removed now-dead inline `collectLeadItems`/`buildOrder`/
+  `houseLeadMap`. Added token-authenticated `post()` helper; per-task controls hidden in print CSS.
+
+**Logic (`src/workorders.js`)** — new pure, tested helpers: `isExecutionLive` (only בוצע or
+completed/closed drops a task), `collectExecutionItems`, and `EXEC_*` constants.
+
+**Security**
+- Both new/changed write paths (`setExecution`, `assign` reassignment) require the staff token,
+  verified server-side against `STAFF_WRITE_TOKEN` — the page never holds the secret. Input values
+  are whitelist-validated. No secrets added to repo/Railway.
+
+**Tests** — `node --test`: **121 pass / 0 fail** (was 88). Added execution-status vocab + column-order
+assertions to `schema.test.js` (Requests now 24 cols, execution_status asserted last) and
+live/collect tests to `workorders.test.js`.
+
+---
+
 ## [Docs] — EZONE-ECOSYSTEM-STATUS.md at repo root
 
 **What:** Added `EZONE-ECOSYSTEM-STATUS.md` at the repo root — the July 4 merged cross-app ecosystem status doc, distributed to the root of all six E-Zone repos so every project/session starts from the true state. Docs-only; no code, schema, or Apps Script change.
