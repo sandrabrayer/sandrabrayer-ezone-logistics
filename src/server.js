@@ -23,11 +23,44 @@ loadEnv();
 const PORT = process.env.PORT || 3000;
 const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
 
+const PUBLIC = join(__dirname, 'public');
+
+// Explicit PWA static routes. The server is hand-rolled (no framework / static
+// middleware), so every asset the manifest and service worker reference must be
+// mapped here. sw.js is served from the ROOT path so its scope covers "/" and
+// "/dashboard"; a service worker only controls pages at or below its own URL.
+const STATIC = {
+  '/manifest.json':        { file: 'manifest.json',        type: 'application/manifest+json; charset=utf-8' },
+  '/sw.js':                { file: 'sw.js',                type: 'application/javascript; charset=utf-8' },
+  '/icon-v1-192.png':      { file: 'icon-v1-192.png',      type: 'image/png' },
+  '/icon-v1-512.png':      { file: 'icon-v1-512.png',      type: 'image/png' },
+  '/icon-v1-maskable.png': { file: 'icon-v1-maskable.png', type: 'image/png' },
+};
+
 const server = createServer((req, res) => {
+  const path = req.url.split('?')[0];
+
+  // PWA static assets (served verbatim from src/public, no HTML injection).
+  const asset = STATIC[path];
+  if (asset) {
+    let body;
+    try {
+      body = readFileSync(join(PUBLIC, asset.file));
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      return res.end('Not found');
+    }
+    // sw.js must never be cached by the browser, or a new worker is missed.
+    const headers = { 'Content-Type': asset.type };
+    if (asset.file === 'sw.js') headers['Cache-Control'] = 'no-cache';
+    res.writeHead(200, headers);
+    return res.end(body);
+  }
+
   const inject = `<script>window.__EXEC_URL__=${JSON.stringify(EXEC_URL)};</script>`;
   let file = null;
-  if (req.url === '/' || req.url === '/index.html') file = 'index.html';
-  else if (req.url === '/dashboard' || req.url === '/dashboard.html') file = 'dashboard.html';
+  if (path === '/' || path === '/index.html') file = 'index.html';
+  else if (path === '/dashboard' || path === '/dashboard.html') file = 'dashboard.html';
 
   if (file) {
     let html = readFileSync(join(__dirname, file), 'utf8');

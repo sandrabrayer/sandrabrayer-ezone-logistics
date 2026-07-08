@@ -2,8 +2,14 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>EZone לוגיסטיקה — לוח בקרה</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#071410" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Logistics" />
+  <link rel="apple-touch-icon" href="/icon-v1-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -265,6 +271,16 @@
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
     load();
+  </script>
+  <script>
+    // PWA: register the service worker so the app is installable to the home
+    // screen and opens standalone. Guarded — a failed registration must never
+    // break the page.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
   </script>
 </body>
 </html>
