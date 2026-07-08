@@ -26,12 +26,34 @@ const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
 // it and the Apps Script backend verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
 // Property. Only the (non-secret) /exec URL is exposed to the page.
 
+const PUBLIC = join(__dirname, 'public');
+
 // PWA head links injected into every served HTML page (kept here, DRY, like __EXEC_URL__).
+// These point at the brand PWA layer under src/public/ (dark #071410, teal #00bfa5 glyph): the
+// installable manifest, apple-touch icon and standalone metas. The 32px favicon stays the shared
+// src/icons/ asset. Injecting server-side means every page (index, dashboard, inspection, reports,
+// workorders) is wired identically with no per-file duplication.
 const HEAD_INJECT =
-  '<link rel="manifest" href="/manifest.webmanifest">'
-  + '<meta name="theme-color" content="#161a20">'
+  '<link rel="manifest" href="/manifest.json">'
+  + '<meta name="theme-color" content="#071410">'
   + '<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32-v1.png">'
-  + '<link rel="apple-touch-icon" href="/icons/apple-touch-icon-v1.png">';
+  + '<link rel="apple-touch-icon" href="/icon-v1-192.png">'
+  + '<meta name="apple-mobile-web-app-capable" content="yes">'
+  + '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+  + '<meta name="apple-mobile-web-app-title" content="Logistics">';
+
+// The brand PWA static assets (src/public/): the installable manifest, the service worker and the
+// recoloured teal icons the manifest/apple-touch links reference. The server is hand-rolled (no
+// framework / static middleware), so each must be mapped explicitly. sw.js is served from the ROOT
+// path so its scope covers "/" and "/dashboard"; a service worker only controls pages at or below
+// its own URL.
+const PUBLIC_ASSETS = {
+  '/manifest.json':        { file: 'manifest.json',        type: 'application/manifest+json; charset=utf-8' },
+  '/sw.js':                { file: 'sw.js',                type: 'application/javascript; charset=utf-8', noCache: true },
+  '/icon-v1-192.png':      { file: 'icon-v1-192.png',      type: 'image/png' },
+  '/icon-v1-512.png':      { file: 'icon-v1-512.png',      type: 'image/png' },
+  '/icon-v1-maskable.png': { file: 'icon-v1-maskable.png', type: 'image/png' },
+};
 
 const HTML_ROUTES = {
   '/': 'index.html', '/index.html': 'index.html',
@@ -64,7 +86,23 @@ function sendPng(res, name, cacheControl) {
 export function requestHandler(req, res) {
   const path = (req.url || '/').split('?')[0];
 
-  // Static: PWA manifest.
+  // Static: brand PWA assets (manifest.json, sw.js, recoloured teal icons) from src/public/.
+  const asset = PUBLIC_ASSETS[path];
+  if (asset) {
+    let body;
+    try {
+      body = readFileSync(join(PUBLIC, asset.file));
+    } catch (e) {
+      return notFound(res);
+    }
+    const headers = { 'Content-Type': asset.type };
+    // sw.js must never be cached by the browser, or a newly-deployed worker is missed.
+    if (asset.noCache) headers['Cache-Control'] = 'no-cache';
+    res.writeHead(200, headers);
+    return res.end(body);
+  }
+
+  // Static: PWA manifest (legacy .webmanifest variant, still served for compatibility).
   if (path === '/manifest.webmanifest') {
     try {
       const body = readFileSync(join(__dirname, 'manifest.webmanifest'));

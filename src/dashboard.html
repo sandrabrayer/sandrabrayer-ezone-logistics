@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>EZone לוגיסטיקה — דשבורד</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -636,6 +636,16 @@
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
     staffGate().then(load);
+  </script>
+  <script>
+    // PWA: register the service worker so the app is installable to the home
+    // screen and opens standalone. Guarded — a failed registration must never
+    // break the page.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
   </script>
 </body>
 </html>
