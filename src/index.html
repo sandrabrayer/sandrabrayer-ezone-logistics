@@ -4,12 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>EZone לוגיסטיקה — דרישה חדשה</title>
-  <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#071410" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Logistics" />
-  <link rel="apple-touch-icon" href="/icon-v1-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -121,11 +115,48 @@
     .msg.ok { display: block; background: rgba(52,194,126,.12); color: #5fd79b; border: 1px solid rgba(52,194,126,.35); }
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .loading { color: var(--muted); font-size: .85rem; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+      /* step 2 — intake form polish */
+      /* seg groups stay 3-across but wrap gracefully on ~320px instead of squeezing */
+      .seg { flex-wrap: wrap; }
+      .seg label { min-width: 0; }
+      /* tighter side padding lets the card breathe wider */
+      .wrap { padding-inline: 14px; }
+      /* primary action gets a taller touch target than the 40px default */
+      button.submit { min-height: 48px; }
+      /* larger toast text for readability */
+      .msg { font-size: 1rem; }
+    }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <div class="tab">לוגיסטיקה</div>
+    <nav class="nav"><a href="/" class="active">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
@@ -139,10 +170,12 @@
         <label for="created_by">מגיש הבקשה</label>
         <select id="created_by" required>
           <option value="" disabled selected>בחר/י…</option>
-          <option value="רמי">רמי</option>
-          <option value="צחי">צחי</option>
+          <option value="שירה">שירה (קיסריה עפרוני)</option>
+          <option value="יעקב">יעקב (ריהאב)</option>
+          <option value="אורן">אורן (רעננה)</option>
+          <option value="אביב">אביב (רמות השבים)</option>
+          <option value="צחי">צחי (צפון)</option>
           <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
         </select>
       </div>
 
@@ -182,12 +215,6 @@
         <input id="location_in_house" type="text" placeholder="למשל: מטבח, חדר 4, גינה" />
       </div>
 
-      <div class="field">
-        <label for="estimated_cost">עלות משוערת (₪) <span class="opt">(לא חובה — אפשר להשאיר ריק)</span></label>
-        <input id="estimated_cost" type="number" min="0" step="any" inputmode="decimal" placeholder="אם לא ידוע, השאר/י ריק" />
-        <div class="hint">אם העלות לא ידועה, אפשר להשאיר ריק — הבקשה תטופל בהתאם.</div>
-      </div>
-
       <button class="submit" id="submitBtn">שליחת דרישה</button>
       <div class="msg" id="msg"></div>
     </div>
@@ -220,6 +247,24 @@
       }
     }
 
+    // Each coordinator handles one house → auto-fill + lock. צחי (north) and רועי file anywhere.
+    const COORDINATOR_HOUSE = {
+      'שירה': 'קיסריה עפרוני',
+      'יעקב': 'ריהאב',
+      'אורן': 'רעננה',
+      'אביב': 'רמות השבים',
+    };
+    function onSubmitterChange() {
+      const who = document.getElementById('created_by').value;
+      const house = COORDINATOR_HOUSE[who];
+      if (house) {
+        houseSelect.value = house;
+        houseSelect.disabled = true;   // locked to their house
+      } else {
+        houseSelect.disabled = false;  // צחי / רועי choose freely
+      }
+    }
+
     function showMsg(kind, text) {
       msg.className = 'msg ' + kind;
       msg.textContent = text;
@@ -238,7 +283,6 @@
         urgency: checked('urgency'),
         description: document.getElementById('description').value.trim(),
         location_in_house: document.getElementById('location_in_house').value.trim(),
-        estimated_cost: document.getElementById('estimated_cost').value, // '' if blank — valid
       };
 
       // Client-side mirror of server validation (server is the source of truth).
@@ -267,14 +311,15 @@
 
     function resetForm() {
       document.getElementById('created_by').selectedIndex = 0;
+      houseSelect.disabled = false;
       houseSelect.selectedIndex = 0;
       document.querySelectorAll('input[name="category"]').forEach(r => r.checked = false);
       document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
       document.getElementById('description').value = '';
       document.getElementById('location_in_house').value = '';
-      document.getElementById('estimated_cost').value = '';
     }
 
+    document.getElementById('created_by').addEventListener('change', onSubmitterChange);
     btn.addEventListener('click', submit);
     loadHouses();
   </script>

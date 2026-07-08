@@ -3,20 +3,36 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HEADERS, SHEET_NAMES, SEED_HOUSES, SEED_TECHNICIANS, SEED_CONFIG, CLUSTERS,
+  EXECUTION_STATUS, EXECUTION_STATUS_CHOICES, ASSIGNABLE_LEADS,
 } from '../src/schema.js';
 
-test('all five sheets are defined', () => {
-  assert.deepEqual(SHEET_NAMES.sort(), ['AuditLog', 'Config', 'Houses', 'Requests', 'Technicians']);
+test('all sheets are defined (core + inspection module)', () => {
+  assert.deepEqual(SHEET_NAMES.sort(), [
+    'AuditLog', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
+    'Inspections', 'Requests', 'Technicians',
+  ]);
 });
 
-test('Requests sheet has all 22 spec columns in order', () => {
-  assert.equal(HEADERS.Requests.length, 22);
+test('Requests sheet has all 24 columns in order (execution_status appended last)', () => {
+  assert.equal(HEADERS.Requests.length, 24);
   assert.equal(HEADERS.Requests[0], 'id');
+  // execution_status is APPEND-ONLY at the end (never reorder mid-array — position-mapped sheet).
+  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'execution_status');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
-    'deferred_until', 'assigned_to', 'assignment_type', 'batch_id']) {
+    'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
+});
+
+test('execution-status vocabulary: three pickable values + empty default', () => {
+  assert.deepEqual(EXECUTION_STATUS_CHOICES, ['בוצע', 'לא בוצע', 'אחר']);
+  assert.equal(EXECUTION_STATUS.NONE, '');
+  assert.equal(EXECUTION_STATUS.DONE, 'בוצע');
+});
+
+test('assignable leads on הפניה לביצוע are רמי / צחי / רועי', () => {
+  assert.deepEqual(ASSIGNABLE_LEADS, ['רמי', 'צחי', 'רועי']);
 });
 
 test('Houses has exactly the six seed houses', () => {

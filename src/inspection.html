@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — בקרה</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --go: #14b8a6; --go-press: #0f9488; --amber: #e0a23a; --red: #e0584a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.5; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; background: var(--accent-grad); }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .card { background: var(--card); background: linear-gradient(var(--card), var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 20px 18px; margin-bottom: 18px; box-shadow: 0 0 30px -10px var(--glow); }
+    label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 6px; }
+    .opt { color: var(--muted); font-weight: 500; font-size: .8rem; }
+    input, select, textarea { width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 11px 12px; margin-bottom: 14px; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+    select option { background: #161a20; color: var(--ink); }
+    textarea { resize: vertical; min-height: 56px; }
+    h2 { font-size: 1.1rem; font-weight: 800; margin: 4px 0 12px; }
+    .domain-title { color: var(--accent-2); }
+    .check { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .check .t { flex: 1; }
+    .check .rating { width: auto; min-width: 120px; margin: 0; flex-shrink: 0; padding: 7px 10px; font-size: .9rem; }
+    .check .rating[data-low="1"] { border-color: var(--amber); color: var(--amber); }
+    .finding-row { background: #161a20; border: 1px solid var(--card-line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .finding-row .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg { display: flex; gap: 8px; margin-bottom: 8px; }
+    .seg label { flex: 1; text-align: center; margin: 0; padding: 9px 6px; border: 1.5px solid var(--card-line); border-radius: 9px; cursor: pointer; font-weight: 500; background: #12151a; }
+    .seg input { position: absolute; opacity: 0; }
+    .seg label:has(input:checked) { border-color: var(--accent-2); background: var(--accent-soft); color: var(--accent-2); }
+    .seg label:has(input[value="physical_defect"]:checked) { border-color: var(--amber); background: rgba(224,162,58,.12); color: var(--amber); }
+    button { font-family: inherit; cursor: pointer; }
+    button.add { background: transparent; color: var(--accent-2); border: 1.5px dashed var(--card-line); border-radius: 10px; padding: 10px; width: 100%; font-weight: 700; margin-bottom: 8px; }
+    button.primary { width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 800; color: #06201c; background: var(--go); border: none; border-radius: 12px; box-shadow: 0 0 22px -6px var(--glow); }
+    button.primary:hover { background: var(--go-press); }
+    button.primary:disabled { opacity: .5; }
+    .msg { padding: 11px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 14px; display: none; }
+    .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
+    .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
+    .pill { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. On success the verified token is kept in sessionStorage for this session and sent
+    // as `token` on every staff write. Fail-closed: wrong/blank code, cancel, or no server token →
+    // back to the request form. Invoked below via staffGate().then(init) so no data loads first.
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; } // already verified this session
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break; // cancelled
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        // wrong code or network error → re-prompt
+      }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+      return new Promise(function () {}); // never resolves → nothing after the gate runs
+    }
+  </script>
+
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inspection" class="active">בקרה</a><a href="/reports">דוחות</a></nav>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>בקרת בית</h1>
+    <p class="sub">צ'קליסט בדיקה — ליקוי פיזי יסומן ויישלח לאישור רועי לפתיחת דרישת תיקון</p>
+
+    <div class="msg" id="msg"></div>
+
+    <div class="card">
+      <label>מבקר/ת</label>
+      <select id="inspector">
+        <option value="אולגה" selected>אולגה</option>
+        <option value="רועי">רועי</option>
+      </select>
+      <label>בית</label>
+      <select id="house"><option value="" disabled selected>טוען…</option></select>
+      <label>תאריך בקרה</label>
+      <input id="inspection_date" type="date" />
+      <label>תאריך בקרה חוזרת <span class="opt">(ברירת מחדל: חודש קדימה — ניתן לשינוי)</span></label>
+      <input id="reinspect_date" type="date" />
+      <label>שעת התחלה <span class="opt">(לא חובה)</span></label>
+      <input id="start_time" type="time" />
+      <label>מספר מטופלים בבית בזמן הבקרה</label>
+      <select id="patient_count">
+        <option value="" selected>בחר/י…</option>
+      </select>
+      <label>נוכחים מהצוות <span class="opt">(לא חובה)</span></label>
+      <input id="staff_present" type="text" placeholder="למשל: אורן רכזת + מדריכה, עידו מנהל" />
+      <label>נוכחות מנקה / שעות <span class="opt">(לא חובה)</span></label>
+      <input id="cleaner_present" type="text" placeholder="למשל: מנקה 8:00–13:00" />
+    </div>
+
+    <div id="checklistIntro"></div>
+    <div id="domains"></div>
+
+    <div class="card">
+      <label>הערות כלליות <span class="opt">(לא חובה)</span></label>
+      <textarea id="general_notes" placeholder="רקע כללי, התרשמות..."></textarea>
+      <button class="primary" id="submitBtn">שמירת בקרה</button>
+    </div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const DOMAIN_LABELS = { treatment: 'תחום הטיפול', cleanliness: 'ניקיון ואחזקה', kitchen: 'מטבחים ומחסנים' };
+    let checklist = [];
+    const msg = document.getElementById('msg');
+
+    function showMsg(k, t) { msg.className = 'msg ' + k; msg.textContent = t; msg.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+
+    async function init() {
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById('inspection_date').value = today;
+      // Default re-inspection one month out; recompute whenever the inspection date changes,
+      // unless the user has manually overridden it.
+      const reEl = document.getElementById('reinspect_date');
+      const dateEl = document.getElementById('inspection_date');
+      let reTouched = false;
+      reEl.addEventListener('input', () => { reTouched = true; });
+      function syncReinspect() {
+        if (reTouched) return;
+        reEl.value = addMonths(dateEl.value, 1);
+      }
+      dateEl.addEventListener('change', syncReinspect);
+      syncReinspect();
+      // patient count menu 0–40
+      const pc = document.getElementById('patient_count');
+      for (let i = 0; i <= 40; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = String(i); pc.appendChild(o); }
+      try {
+        const [houseRes, clRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=checklist').then(r => r.json()),
+        ]);
+        const hs = document.getElementById('house');
+        hs.innerHTML = '<option value="" disabled selected>בחר/י בית…</option>';
+        (houseRes.data || []).forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; hs.appendChild(o); });
+        checklist = (clRes.data || []).filter(c => String(c.active).toUpperCase() === 'TRUE');
+        renderDomains();
+      } catch (e) { showMsg('err', 'שגיאה בטעינה. רענן/י ונסה/י שוב.'); }
+    }
+
+    function renderDomains() {
+      const byDomain = {};
+      checklist.forEach(c => { (byDomain[c.domain] = byDomain[c.domain] || []).push(c); });
+
+      // Up-front summary: what this inspection covers, by domain, so Roy & Olga see it before starting.
+      const introBlocks = Object.keys(DOMAIN_LABELS).map(d => {
+        const items = byDomain[d] || [];
+        return `<div style="margin-bottom:10px"><div class="domain-title" style="font-weight:800;margin-bottom:4px">${DOMAIN_LABELS[d]} <span class="pill">${items.length}</span></div><ul style="margin:0;padding-inline-start:20px;color:var(--muted);font-size:.88rem">${items.map(c => `<li>${esc(c.item_text)}</li>`).join('')}</ul></div>`;
+      }).join('');
+      document.getElementById('checklistIntro').innerHTML = `<div class="card"><h2 class="domain-title" style="margin-top:0">מה נבדק בבקרה</h2><p class="sub" style="margin:0 0 12px">צ'קליסט קבוע — לכל פריט תינתן דרגה 1–5. דירוג 1–2 נחשב ליקוי ויופנה אוטומטית לרועי לפתיחת דרישה.</p>${introBlocks}</div>`;
+
+      document.getElementById('domains').innerHTML = Object.keys(DOMAIN_LABELS).map(d => {
+        const items = byDomain[d] || [];
+        return `<div class="card" data-domain="${d}">
+          <h2 class="domain-title">${DOMAIN_LABELS[d]}</h2>
+          ${items.map((c, i) => `<div class="check"><div class="t"><label for="${d}_${i}" style="font-weight:500;margin:0">${esc(c.item_text)}</label></div><select class="rating" id="${d}_${i}" data-rating="${d}" data-item="${esc(c.item_text)}"><option value="">—</option><option value="5">5 · מצוין</option><option value="4">4 · טוב</option><option value="3">3 · סביר</option><option value="2">2 · טעון שיפור</option><option value="1">1 · ליקוי</option></select></div>`).join('')}
+          <textarea data-summary="${d}" placeholder="סיכום תחום ${DOMAIN_LABELS[d]} (לא חובה)" style="margin-top:12px"></textarea>
+          <div class="findings" data-findings="${d}"></div>
+          <button class="add" onclick="addFinding('${d}')">+ הוסף ממצא ב${DOMAIN_LABELS[d]}</button>
+        </div>`;
+      }).join('');
+    }
+
+    window.addFinding = (domain) => {
+      const box = document.querySelector(`[data-findings="${domain}"]`);
+      const idx = box.children.length;
+      const row = document.createElement('div');
+      row.className = 'finding-row';
+      row.innerHTML = `
+        <div class="seg">
+          <label><input type="radio" name="${domain}_t_${idx}" value="process_note" checked>הערה/תהליך</label>
+          <label><input type="radio" name="${domain}_t_${idx}" value="physical_defect">ליקוי פיזי</label>
+        </div>
+        <input type="text" placeholder="תיאור הממצא" data-f="text">
+        <div class="grid">
+          <input type="text" placeholder="מיקום בבית (לא חובה)" data-f="location">
+          <select data-f="category"><option value="">קטגוריה (לליקוי)</option><option value="תיקון">תיקון</option><option value="החלפה">החלפה</option></select>
+        </div>`;
+      box.appendChild(row);
+    };
+
+    function collectFindings() {
+      const out = [];
+      document.querySelectorAll('[data-findings]').forEach(box => {
+        const domain = box.getAttribute('data-findings');
+        Array.from(box.children).forEach((row, idx) => {
+          const text = row.querySelector('[data-f="text"]').value.trim();
+          if (!text) return;
+          const type = row.querySelector(`input[name="${domain}_t_${idx}"]:checked`)?.value || 'process_note';
+          out.push({
+            domain, finding_text: text, finding_type: type,
+            location_in_house: row.querySelector('[data-f="location"]').value.trim(),
+            suggested_category: row.querySelector('[data-f="category"]').value,
+          });
+        });
+      });
+      return out;
+    }
+
+    // Collect every checklist rating the inspector set. Returns [{domain, item, score}].
+    function collectRatings() {
+      const out = [];
+      document.querySelectorAll('select.rating').forEach(sel => {
+        const score = sel.value;
+        if (score === '') return; // not rated → skip
+        out.push({ domain: sel.getAttribute('data-rating'), item: sel.getAttribute('data-item'), score: Number(score) });
+      });
+      return out;
+    }
+
+    // A checklist item scored 1 or 2 is a ליקוי → becomes a physical-defect finding (Roy referral),
+    // exactly like a manually-added defect. 3–5 are just recorded as ratings.
+    function ratingsToFindings(ratings) {
+      return ratings.filter(r => r.score <= 2).map(r => ({
+        domain: r.domain,
+        finding_text: r.item + ' — דירוג ' + r.score + ' (ליקוי מצ\'קליסט)',
+        finding_type: 'physical_defect',
+        location_in_house: '',
+        suggested_category: 'תיקון',
+        _from_rating: true,
+      }));
+    }
+
+    async function submit() {
+      const inspector = document.getElementById('inspector').value;
+      const house = document.getElementById('house').value;
+      const date = document.getElementById('inspection_date').value;
+      if (!house) return showMsg('err', 'יש לבחור בית.');
+      if (!date) return showMsg('err', 'יש לבחור תאריך.');
+
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true; btn.textContent = 'שומר…';
+      try {
+        const sum = (d) => document.querySelector(`[data-summary="${d}"]`)?.value.trim() || '';
+        const ratings = collectRatings();
+        const insRes = await post('createInspection', {
+          house, inspector, inspection_date: date,
+          start_time: document.getElementById('start_time').value,
+          patient_count: document.getElementById('patient_count').value,
+          staff_present: document.getElementById('staff_present').value.trim(),
+          cleaner_present: document.getElementById('cleaner_present').value.trim(),
+          domain_treatment_summary: sum('treatment'),
+          domain_cleanliness_summary: sum('cleanliness'),
+          domain_kitchen_summary: sum('kitchen'),
+          general_notes: document.getElementById('general_notes').value.trim(),
+          reinspect_date: document.getElementById('reinspect_date').value,
+          ratings, // [{domain,item,score}] — stored for the report; 1–2 also become findings below
+        });
+        const inspectionId = insRes.id;
+        // Manual findings + auto-findings from low (1–2) checklist ratings.
+        const findings = collectFindings().concat(ratingsToFindings(ratings));
+        let defects = 0;
+        for (const f of findings) {
+          await post('addFinding', { inspection_id: inspectionId, ...f });
+          if (f.finding_type === 'physical_defect') defects++;
+        }
+        showMsg('ok', `הבקרה נשמרה (${findings.length} ממצאים, ${defects} ליקויים פיזיים ממתינים לאישור רועי).`);
+        btn.textContent = 'נשמר ✓';
+      } catch (e) {
+        showMsg('err', 'השמירה נכשלה: ' + e.message);
+        btn.disabled = false; btn.textContent = 'שמירת בקרה';
+      }
+    }
+
+    async function post(action, payload) {
+      const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: window.__STAFF_TOKEN__ || '' }) });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'שגיאה');
+      return json;
+    }
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+    // Add N months to YYYY-MM-DD, clamping end-of-month overflow. Mirrors nextInspectionDate in inspection.js.
+    function addMonths(isoDate, months) {
+      if (!isoDate) return '';
+      const m = String(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return '';
+      const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+      const t = new Date(Date.UTC(y, mo + Number(months), 1));
+      const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+      t.setUTCDate(Math.min(d, last));
+      return t.toISOString().slice(0, 10);
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', submit);
+    staffGate().then(init);
+  </script>
+</body>
+</html>

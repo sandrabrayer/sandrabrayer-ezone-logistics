@@ -3,13 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>EZone לוגיסטיקה — לוח בקרה</title>
-  <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#071410" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Logistics" />
-  <link rel="apple-touch-icon" href="/icon-v1-192.png" />
+  <title>EZone לוגיסטיקה — דשבורד</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -47,6 +41,17 @@
     select { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
     select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
     select option { background: #161a20; color: var(--ink); }
+    /* attention / notifications panel */
+    .attention { background: linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 16px 18px; margin-bottom: 20px; box-shadow: 0 0 30px -12px var(--glow); }
+    .attention h2 { font-size: 1.05rem; font-weight: 800; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+    .attention .who { color: var(--muted); font-weight: 500; font-size: .85rem; }
+    .attn-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: .92rem; }
+    .attn-item:last-child { border-bottom: none; }
+    .attn-badge { font-size: .78rem; font-weight: 800; min-width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; padding: 0 7px; }
+    .attn-badge.act { background: var(--accent-soft); color: var(--accent-2); }
+    .attn-badge.warn { background: rgba(224,162,58,.16); color: var(--amber); }
+    .attn-badge.due { background: rgba(224,88,74,.16); color: var(--red); }
+    .attn-none { color: var(--muted); font-size: .9rem; }
     /* summary counters */
     .counters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
     .counter { flex: 1; min-width: 130px; background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 14px 16px; }
@@ -83,22 +88,91 @@
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .loading { color: var(--muted); }
     @media (max-width: 600px) { .counter { min-width: 45%; } }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    /* Deferral modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: var(--card); border: 1px solid var(--card-line); border-radius: 14px; padding: 22px; width: 320px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal-title { margin: 0 0 16px; font-size: 1.1rem; color: var(--accent-2); }
+    .modal-field { margin-bottom: 14px; }
+    .modal-field label { display: block; font-weight: 700; font-size: .85rem; margin-bottom: 6px; }
+    .modal-field input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 10px 12px; }
+    .modal-field input:focus { outline: none; border-color: var(--accent-2); }
+    .modal-hint { color: var(--muted); font-size: .78rem; margin-top: 5px; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+    }
   </style>
 </head>
 <body>
+  <script>
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. On success the verified token is kept in sessionStorage for this session and sent
+    // as `token` on every staff write. Fail-closed: wrong/blank code, cancel, or no server token →
+    // back to the request form. Invoked below via staffGate().then(load) so no data loads first.
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; } // already verified this session
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break; // cancelled
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        // wrong code or network error → re-prompt
+      }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+      return new Promise(function () {}); // never resolves → nothing after the gate runs
+    }
+  </script>
+
   <div class="topbar">
-    <div class="tab">לוח בקרה</div>
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
   </div>
   <div class="wrap">
-    <h1>לוח בקרה</h1>
-    <p class="sub">ניהול דרישות — אישור, הקצאה ומעקב</p>
+    <h1>דשבורד</h1>
+    <p class="sub">ניהול דרישות — אישור, הפניה ומעקב</p>
 
     <div class="controls">
       <span><label>משתמש:</label>
         <select id="who">
           <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
         </select>
       </span>
       <span><label>בית:</label>
@@ -114,8 +188,57 @@
     </div>
 
     <div class="msg" id="msg"></div>
+    <div id="attention"></div>
     <div class="counters" id="counters"></div>
     <div id="board"><p class="loading">טוען דרישות…</p></div>
+  </div>
+
+  <!-- Deferral modal: calendar date picker + reminder-days-before -->
+  <div class="modal-overlay" id="deferModal">
+    <div class="modal-box">
+      <h3 class="modal-title">דחיית דרישה לתאריך</h3>
+      <div class="modal-field">
+        <label for="deferDate">דחה עד תאריך</label>
+        <input type="date" id="deferDate" />
+      </div>
+      <div class="modal-field">
+        <label for="deferRemind">תזכורת כמה ימים לפני</label>
+        <input type="number" id="deferRemind" min="0" step="1" value="7" />
+        <div class="modal-hint" id="remindHint"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="act" id="deferCancel">ביטול</button>
+        <button class="act go" id="deferConfirm">אישור דחייה</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Refer / assign modal: internal lead (auto by house) vs external trade -->
+  <div class="modal-overlay" id="referModal">
+    <div class="modal-box">
+      <h3 class="modal-title">להפנות דרישה</h3>
+      <div class="modal-field">
+        <label>סוג הפנייה</label>
+        <div class="seg" style="display:flex;gap:8px">
+          <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="internal" checked style="position:absolute;opacity:0">אחראי בית (פנימי)</label>
+          <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="external" style="position:absolute;opacity:0">בעל מקצוע (חיצוני)</label>
+        </div>
+      </div>
+      <div class="modal-field" id="referInternalField">
+        <label for="referLeadSel">אחראי הבית</label>
+        <select id="referLeadSel"></select>
+        <div class="modal-hint" id="referLeadHint">ברירת המחדל היא אחראי הבית — ניתן לשנות לרמי / צחי / רועי</div>
+      </div>
+      <div class="modal-field" id="referExternalField" style="display:none">
+        <label for="referTrade">בעל מקצוע</label>
+        <select id="referTrade"></select>
+        <label style="margin-top:10px"><input type="checkbox" id="referMarkOnly" style="width:auto;margin-inline-end:6px">רק לסמן לאיגום עתידי (לא להפנות עכשיו)</label>
+      </div>
+      <div class="modal-actions">
+        <button class="act" id="referCancel">ביטול</button>
+        <button class="act go" id="referConfirm">הפנה</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -129,15 +252,18 @@
     };
     // Display order of status groups on the board.
     const GROUPS = [
-      { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING] },
-      { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED] },
-      { key: 'approved', title: 'מאושר — להקצאה', statuses: [ST.APPROVED] },
-      { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS] },
-      { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED] },
-      { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED] },
+      { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING], color: '#2dd4bf' },
+      { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED], color: '#e0a23a' },
+      { key: 'approved', title: 'מאושר — להפניה לביצוע', statuses: [ST.APPROVED], color: '#60a5fa' },
+      { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS], color: '#34d399' },
+      { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED], color: '#8b93a0' },
+      { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED], color: '#e0584a' },
     ];
 
     let allRequests = [];
+    let allFindings = [];
+    let allInspections = [];
+    let allHouses = [];
     let threshold = THRESHOLD_DEFAULT;
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
@@ -147,33 +273,35 @@
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
+    // Roy approves alone — emergencies auto-approve; no Sandra tier.
     function whoApproves(cost, urgency) {
       if (urgency === 'חירום') return 'auto';
-      if (blank(cost)) return 'roy';
-      return Number(cost) > threshold ? 'sandra' : 'roy';
+      return 'roy';
     }
     function canApprove(approver, cost, urgency) {
-      const w = whoApproves(cost, urgency);
-      if (w === 'auto') return true;
-      if (w === 'sandra') return approver === 'sandra';
-      return approver === 'רועי' || approver === 'sandra';
+      return true;
     }
 
     async function load() {
       try {
-        const [reqRes, cfgRes, houseRes] = await Promise.all([
+        const [reqRes, cfgRes, houseRes, findRes, insRes] = await Promise.all([
           fetch(EXEC_URL + '?action=requests').then(r => r.json()),
           fetch(EXEC_URL + '?action=config').then(r => r.json()),
           fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
         ]);
         if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
         allRequests = reqRes.data || [];
+        allFindings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        allInspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
         if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
           threshold = Number(cfgRes.data.approval_threshold);
         }
         if (houseRes.ok) {
+          allHouses = houseRes.data || [];
           const sel = document.getElementById('filterHouse');
-          houseRes.data.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+          allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
         }
         render();
       } catch (e) {
@@ -190,6 +318,7 @@
 
     function render() {
       const reqs = filtered();
+      renderAttention(reqs);
       // counters
       const open = reqs.filter(r => ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(r.status)).length;
       const pending = reqs.filter(r => [ST.REQUEST, ST.PENDING].includes(r.status)).length;
@@ -199,11 +328,139 @@
         ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
 
-      board.innerHTML = GROUPS.map(g => {
+      board.innerHTML = renderBatchSuggestions() + renderHouseConsolidation() + (GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
         if (items.length === 0) return '';
-        return `<div class="group"><h2><span class="dot"></span>${g.title} <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(card).join('')}</div>`;
-      }).join('') || '<p class="empty">אין דרישות להצגה.</p>';
+        return `<div class="group"><h2><span class="dot" style="background:${g.color}"></span><span style="border-inline-start:4px solid ${g.color};padding-inline-start:8px">${g.title}</span> <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(r => card(r, g.color)).join('')}</div>`;
+      }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
+    }
+
+    // Per-user attention panel: what the logged-in user needs to act on.
+    function renderAttention(reqs) {
+      const u = who();
+      const today = new Date().toISOString().slice(0, 10);
+      const items = [];
+
+      // Requests awaiting THIS user's approval (by the §6 routing).
+      const awaiting = reqs.filter(r => {
+        if (![ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(r.status)) return false;
+        const w = whoApproves(r.estimated_cost, r.urgency);
+        if (w === 'auto') return false;
+        return w === 'sandra' ? u === 'sandra' : u === 'רועי';
+      });
+      if (awaiting.length) items.push(['act', awaiting.length, 'דרישות ממתינות לאישורך']);
+
+      // New requests (status דרישה) — Roy should act / route them.
+      if (u === 'רועי') {
+        const fresh = reqs.filter(r => r.status === ST.REQUEST);
+        if (fresh.length) items.push(['act', fresh.length, 'דרישות חדשות שהתקבלו']);
+      }
+
+      // Deferral reminders due today (or overdue).
+      const dueDefers = reqs.filter(r => r.status === ST.DEFERRED && r.deferred_until && r.deferred_until <= today);
+      if (dueDefers.length) items.push(['due', dueDefers.length, 'תזכורות דחייה שהגיע מועדן']);
+
+      // Pending inspection defects awaiting confirmation into a request (Roy acts).
+      if (u === 'רועי') {
+        const pendingDefects = allFindings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
+        if (pendingDefects.length) items.push(['warn', pendingDefects.length, 'ליקויים מבקרות לאישור לדרישה']);
+      }
+
+      document.getElementById('attention').innerHTML = `<div class="attention">
+        <h2>🔔 דורש את תשומת לבך <span class="who">— ${escapeHtml(u)}</span></h2>
+        ${items.length
+          ? items.map(([k, n, t]) => `<div class="attn-item"><span class="attn-badge ${k}">${n}</span>${t}</div>`).join('')
+          : '<div class="attn-none">אין פעולות הממתינות לך כרגע ✓</div>'}
+      </div>`;
+    }
+
+    // Clean Hebrew date (no ISO timestamp). Accepts "2026-06-13" or a full ISO string.
+    function fmtDate(v) {
+      if (!v) return '';
+      const s = String(v).slice(0, 10);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return escapeHtml(String(v));
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    }
+
+    // Per-house consolidation of open inspection defects (ליקויים פתוחים), de-duplicated by text,
+    // honoring the current house filter. This centralizes faults per house so the same broken
+    // item isn't opened twice. Each row links straight to opening a request.
+    // Smart batching: approved EXTERNAL requests sharing trade × cluster → suggest one visit.
+    // A request becomes batchable once Roy marks it external + a trade (status stays מאושר).
+    function renderBatchSuggestions() {
+      const cluster = {};
+      allHouses.forEach(h => { if (h && h.name) cluster[h.name] = h.cluster || ''; });
+      const groups = {};
+      allRequests.forEach(r => {
+        if (r.status !== ST.APPROVED || r.assignment_type !== 'external' || !r.trade || r.batch_id) return;
+        const cl = cluster[r.house] || '';
+        if (!cl) return;
+        const key = r.trade + '|' + cl;
+        (groups[key] = groups[key] || { trade: r.trade, cluster: cl, reqs: [] }).reqs.push(r);
+      });
+      const batches = Object.values(groups).filter(g => g.reqs.length >= 2)
+        .sort((a, b) => b.reqs.length - a.reqs.length);
+      if (batches.length === 0) return '';
+      const clusterHe = { sharon: 'שרון', caesarea: 'קיסריה', north: 'צפון' };
+      const blocks = batches.map(b => {
+        const ids = b.reqs.map(r => r.id);
+        const rows = b.reqs.map(r => `<div class="attn-item"><span>${escapeHtml(r.house)} · ${escapeHtml(r.description || r.id)}</span></div>`).join('');
+        return `<div style="margin-bottom:12px">
+          <div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(b.trade)} · ${clusterHe[b.cluster] || escapeHtml(b.cluster)} <span class="pill normal">${b.reqs.length} עבודות</span></div>
+          ${rows}
+          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)})'>הקצה כביקור מרוכז</button>
+        </div>`;
+      }).join('');
+      return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box">
+        <h2>🔗 הצעות לאיגום ביקורי טכנאי</h2>
+        <p class="attn-none" style="margin:0 0 10px">דרישות חיצוניות מאושרות מאותו מקצוע ואותו אשכול — כדאי לאחד לביקור אחד.</p>
+        ${blocks}
+      </div>`;
+    }
+    window.doAssignBatch = (ids, trade) => {
+      if (!confirm(`להקצות ${ids.length} עבודות כביקור מרוכז אחד (${trade})?`)) return;
+      post('assignBatch', { ids, by: who(), trade });
+    };
+
+    function renderHouseConsolidation() {
+      const houseFilter = document.getElementById('filterHouse').value;
+      const insById = {};
+      allInspections.forEach(i => { if (i && i.id != null) insById[String(i.id)] = i; });
+      const open = allFindings.filter(f =>
+        f.finding_type === 'physical_defect' && !f.linked_request_id);
+      if (open.length === 0) return '';
+
+      // group: house -> normalized text -> {text, location, category, count, ids}
+      const byHouse = {};
+      open.forEach(f => {
+        const ins = insById[String(f.inspection_id)];
+        const house = ins ? ins.house : '';
+        if (!house) return;
+        if (houseFilter && house !== houseFilter) return;
+        const key = String(f.finding_text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        const bucket = (byHouse[house] = byHouse[house] || {});
+        if (bucket[key]) { bucket[key].count++; bucket[key].ids.push(f.id); }
+        else bucket[key] = { text: f.finding_text, location: f.location_in_house || '', category: f.suggested_category || 'תיקון', count: 1, ids: [f.id] };
+      });
+      const houses = Object.keys(byHouse).sort((a, b) => a.localeCompare(b, 'he'));
+      if (houses.length === 0) return '';
+
+      const blocks = houses.map(house => {
+        const rows = Object.values(byHouse[house]).map(it => `
+          <div class="attn-item" style="justify-content:space-between">
+            <span>${it.location ? '<b>' + escapeHtml(it.location) + ':</b> ' : ''}${escapeHtml(it.text)}
+              <span class="pill urgent">${escapeHtml(it.category)}</span>${it.count > 1 ? ' <span class="pill normal">×' + it.count + '</span>' : ''}</span>
+            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}')">פתח דרישה</button>
+          </div>`).join('');
+        return `<div style="margin-bottom:14px"><div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(house)}</div>${rows}</div>`;
+      }).join('');
+
+      return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, linear-gradient(120deg,#e0a23a,#f0c674) border-box">
+        <h2>🛠 ריכוז ליקויים פתוחים לפי בית</h2>
+        <p class="attn-none" style="margin:0 0 10px">ממצאים מבקרות שטרם נפתחה להם דרישה — מקובצים לפי בית, ללא כפילויות.</p>
+        ${blocks}
+      </div>`;
     }
 
     function urgencyPill(u) {
@@ -212,16 +469,15 @@
       return '<span class="pill normal">רגיל</span>';
     }
 
-    function card(r) {
-      const cost = blank(r.estimated_cost) ? 'לא ידוע' : '₪' + r.estimated_cost;
+    function card(r, color) {
       const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
-      return `<div class="req">
+      return `<div class="req" style="border-inline-start:4px solid ${color || 'var(--card-line)'}">
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
-            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.assigned_to ? ' · אחראי: ' + escapeHtml(r.assigned_to) : ''}${r.deferred_until ? ' · נדחה ל-' + escapeHtml(r.deferred_until) : ''}</div>
+            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.deferred_until ? ' · נדחה ל-' + fmtDate(r.deferred_until) : ''}</div>
+            ${r.assigned_to ? `<div class="meta" style="color:var(--accent-2);font-weight:700;margin-top:4px">↩ הופנה ל: ${escapeHtml(r.assigned_to)}${r.assignment_type === 'external' ? ' (בעל מקצוע)' : ' (אחראי בית)'}${r.batch_id ? ' · 🔗 ביקור מרוכז' : ''}</div>` : (r.trade && r.assignment_type === 'external' ? `<div class="meta" style="color:var(--amber);font-weight:700;margin-top:4px">סומן ל: ${escapeHtml(r.trade)} — ממתין לאיגום</div>` : '')}
           </div>
-          <div class="cost">${cost}</div>
         </div>
         <div class="actions">${actionsFor(r)}</div>
       </div>`;
@@ -231,13 +487,11 @@
       const s = r.status, id = r.id;
       const btns = [];
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
-        const allowed = canApprove(who(), r.estimated_cost, r.urgency);
-        const needSandra = whoApproves(r.estimated_cost, r.urgency) === 'sandra';
-        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}')">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
-        btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
+        btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
+        btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
         btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
-        btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+        btns.push(`<button class="act go" onclick="doAssign('${id}')">הפנה לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
         btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
@@ -245,12 +499,19 @@
       } else {
         btns.push('<span class="empty">—</span>');
       }
+      // Edit only before approval; delete always available to Roy/Sandra.
+      if ([ST.REQUEST, ST.PENDING].includes(s)) {
+        btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
+      }
+      if (who() === 'רועי') {
+        btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
+      }
       return btns.join('');
     }
 
     async function post(action, payload) {
       try {
-        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
+        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: window.__STAFF_TOKEN__ || '' }) });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'שגיאה');
         showMsg('ok', 'בוצע.');
@@ -259,18 +520,122 @@
     }
 
     window.doApprove = (id) => post('approve', { id, by: who() });
-    window.doReject = (id) => { const reason = prompt('סיבת הדחייה:') || ''; post('reject', { id, by: who(), reason }); };
-    window.doDefer = (id) => { const d = prompt('דחה עד תאריך (YYYY-MM-DD):'); if (d) post('defer', { id, by: who(), deferred_until: d }); };
-    window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
+    window.doReject = (id) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }); };
+
+    // Deferral via calendar modal + reminder N days before (default 7).
+    let _deferId = null;
+    const deferModal = document.getElementById('deferModal');
+    const deferDate = document.getElementById('deferDate');
+    const deferRemind = document.getElementById('deferRemind');
+    const remindHint = document.getElementById('remindHint');
+
+    function reminderDate(deferUntil, daysBefore) {
+      if (!deferUntil) return '';
+      const d = new Date(deferUntil + 'T00:00:00');
+      if (isNaN(d.getTime())) return '';
+      d.setDate(d.getDate() - (Number(daysBefore) || 0));
+      return d.toISOString().slice(0, 10);
+    }
+    function updateRemindHint() {
+      const rd = reminderDate(deferDate.value, deferRemind.value);
+      remindHint.textContent = rd ? ('התזכורת תופיע ב-' + rd) : '';
+    }
+    deferDate.addEventListener('change', updateRemindHint);
+    deferRemind.addEventListener('input', updateRemindHint);
+
+    window.doDefer = (id) => {
+      _deferId = id;
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      deferDate.value = tomorrow.toISOString().slice(0, 10);
+      deferDate.min = new Date().toISOString().slice(0, 10);
+      deferRemind.value = 7;
+      updateRemindHint();
+      deferModal.classList.add('open');
+    };
+    document.getElementById('deferCancel').addEventListener('click', () => { deferModal.classList.remove('open'); _deferId = null; });
+    document.getElementById('deferConfirm').addEventListener('click', () => {
+      if (!_deferId || !deferDate.value) { deferModal.classList.remove('open'); return; }
+      const remind_days = Number(deferRemind.value) || 0;
+      post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) });
+      deferModal.classList.remove('open'); _deferId = null;
+    });
+    const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
+
+    // "הפנות ל" — modal: internal (lead auto-resolved from the request's house) or external (trade).
+    let _referId = null;
+    const referModal = document.getElementById('referModal');
+    const referTradeSel = document.getElementById('referTrade');
+    TRADES.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; referTradeSel.appendChild(o); });
+
+    // Internal leads pickable when referring a request (default = the house's own lead).
+    const ASSIGN_LEADS = ['רמי', 'צחי', 'רועי'];
+    const referLeadSel = document.getElementById('referLeadSel');
+    ASSIGN_LEADS.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; referLeadSel.appendChild(o); });
+
+    function leadForHouse(house) {
+      const h = allHouses.find(x => x.name === house);
+      return h ? (h.technician || '') : '';
+    }
+    function referType() {
+      const el = document.querySelector('input[name="referType"]:checked');
+      return el ? el.value : 'internal';
+    }
+    function syncReferFields() {
+      const ext = referType() === 'external';
+      document.getElementById('referExternalField').style.display = ext ? 'block' : 'none';
+      document.getElementById('referInternalField').style.display = ext ? 'none' : 'block';
+    }
+    document.querySelectorAll('input[name="referType"]').forEach(r => r.addEventListener('change', syncReferFields));
+
+    window.doAssign = (id) => {
+      _referId = id;
+      const r = allRequests.find(x => String(x.id) === String(id));
+      const lead = r ? leadForHouse(r.house) : '';
+      // Default the picker to the house's own lead; fall back to first option if unknown.
+      referLeadSel.value = ASSIGN_LEADS.indexOf(lead) !== -1 ? lead : ASSIGN_LEADS[0];
+      const hint = document.getElementById('referLeadHint');
+      if (hint) hint.textContent = lead
+        ? ('אחראי הבית ' + (r ? r.house : '') + ': ' + lead + ' — ניתן לשנות')
+        : 'לא הוגדר אחראי לבית זה — בחר/י ידנית';
+      document.querySelector('input[name="referType"][value="internal"]').checked = true;
+      document.getElementById('referMarkOnly').checked = false;
+      syncReferFields();
+      referModal.classList.add('open');
+    };
+    document.getElementById('referCancel').addEventListener('click', () => { referModal.classList.remove('open'); _referId = null; });
+    document.getElementById('referConfirm').addEventListener('click', () => {
+      if (!_referId) { referModal.classList.remove('open'); return; }
+      const id = _referId;
+      if (referType() === 'internal') {
+        const lead = referLeadSel.value;
+        if (!lead) { showMsg('err', 'בחר/י אחראי.'); return; }
+        post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' });
+      } else {
+        const trade = referTradeSel.value;
+        if (document.getElementById('referMarkOnly').checked) post('markExternal', { id, by: who(), trade });
+        else post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade });
+      }
+      referModal.classList.remove('open'); _referId = null;
+    });
     window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
     window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
+    window.doConfirmFinding = (fid) => post('confirmFinding', { finding_id: fid, by: who() });
+    window.doDelete = (id) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }); };
+    window.doEdit = (id) => {
+      const r = allRequests.find(x => String(x.id) === String(id));
+      if (!r) return;
+      const description = prompt('תיאור:', r.description || ''); if (description === null) return;
+      const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
+      const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
+      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost });
+    };
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
     document.getElementById('who').addEventListener('change', render);
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
-    load();
+    staffGate().then(load);
   </script>
   <script>
     // PWA: register the service worker so the app is installable to the home

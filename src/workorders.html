@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — משימות שבועיות</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --go: #14b8a6; --go-press: #0f9488; --amber: #e0a23a; --red: #e0584a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+    .controls label { font-size: .8rem; color: var(--muted); margin-inline-end: 4px; }
+    select { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
+    select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+    select option { background: #161a20; color: var(--ink); }
+    button { font-family: inherit; cursor: pointer; }
+    .btn { font-size: .9rem; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .btn.go { background: var(--accent-grad); color: #06201c; border: none; }
+    .lead-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .lead-tab { font-weight: 800; padding: 9px 20px; border-radius: 999px; border: 1.5px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .lead-tab.active { background: var(--accent-grad); color: #14171c; border-color: transparent; }
+    .order-doc { background: #fff; color: #1a1a1a; border-radius: 12px; padding: 30px 34px; margin-top: 6px; }
+    .order-doc h2 { font-size: 1.4rem; margin: 0 0 4px; color: #0f766e; }
+    .order-doc .head-meta { color: #555; font-size: .9rem; margin-bottom: 18px; }
+    .order-house { border: 1px solid #e3e8e8; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+    .order-house-name { font-weight: 800; font-size: 1.1rem; color: #0f766e; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .order-house ul { margin: 0; padding-inline-start: 20px; }
+    .order-house li { margin: 6px 0; }
+    .u { font-size: .72rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+    .u.emergency { background: #fde2de; color: #b3402f; }
+    .u.urgent { background: #fbeccd; color: #9a6a12; }
+    .u.normal { background: #d7f2ee; color: #0f766e; }
+    .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
+    .empty { color: var(--muted); }
+    /* interactive per-task rows (הפניה לביצוע / סטטוס ביצוע tabs) */
+    .task-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid #eef1f1; }
+    .task-row:last-child { border-bottom: none; }
+    .task-main { flex: 1 1 240px; min-width: 200px; }
+    .task-house { font-weight: 800; color: #0f766e; }
+    .task-sel { font-family: inherit; font-size: .9rem; color: #1a1a1a; background: #fff; border: 1.5px solid #cbd5d3; border-radius: 8px; padding: 7px 10px; min-width: 130px; }
+    .task-sel:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.15); }
+    .exec-btns { display: inline-flex; gap: 6px; }
+    .exec-btn { font-family: inherit; font-weight: 700; font-size: .85rem; padding: 7px 13px; border-radius: 8px; border: 1.5px solid #cbd5d3; background: #fff; color: #1a1a1a; }
+    .exec-btn.sel-done { background: #0f766e; color: #fff; border-color: #0f766e; }
+    .exec-btn.sel-notdone { background: #e0584a; color: #fff; border-color: #e0584a; }
+    .exec-btn.sel-other { background: #e0a23a; color: #1a1a1a; border-color: #e0a23a; }
+    .save-flash { font-size: .8rem; font-weight: 700; color: #0f766e; }
+    @media print { .task-sel, .exec-btns, .save-flash { display: none !important; } }
+    .actions-bar { display: flex; gap: 10px; margin: 14px 0 6px; }
+    .loading { color: var(--muted); }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    @media print {
+      body { background: #fff; }
+      .topbar, .controls, .lead-tabs, .actions-bar, h1, .sub { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .order-doc { border-radius: 0; padding: 8px 0; }
+    }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. Verified token kept in sessionStorage for the session. Fail-closed: wrong/blank
+    // code, cancel, or no server token → back to the request form. Invoked via staffGate().then(load).
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; }
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break;
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+      }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+      return new Promise(function () {});
+    }
+  </script>
+
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders" class="active">משימות פתוחות וסטטוס</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>משימות פתוחות וסטטוס</h1>
+    <p class="sub">הפניה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
+
+    <div class="lead-tabs" id="leadTabs"></div>
+    <div class="actions-bar">
+      <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
+    </div>
+    <div id="out"><p class="loading">טוען…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const LEADS = ['רמי', 'צחי', 'רועי'];       // pickable internal leads (הפניה לביצוע dropdown)
+    const REFER_TAB = 'הפניה לביצוע';
+    const EXTERNAL_TAB = 'בעלי מקצוע';
+    const EXEC_TAB = 'סטטוס ביצוע';
+    const TABS = [REFER_TAB, EXTERNAL_TAB, EXEC_TAB];
+    const EXEC_DONE = 'בוצע', EXEC_NOT_DONE = 'לא בוצע', EXEC_OTHER = 'אחר';
+    const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
+    let requests = [], findings = [], inspections = [], houses = [];
+    let activeLead = REFER_TAB;
+
+    // Staff-authenticated POST. Token was verified in staffGate() and kept in window.__STAFF_TOKEN__.
+    async function post(action, payload) {
+      const res = await fetch(EXEC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, token: window.__STAFF_TOKEN__ || '', payload }),
+      });
+      return res.json();
+    }
+
+    function urgencyRank(u) { return Object.prototype.hasOwnProperty.call(URGENCY_RANK, u) ? URGENCY_RANK[u] : 3; }
+
+    async function load() {
+      try {
+        const [reqRes, findRes, insRes, houseRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        requests = (reqRes.data || []);
+        findings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        inspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
+        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
+        renderTabs();
+        render();
+      } catch (e) {
+        document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
+      }
+    }
+
+    function renderTabs() {
+      document.getElementById('leadTabs').innerHTML = TABS.map(l =>
+        `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
+    }
+    window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
+
+    function uPill(u) {
+      const cls = u === 'חירום' ? 'emergency' : u === 'דחוף' ? 'urgent' : 'normal';
+      return `<span class="u ${cls}">${esc(u)}</span>`;
+    }
+
+    function render() {
+      if (activeLead === EXTERNAL_TAB) return renderExternal();
+      if (activeLead === EXEC_TAB) return renderExecution();
+      return renderRefer();
+    }
+
+    // A live task = referred to a lead (assigned_to set), not done (not הושלם/סגור) and not marked בוצע.
+    const DONE_STATUSES = ['הושלם', 'סגור'];
+    function isLive(r) {
+      if (!r || !r.assigned_to) return false;
+      if (DONE_STATUSES.indexOf(r.status) !== -1) return false;
+      return r.execution_status !== EXEC_DONE;
+    }
+    function liveReferred() {
+      return requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r))
+        .slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || String(a.house).localeCompare(String(b.house), 'he'));
+    }
+
+    // ── Tab: הפניה לביצוע — per-task lead dropdown (רמי / צחי / רועי), saved to the sheet. ──
+    function renderRefer() {
+      const items = liveReferred();
+      const today = new Date().toLocaleDateString('he-IL');
+      if (items.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>הפניה לביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
+        return;
+      }
+      const rows = items.map(r => {
+        const opts = LEADS.map(l => `<option value="${esc(l)}"${l === r.assigned_to ? ' selected' : ''}>${esc(l)}</option>`).join('');
+        return `<div class="task-row">
+          <div class="task-main"><span class="task-house">${esc(r.house)}</span> · ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}</div>
+          <label style="color:#555;font-size:.82rem">אחראי:</label>
+          <select class="task-sel" onchange="reassign('${esc(r.id)}', this.value, this)">${opts}</select>
+          <span class="save-flash" id="flash-${esc(r.id)}"></span>
+        </div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>הפניה לביצוע</h2>
+        <div class="head-meta">הופק: ${today} · ${items.length} משימות פתוחות · בחר/י אחראי לכל משימה</div>
+        ${rows}
+      </div>`;
+    }
+
+    window.reassign = async (id, lead, el) => {
+      el.disabled = true;
+      const flash = document.getElementById('flash-' + id);
+      try {
+        const j = await post('assign', { id, by: window.__STAFF_TOKEN__ || 'staff', assigned_to: lead, assignment_type: 'internal' });
+        if (j && j.ok) {
+          const r = requests.find(x => x && String(x.id) === String(id));
+          if (r) { r.assigned_to = lead; r.assignment_type = 'internal'; if (r.status === 'מאושר') r.status = 'בביצוע'; }
+          if (flash) { flash.textContent = 'נשמר ✓'; setTimeout(() => { if (flash) flash.textContent = ''; }, 1500); }
+        } else if (flash) { flash.textContent = 'שגיאה'; }
+      } catch (e) { if (flash) flash.textContent = 'שגיאה'; }
+      el.disabled = false;
+    };
+
+    // ── Tab: סטטוס ביצוע — per-task בוצע / לא בוצע / אחר. Task stays live until בוצע. ──
+    function renderExecution() {
+      const items = liveReferred();
+      const today = new Date().toLocaleDateString('he-IL');
+      if (items.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>סטטוס ביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
+        return;
+      }
+      const rows = items.map(r => {
+        const cur = r.execution_status || '';
+        const btn = (val, cls, label) => `<button class="exec-btn ${cur === val ? cls : ''}" onclick="setExec('${esc(r.id)}','${esc(val)}',this)">${esc(label)}</button>`;
+        return `<div class="task-row">
+          <div class="task-main"><span class="task-house">${esc(r.house)}</span> · ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')} <span class="u normal">${esc(r.assigned_to)}</span></div>
+          <div class="exec-btns">
+            ${btn(EXEC_DONE, 'sel-done', 'בוצע')}
+            ${btn(EXEC_NOT_DONE, 'sel-notdone', 'לא בוצע')}
+            ${btn(EXEC_OTHER, 'sel-other', 'אחר')}
+          </div>
+          <span class="save-flash" id="eflash-${esc(r.id)}"></span>
+        </div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>סטטוס ביצוע</h2>
+        <div class="head-meta">הופק: ${today} · ${items.length} משימות פתוחות · משימה נשארת פתוחה עד שמסומנת "בוצע"</div>
+        ${rows}
+      </div>`;
+    }
+
+    window.setExec = async (id, value, el) => {
+      const flash = document.getElementById('eflash-' + id);
+      Array.from(el.parentNode.children).forEach(b => b.disabled = true);
+      try {
+        const j = await post('setExecution', { id, by: window.__STAFF_TOKEN__ || 'staff', value });
+        if (j && j.ok) {
+          const r = requests.find(x => x && String(x.id) === String(id));
+          if (r) { r.execution_status = value; if (j.completed) r.status = 'הושלם'; }
+          if (flash) { flash.textContent = 'נשמר ✓'; }
+          if (value === EXEC_DONE) { setTimeout(render, 600); }  // completed → drops off the live list
+          else render();
+        } else if (flash) { flash.textContent = (j && j.error) || 'שגיאה'; Array.from(el.parentNode.children).forEach(b => b.disabled = false); }
+      } catch (e) { if (flash) flash.textContent = 'שגיאה'; Array.from(el.parentNode.children).forEach(b => b.disabled = false); }
+    };
+
+    // External work for בעלי מקצוע: live worklist of external-trade requests that aren't done yet —
+    // both waiting-to-refer (ממתין) and already-in-progress (בביצוע) so the worklist stays live.
+    // Grouped by trade (כל החשמל יחד), then by house, then by cluster for batching context.
+    function renderExternal() {
+      const clusterHe = { sharon: 'שרון', caesarea: 'קיסריה', north: 'צפון' };
+      const houseCluster = {}; houses.forEach(h => { if (h && h.name) houseCluster[h.name] = h.cluster || ''; });
+      const DONE = ['הושלם', 'סגור'];
+      const ext = requests.filter(r => r && r.assignment_type === 'external' && r.trade && DONE.indexOf(r.status) === -1);
+      const today = new Date().toLocaleDateString('he-IL');
+      if (ext.length === 0) {
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — בעלי מקצוע</h2><div class="head-meta">${today}</div><p>אין כרגע עבודות חיצוניות מאושרות הממתינות להפניה ✓</p></div>`;
+        return;
+      }
+      const byTrade = {};
+      ext.forEach(r => { (byTrade[r.trade] = byTrade[r.trade] || []).push(r); });
+      const blocks = Object.keys(byTrade).sort((a, b) => a.localeCompare(b, 'he')).map(trade => {
+        const rows = byTrade[trade].slice()
+          .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency))
+          .map(r => {
+            const cl = clusterHe[houseCluster[r.house]] || '';
+            const statusLabel = r.status === 'בביצוע' ? 'בביצוע' : 'ממתין';
+            return `<li><b>${esc(r.house)}</b>${cl ? ' <span class="u normal">' + esc(cl) + '</span>' : ''}: ${esc(r.description || r.id)} ${uPill(r.urgency || 'רגיל')}${r.category ? ' <span class="u normal">' + esc(r.category) + '</span>' : ''} <span class="u normal">${esc(statusLabel)}</span></li>`;
+          }).join('');
+        return `<div class="order-house"><div class="order-house-name">${esc(trade)} <span class="count-badge">${byTrade[trade].length} עבודות</span></div><ul>${rows}</ul></div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>משימות שבועיות — בעלי מקצוע</h2>
+        <div class="head-meta">הופק: ${today} · סה"כ ${ext.length} עבודות חיצוניות · מקובץ לפי מקצוע</div>
+        ${blocks}
+      </div>`;
+    }
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    staffGate().then(load);
+  </script>
+</body>
+</html>

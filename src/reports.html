@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — דוחות בקרה</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --amber: #e0a23a; --red: #e0584a; --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; background: var(--accent-grad); }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .list-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--card-line); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; transition: border-color .12s; }
+    .list-item:hover { border-color: var(--accent-2); }
+    .list-item .t { font-weight: 700; }
+    .list-item .m { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+    .badge { font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); white-space: nowrap; }
+    .badge.def { background: rgba(224,162,58,.14); color: var(--amber); }
+    button { font-family: inherit; cursor: pointer; }
+    .btn { font-size: .9rem; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .btn.go { background: var(--accent-grad); color: #06201c; border: none; }
+    .back { margin-bottom: 14px; }
+    .empty { color: var(--muted); }
+    .loading { color: var(--muted); }
+    /* ---- Report view ---- */
+    #report { display: none; }
+    .report-actions { display: flex; gap: 10px; margin-bottom: 16px; }
+    .report-doc { background: #fff; color: #1a1a1a; border-radius: 12px; padding: 34px 38px; }
+    .report-doc h2 { font-size: 1.5rem; margin: 0 0 4px; color: #0f766e; }
+    .report-doc .head-meta { color: #555; font-size: .9rem; margin-bottom: 18px; }
+    .report-doc .bg { background: #f3f6f6; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; font-size: .92rem; }
+    .report-doc .bg b { color: #0f766e; }
+    .report-doc h3 { font-size: 1.15rem; color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 4px; margin: 22px 0 10px; }
+    .report-doc .summary { font-style: italic; color: #444; margin: 0 0 10px; }
+    .report-doc ul { margin: 6px 0; padding-inline-start: 22px; }
+    .report-doc li { margin: 4px 0; }
+    .report-doc .defect { color: #b3402f; font-weight: 600; }
+    .report-doc .linked { color: #0f766e; font-size: .82rem; }
+    .report-doc .note { color: #333; }
+    .report-doc .foot { margin-top: 26px; border-top: 1px solid #ddd; padding-top: 10px; color: #888; font-size: .8rem; }
+    .report-doc .rec-list { list-style: none; padding-inline-start: 0; }
+    .report-doc .rec-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
+    .report-doc .rec-cat { color: #0f766e; font-weight: 600; }
+    .report-doc .rec-btn { font-family: inherit; font-size: .82rem; font-weight: 700; padding: 5px 12px; border: none; border-radius: 7px; background: #0f766e; color: #fff; cursor: pointer; }
+    @media print { .report-doc .rec-btn { display: none; } }
+    @media print {
+      body { background: #fff; }
+      .topbar, .report-actions, #list, h1, .sub { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .report-doc { border-radius: 0; padding: 10px 0; }
+    }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    .rollup-card { background: var(--card); background: linear-gradient(var(--card), var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 20px 18px; margin-bottom: 22px; box-shadow: 0 0 30px -10px var(--glow); }
+    .rollup-lead { margin-bottom: 16px; }
+    .rollup-lead-name { font-weight: 800; font-size: 1rem; margin-bottom: 8px; }
+    .rollup-house { background: #161a20; border: 1px solid var(--card-line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+    .rollup-house-name { font-weight: 700; margin-bottom: 4px; }
+    .rollup-house ul { margin: 4px 0 0; padding-inline-start: 20px; }
+    .rollup-house li { margin: 3px 0; font-size: .9rem; }
+
+    /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
+       Fully scoped to this media query so the desktop layout stays pixel-identical.
+       RTL preserved: logical properties (padding-block / margin-block) only, no left/right. */
+    @media (max-width: 640px) {
+      /* hard-disable horizontal panning on Android — content already fits, nothing gets cut */
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      /* ≥40px touch targets */
+      .nav a, .tab { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      /* 16px form fields prevent iOS focus zoom */
+      input, select, textarea { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
+    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
+    // Property. On success the verified token is kept in sessionStorage for this session and sent
+    // as `token` on every staff write. Fail-closed: wrong/blank code, cancel, or no server token →
+    // back to the request form. Invoked below via staffGate().then(load) so no data loads first.
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; } // already verified this session
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
+        if (entered == null) break; // cancelled
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        // wrong code or network error → re-prompt
+      }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+      return new Promise(function () {}); // never resolves → nothing after the gate runs
+    }
+  </script>
+
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inspection">בקרה</a><a href="/reports" class="active">דוחות</a></nav>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>דוחות בקרה</h1>
+    <p class="sub">בקרות שבוצעו — לחיצה על בקרה פותחת דוח מסודר להדפסה / שמירה כ-PDF</p>
+
+    <div id="list"><p class="loading">טוען בקרות…</p></div>
+
+    <div id="report">
+      <div class="report-actions">
+        <button class="btn back" onclick="closeReport()">→ חזרה לרשימה</button>
+        <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
+      </div>
+      <div class="report-doc" id="reportDoc"></div>
+    </div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    const DOMAIN_LABELS = { treatment: 'תחום הטיפול', cleanliness: 'ניקיון ואחזקה', kitchen: 'מטבחים ומחסנים' };
+    let inspections = [], findings = [], houses = [];
+    const houseLead = {}; // house name -> maintenance lead (רמי / צחי)
+
+    async function load() {
+      try {
+        const [insRes, findRes, houseRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        inspections = (insRes.data || []).slice().reverse(); // newest first
+        findings = findRes.data || [];
+        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
+        houses.forEach(h => { houseLead[h.name] = h.technician || '—'; });
+        renderList();
+      } catch (e) {
+        document.getElementById('list').innerHTML = '<p class="empty">שגיאה בטעינת הבקרות.</p>';
+      }
+    }
+
+    function findingsFor(id) { return findings.filter(f => String(f.inspection_id) === String(id)); }
+
+    // House for a finding = its inspection's house (findings carry inspection_id).
+    function houseForFinding(f) {
+      const ins = inspections.find(x => String(x.id) === String(f.inspection_id));
+      return ins ? ins.house : '';
+    }
+
+    function renderList() {
+      const el = document.getElementById('list');
+      if (inspections.length === 0) { el.innerHTML = '<p class="empty">עדיין לא בוצעו בקרות.</p>'; return; }
+      const summary = renderLeadRollup();
+      const items = inspections.map(ins => {
+        const fs = findingsFor(ins.id);
+        const defects = fs.filter(f => f.finding_type === 'physical_defect').length;
+        return `<div class="list-item" onclick="openReport('${ins.id}')">
+          <div>
+            <div class="t">${esc(ins.house)} — ${fmtDate(ins.inspection_date)}</div>
+            <div class="m">מבקר/ת: ${esc(ins.inspector)} · ${fs.length} ממצאים${ins.patient_count !== '' ? ' · ' + esc(ins.patient_count) + ' מטופלים' : ''}</div>
+          </div>
+          ${defects ? `<span class="badge def">${defects} ליקויים</span>` : '<span class="badge">תקין</span>'}
+        </div>`;
+      }).join('');
+      el.innerHTML = summary + `<h2 style="font-size:1.05rem;margin:24px 0 10px">בקרות אחרונות</h2>` + items;
+    }
+
+    // Consolidated open ליקויים (unlinked physical defects), grouped by maintenance lead, then house.
+    // This is Rami's / Tzachi's work list across all inspections.
+    function renderLeadRollup() {
+      const open = findings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
+      if (open.length === 0) return '';
+      // group: lead -> house -> [findings]
+      const byLead = {};
+      open.forEach(f => {
+        const house = houseForFinding(f);
+        const lead = houseLead[house] || '—';
+        ((byLead[lead] = byLead[lead] || {})[house] = (byLead[lead][house] || [])).push(f);
+      });
+      const leadOrder = Object.keys(byLead).sort();
+      const blocks = leadOrder.map(lead => {
+        const houseMap = byLead[lead];
+        const total = Object.values(houseMap).reduce((s, arr) => s + arr.length, 0);
+        const houseBlocks = Object.keys(houseMap).sort().map(house => {
+          const arr = houseMap[house];
+          const lis = arr.map(f => `<li>${f.location_in_house ? '<b>' + esc(f.location_in_house) + ':</b> ' : ''}${esc(f.finding_text)}${f.suggested_category ? ' (' + esc(f.suggested_category) + ')' : ''}</li>`).join('');
+          return `<div class="rollup-house"><div class="rollup-house-name">${esc(house)} <span class="badge def">${arr.length}</span></div><ul>${lis}</ul></div>`;
+        }).join('');
+        return `<div class="rollup-lead">
+          <div class="rollup-lead-name">איש אחזקה: ${esc(lead)} <span class="badge def">${total} ליקויים פתוחים</span></div>
+          ${houseBlocks}
+        </div>`;
+      }).join('');
+      return `<div class="rollup-card">
+        <h2 style="font-size:1.15rem;margin:0 0 12px;color:var(--accent-2)">ריכוז ליקויים פתוחים לפי איש אחזקה</h2>
+        <p class="empty" style="margin:0 0 14px">משימות שטרם נפתחה להן דרישה, מקובצות לפי האחראי ובתוך כל אחראי לפי בית.</p>
+        ${blocks}
+      </div>`;
+    }
+
+    window.openReport = (id) => {
+      const ins = inspections.find(x => String(x.id) === String(id));
+      if (!ins) return;
+      const fs = findingsFor(id);
+      const bg = [];
+      if (ins.start_time) bg.push(`<b>שעת התחלה:</b> ${esc(ins.start_time)}`);
+      if (ins.patient_count !== '') bg.push(`<b>מטופלים בבית:</b> ${esc(ins.patient_count)}`);
+      if (ins.staff_present) bg.push(`<b>נוכחים מהצוות:</b> ${esc(ins.staff_present)}`);
+      if (ins.cleaner_present) bg.push(`<b>מנקה:</b> ${esc(ins.cleaner_present)}`);
+
+      const domainBlocks = Object.keys(DOMAIN_LABELS).map(d => {
+        const summary = ins['domain_' + (d === 'treatment' ? 'treatment' : d === 'cleanliness' ? 'cleanliness' : 'kitchen') + '_summary'];
+        const df = fs.filter(f => f.domain === d);
+        if (!summary && df.length === 0) return '';
+        return `<h3>${DOMAIN_LABELS[d]}</h3>
+          ${summary ? `<p class="summary">${esc(summary)}</p>` : ''}
+          ${df.length ? `<ul>${df.map(f => `<li class="${f.finding_type === 'physical_defect' ? 'defect' : 'note'}">${f.finding_type === 'physical_defect' ? '⚠ ' : ''}${f.location_in_house ? '<b>' + esc(f.location_in_house) + ':</b> ' : ''}${esc(f.finding_text)}${f.suggested_category ? ' (' + esc(f.suggested_category) + ')' : ''}${f.linked_request_id ? ' <span class="linked">→ נפתחה דרישה ' + esc(f.linked_request_id) + '</span>' : ''}</li>`).join('')}</ul>` : ''}`;
+      }).join('');
+
+      document.getElementById('reportDoc').innerHTML = `
+        <h2>דוח בקרה — ${esc(ins.house)}</h2>
+        <div class="head-meta">תאריך: ${fmtDate(ins.inspection_date)} · מבקר/ת: ${esc(ins.inspector)}${ins.reinspect_date ? ' · בקרה חוזרת מתוכננת: ' + fmtDate(ins.reinspect_date) : ''}</div>
+        ${bg.length ? `<div class="bg">${bg.join(' &nbsp;•&nbsp; ')}</div>` : ''}
+        ${ins.general_notes ? `<p class="summary">${esc(ins.general_notes)}</p>` : ''}
+        ${domainBlocks || '<p>לא תועדו ממצאים.</p>'}
+        ${recommendations(fs)}
+        <div class="foot">הופק ממערכת EZone Logistics · ${new Date().toLocaleDateString('he-IL')}</div>`;
+      document.getElementById('list').style.display = 'none';
+      document.getElementById('report').style.display = 'block';
+      window.scrollTo(0, 0);
+    };
+
+    // Closing "ריכוז המלצות" — consolidated to-do from physical defects, each linked to a request
+    // (or a button to open one). Cleanliness/maintenance defects are the actionable items.
+    function recommendations(fs) {
+      const defects = fs.filter(f => f.finding_type === 'physical_defect');
+      if (defects.length === 0) return '';
+      const rows = defects.map(f => {
+        const where = f.location_in_house ? `<b>${esc(f.location_in_house)}:</b> ` : '';
+        const cat = f.suggested_category ? ` <span class="rec-cat">(${esc(f.suggested_category)})</span>` : '';
+        const status = f.linked_request_id
+          ? `<span class="linked">✓ נפתחה דרישה ${esc(f.linked_request_id)}</span>`
+          : `<button class="rec-btn" onclick="confirmFromReport('${esc(f.id)}')">פתח דרישה</button>`;
+        return `<li>${where}${esc(f.finding_text)}${cat} — ${status}</li>`;
+      }).join('');
+      const open = defects.filter(f => !f.linked_request_id).length;
+      return `<h3>ריכוז המלצות לטיפול</h3>
+        <p class="summary">${defects.length} ליקויים לטיפול${open ? `, מתוכם ${open} ממתינים לפתיחת דרישה` : ' — כולם טופלו'}.</p>
+        <ul class="rec-list">${rows}</ul>`;
+    }
+
+    window.confirmFromReport = async (fid) => {
+      if (!confirm('לפתוח דרישת תיקון מהממצא הזה?')) return;
+      try {
+        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'confirmFinding', payload: { finding_id: fid, by: 'רועי' }, token: window.__STAFF_TOKEN__ || '' }) });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'שגיאה');
+        alert('נפתחה דרישה: ' + json.request_id);
+        await load();  // refresh so the report reflects the new link
+      } catch (e) { alert('הפעולה נכשלה: ' + e.message); }
+    };
+
+    window.closeReport = () => {
+      document.getElementById('report').style.display = 'none';
+      document.getElementById('list').style.display = 'block';
+    };
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Clean Hebrew date (DD/MM/YYYY). Strips any ISO timestamp tail.
+    function fmtDate(v) {
+      if (!v) return '';
+      const s = String(v).slice(0, 10);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : esc(String(v));
+    }
+    staffGate().then(load);
+  </script>
+</body>
+</html>

@@ -11,7 +11,7 @@ import { STATUSES, URGENCY, CATEGORY } from './schema.js';
 
 // Controlled list of who may submit. Not free text — keeps deferral-reminder routing clean
 // later (reminders go to "whoever deferred", which must be a known identity, not a typo).
-export const SUBMITTERS = ['רמי', 'צחי', 'רועי', 'sandra'];
+export const SUBMITTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי'];
 
 const VALID_CATEGORIES = new Set(Object.values(CATEGORY));   // רכישה / תיקון / החלפה
 const VALID_URGENCIES = new Set(Object.values(URGENCY));     // רגיל / דחוף / חירום

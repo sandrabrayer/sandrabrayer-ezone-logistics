@@ -16,12 +16,25 @@ var HEADERS = {
     'id', 'created_at', 'created_by', 'house', 'category', 'description', 'location_in_house',
     'urgency', 'estimated_cost', 'attachment_url', 'status', 'approval_required', 'approved_by',
     'approved_at', 'rejection_reason', 'deferred_until', 'assigned_to', 'assignment_type',
-    'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
+    'trade', 'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
+    'execution_status',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+  Inspections: [
+    'id', 'house', 'inspection_date', 'inspector', 'started_at',
+    'patient_count', 'staff_present', 'start_time', 'cleaner_present',
+    'domain_treatment_summary', 'domain_cleanliness_summary', 'domain_kitchen_summary',
+    'general_notes', 'reinspect_date', 'status',
+  ],
+  InspectionFindings: [
+    'id', 'inspection_id', 'domain', 'location_in_house', 'finding_text',
+    'finding_type', 'severity', 'suggested_category',
+    'linked_request_id', 'confirmed_by', 'confirmed_at',
+  ],
+  ChecklistItems: ['domain', 'item_text', 'active'],
 };
 
 var SEED_HOUSES = [
@@ -43,6 +56,25 @@ var SEED_CONFIG = [
   ['emergency_bypasses_approval', 'TRUE'],
 ];
 
+var SEED_CHECKLIST = [
+  ['treatment', 'תיקים ממוחשבים מסודרים ומעודכנים', 'TRUE'],
+  ['treatment', 'אינטייקים סרוקים ומצורפים', 'TRUE'],
+  ['treatment', 'כל המטופלים רשומים במערכת', 'TRUE'],
+  ['treatment', 'סטנדרטים טיפוליים נשמרים', 'TRUE'],
+  ['cleanliness', 'נראות כללית וניקיון שטחים ציבוריים', 'TRUE'],
+  ['cleanliness', 'ברזים, מקלחונים ומראות נקיים מאבנית', 'TRUE'],
+  ['cleanliness', 'חדרי שינה נקיים ומאווררים', 'TRUE'],
+  ['cleanliness', 'מסילות חלונות, מעקות ודלתות נקיים', 'TRUE'],
+  ['cleanliness', 'חדר כביסה נקי ונעול', 'TRUE'],
+  ['cleanliness', 'תאורה תקינה בכל החדרים', 'TRUE'],
+  ['cleanliness', 'חצר/בריכה נקיים ובטיחותיים', 'TRUE'],
+  ['cleanliness', 'פערי תחזוקה (צבע, פאנלים, מזגנים)', 'TRUE'],
+  ['kitchen', 'ניקיון מטבח וציוד מטבח', 'TRUE'],
+  ['kitchen', 'מוצרי חשמל תקינים ובמקומם', 'TRUE'],
+  ['kitchen', 'אחסון מזון תקין ובטיחותי', 'TRUE'],
+  ['kitchen', 'בדיקת מחסן ומלאים', 'TRUE'],
+];
+
 function setupSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -50,18 +82,30 @@ function setupSheet() {
     var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
     var headers = HEADERS[name];
 
-    // Write headers only if the first row is empty (don't clobber existing data).
+    // Write headers if the first row is empty...
     var firstCell = sheet.getRange(1, 1).getValue();
     if (firstCell === '' || firstCell === null) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
       sheet.setFrozenRows(1);
+    } else {
+      // ...otherwise, APPEND any new columns that were added to the schema later
+      // (e.g. inspection background fields), so existing sheets gain them without data loss.
+      var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      headers.forEach(function (h) {
+        if (existing.indexOf(h) === -1) {
+          var newCol = sheet.getLastColumn() + 1;
+          sheet.getRange(1, newCol).setValue(h).setFontWeight('bold');
+          existing.push(h);
+        }
+      });
     }
   });
 
   seedIfEmpty_(ss.getSheetByName('Houses'), SEED_HOUSES);
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('Config'), SEED_CONFIG);
+  seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');
