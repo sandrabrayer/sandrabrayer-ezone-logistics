@@ -35,6 +35,11 @@ var HEADERS = {
     'linked_request_id', 'confirmed_by', 'confirmed_at',
   ],
   ChecklistItems: ['domain', 'item_text', 'active'],
+  InventoryItems: ['category', 'item_text', 'active'],
+  InventoryCounts: [
+    'count_id', 'house', 'month', 'counted_by', 'counted_at',
+    'category', 'item', 'quantity', 'notes',
+  ],
 };
 
 var SEED_HOUSES = [
@@ -75,6 +80,38 @@ var SEED_CHECKLIST = [
   ['kitchen', 'בדיקת מחסן ומלאים', 'TRUE'],
 ];
 
+// Inventory catalog seed (increment 25) — edit in the Sheet, no code change needed
+// (active=FALSE hides an item, new rows extend the list).
+var SEED_INVENTORY_ITEMS = [
+  ['טואלטיקה', 'נייר טואלט', 'TRUE'],
+  ['טואלטיקה', 'מגבות נייר', 'TRUE'],
+  ['טואלטיקה', 'טישו', 'TRUE'],
+  ['טואלטיקה', 'סבון ידיים', 'TRUE'],
+  ['טואלטיקה', 'שמפו', 'TRUE'],
+  ['טואלטיקה', 'סבון רחצה', 'TRUE'],
+  ['טואלטיקה', 'משחת שיניים', 'TRUE'],
+  ['טואלטיקה', 'מברשות שיניים', 'TRUE'],
+  ['חומרי ניקוי', 'אקונומיקה', 'TRUE'],
+  ['חומרי ניקוי', 'נוזל רצפות', 'TRUE'],
+  ['חומרי ניקוי', 'נוזל כלים', 'TRUE'],
+  ['חומרי ניקוי', 'ספוגים', 'TRUE'],
+  ['חומרי ניקוי', 'מטליות', 'TRUE'],
+  ['חומרי ניקוי', 'שקיות אשפה', 'TRUE'],
+  ['חומרי ניקוי', 'תרסיס חיטוי', 'TRUE'],
+  ['חומרי ניקוי', 'אבקת/ג׳ל כביסה', 'TRUE'],
+  ['חומרי ניקוי', 'מרכך כביסה', 'TRUE'],
+  ['מזון', 'אורז', 'TRUE'],
+  ['מזון', 'פסטה', 'TRUE'],
+  ['מזון', 'קמח', 'TRUE'],
+  ['מזון', 'סוכר', 'TRUE'],
+  ['מזון', 'מלח', 'TRUE'],
+  ['מזון', 'שמן', 'TRUE'],
+  ['מזון', 'קפה', 'TRUE'],
+  ['מזון', 'תה', 'TRUE'],
+  ['מזון', 'שימורים', 'TRUE'],
+  ['מזון', 'דגני בוקר', 'TRUE'],
+];
+
 function setupSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -106,6 +143,7 @@ function setupSheet() {
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('Config'), SEED_CONFIG);
   seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
+  seedIfEmpty_(ss.getSheetByName('InventoryItems'), SEED_INVENTORY_ITEMS);
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');

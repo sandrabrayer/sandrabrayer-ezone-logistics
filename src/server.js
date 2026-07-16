@@ -59,6 +59,7 @@ const HTML_ROUTES = {
   '/': 'index.html', '/index.html': 'index.html',
   '/dashboard': 'dashboard.html', '/dashboard.html': 'dashboard.html',
   '/inspection': 'inspection.html', '/inspection.html': 'inspection.html',
+  '/inventory': 'inventory.html', '/inventory.html': 'inventory.html',
   '/reports': 'reports.html', '/reports.html': 'reports.html',
   '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
 };

@@ -15,8 +15,10 @@
 export const STAFF_WRITE_ACTIONS = [
   'approve', 'reject', 'defer', 'assign', 'markExternal', 'assignBatch',
   'setStatus', 'createInspection', 'addFinding', 'confirmFinding',
-  'deleteRequest', 'editRequest',
+  'deleteRequest', 'editRequest', 'setExecution', 'submitInventory',
 ];
+// NOTE: setExecution was always token-gated server-side (Code.gs); it was missing from THIS
+// mirror until increment 25 — drift fixed here so the two lists match exactly again.
 
 /** True when the given POST action must carry a valid staff token. */
 export function writeRequiresToken(action) {

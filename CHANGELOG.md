@@ -3,6 +3,61 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 25] — ספירת מלאי: monthly inventory count per house
+
+**What:** New staff-gated `/inventory` page + "מלאי" nav tab on every page. Once a month, the
+house's maintenance lead (רמי / צחי, with רועי as backstop) counts the house stock across three
+categories: **טואלטיקה** (incl. נייר טואלט), **חומרי ניקוי**, **מזון**.
+
+**Model**
+- Two new sheets (schema.js + setup.gs, append-safe): `InventoryItems` (the countable-item
+  catalog — edit in the Sheet: `active=FALSE` hides, new rows extend, no code change) and
+  `InventoryCounts` (one row PER ITEM per submitted count, grouped by `count_id`).
+- Re-submitting the same house+month appends a NEW count — nothing is overwritten, the sheet
+  keeps full history; the UI shows the latest `counted_at` per house+month.
+- `setupSheet()` seeds ~27 catalog items across the three categories (idempotent, seed-if-empty).
+  **Re-run `setupSheet()` after the redeploy** to create the two sheets + seed.
+
+**Backend (`apps-script/Code.gs`)**
+- New reads: `?action=inventoryItems`, `?action=inventoryCounts`.
+- New staff write `submitInventory` (added to `STAFF_WRITE_ACTIONS_`, token-gated fail-closed):
+  validates house / `YYYY-MM` month / counter (רמי·צחי·רועי) / category whitelist / quantity as a
+  number ≥ 0; blank quantities are skipped; at least one filled quantity required; notes capped at
+  500 chars. Writes all item rows in ONE batched `setValues` (not N appendRow calls) and one
+  AuditLog entry per submission (`ספירת מלאי`).
+
+**Frontend**
+- `src/inventory.html`: staffGate (same verifyToken pattern as /workorders), two tabs —
+  **ספירה** (quantity per item grouped by category, prefilled from the month's latest count,
+  optional per-item note) and **מצב חודשי** (per-house counted / טרם-נספר table + full detail for
+  the selected house, printable). Counter defaults to the house's own maintenance lead
+  (overridable). Mobile media block included; RTL preserved.
+- `src/inventory.js`: pure mirrored logic — `validateInventorySubmission`, `groupCatalog`,
+  `latestCountFor`, `latestByHouse`, `currentMonth`, `isValidMonth`, `isValidQuantity`.
+- Nav on all six pages: דרישה חדשה · דשבורד · משימות פתוחות וסטטוס · **מלאי** · בקרה · דוחות.
+- `src/server.js`: `/inventory` route added.
+
+**Security**
+- `submitInventory` requires the staff token, verified server-side (constant-time, fail-closed).
+- Drift fix: `setExecution` was token-gated in Code.gs but missing from the `src/auth.js` mirror —
+  both lists now match exactly again (auth.test.js updated to lock the new set).
+- All rendered values escaped (`esc()`); category/counter whitelists enforced server-side.
+
+**Tests** — `node --test`: **149 pass** (was 130). New `test/inventory.test.js` (19 tests: schema
+lock, month/quantity primitives, submission validation incl. blank-tolerance, catalog grouping,
+latest-count supersession scoped to house+month). Updated locks: schema SHEET_NAMES,
+auth STAFF_WRITE_ACTIONS, mobile-css PAGES (+inventory.html).
+
+**Deploy steps (after merge to `main`)**
+1. Railway auto-deploys the frontend from `main`.
+2. Copy `apps-script/Code.gs` from the RAW GitHub `main` view → paste into the Apps Script
+   editor → Save → deploy a **New Version of the EXISTING deployment** (never a new deployment).
+3. Do the same for `setup.gs`, then run `setupSheet()` once — creates `InventoryItems` +
+   `InventoryCounts` and seeds the catalog.
+4. Verify: open `/inventory`, enter staff code, submit a test count → check the
+   `InventoryCounts` sheet and the AuditLog `ספירת מלאי` entry; DevTools Network second-row
+   response must be `{ok:true,...}`.
+
 ## [Increment 24] — Dashboard refer picker (רמי/צחי/רועי) + nav rename & reorder
 
 **What:** Two changes, both frontend-only (no schema, no Apps Script, no backend action changes).
@@ -604,6 +659,61 @@ existing server-side validation/authority/audit rules unchanged.
 
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
+
+## [Increment 25] — ספירת מלאי: monthly inventory count per house
+
+**What:** New staff-gated `/inventory` page + "מלאי" nav tab on every page. Once a month, the
+house's maintenance lead (רמי / צחי, with רועי as backstop) counts the house stock across three
+categories: **טואלטיקה** (incl. נייר טואלט), **חומרי ניקוי**, **מזון**.
+
+**Model**
+- Two new sheets (schema.js + setup.gs, append-safe): `InventoryItems` (the countable-item
+  catalog — edit in the Sheet: `active=FALSE` hides, new rows extend, no code change) and
+  `InventoryCounts` (one row PER ITEM per submitted count, grouped by `count_id`).
+- Re-submitting the same house+month appends a NEW count — nothing is overwritten, the sheet
+  keeps full history; the UI shows the latest `counted_at` per house+month.
+- `setupSheet()` seeds ~27 catalog items across the three categories (idempotent, seed-if-empty).
+  **Re-run `setupSheet()` after the redeploy** to create the two sheets + seed.
+
+**Backend (`apps-script/Code.gs`)**
+- New reads: `?action=inventoryItems`, `?action=inventoryCounts`.
+- New staff write `submitInventory` (added to `STAFF_WRITE_ACTIONS_`, token-gated fail-closed):
+  validates house / `YYYY-MM` month / counter (רמי·צחי·רועי) / category whitelist / quantity as a
+  number ≥ 0; blank quantities are skipped; at least one filled quantity required; notes capped at
+  500 chars. Writes all item rows in ONE batched `setValues` (not N appendRow calls) and one
+  AuditLog entry per submission (`ספירת מלאי`).
+
+**Frontend**
+- `src/inventory.html`: staffGate (same verifyToken pattern as /workorders), two tabs —
+  **ספירה** (quantity per item grouped by category, prefilled from the month's latest count,
+  optional per-item note) and **מצב חודשי** (per-house counted / טרם-נספר table + full detail for
+  the selected house, printable). Counter defaults to the house's own maintenance lead
+  (overridable). Mobile media block included; RTL preserved.
+- `src/inventory.js`: pure mirrored logic — `validateInventorySubmission`, `groupCatalog`,
+  `latestCountFor`, `latestByHouse`, `currentMonth`, `isValidMonth`, `isValidQuantity`.
+- Nav on all six pages: דרישה חדשה · דשבורד · משימות פתוחות וסטטוס · **מלאי** · בקרה · דוחות.
+- `src/server.js`: `/inventory` route added.
+
+**Security**
+- `submitInventory` requires the staff token, verified server-side (constant-time, fail-closed).
+- Drift fix: `setExecution` was token-gated in Code.gs but missing from the `src/auth.js` mirror —
+  both lists now match exactly again (auth.test.js updated to lock the new set).
+- All rendered values escaped (`esc()`); category/counter whitelists enforced server-side.
+
+**Tests** — `node --test`: **149 pass** (was 130). New `test/inventory.test.js` (19 tests: schema
+lock, month/quantity primitives, submission validation incl. blank-tolerance, catalog grouping,
+latest-count supersession scoped to house+month). Updated locks: schema SHEET_NAMES,
+auth STAFF_WRITE_ACTIONS, mobile-css PAGES (+inventory.html).
+
+**Deploy steps (after merge to `main`)**
+1. Railway auto-deploys the frontend from `main`.
+2. Copy `apps-script/Code.gs` from the RAW GitHub `main` view → paste into the Apps Script
+   editor → Save → deploy a **New Version of the EXISTING deployment** (never a new deployment).
+3. Do the same for `setup.gs`, then run `setupSheet()` once — creates `InventoryItems` +
+   `InventoryCounts` and seeds the catalog.
+4. Verify: open `/inventory`, enter staff code, submit a test count → check the
+   `InventoryCounts` sheet and the AuditLog `ספירת מלאי` entry; DevTools Network second-row
+   response must be `{ok:true,...}`.
 
 ## [Increment 10] — Roy-only approval, checklist ratings, calendar deferral, lead roll-up
 
