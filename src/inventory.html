@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — ספירת מלאי</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0;
+      --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --accent-soft: rgba(45,212,191,.12); --glow: rgba(45,212,191,.45);
+      --go: #14b8a6; --go-press: #0f9488; --amber: #e0a23a; --red: #e0584a;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { font-weight: 800; font-size: 1.05rem; }
+    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .brand .sub { color: var(--muted); font-weight: 500; }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+    .controls label { font-size: .8rem; color: var(--muted); margin-inline-end: 4px; }
+    select, input[type="month"] { font-family: inherit; font-size: .92rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 9px 11px; }
+    select:focus, input:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+    select option { background: #161a20; color: var(--ink); }
+    button { font-family: inherit; cursor: pointer; }
+    .btn { font-size: .9rem; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .btn.go { background: var(--accent-grad); color: #06201c; border: none; }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .lead-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .lead-tab { font-weight: 800; padding: 9px 20px; border-radius: 999px; border: 1.5px solid var(--card-line); background: #161a20; color: var(--ink); }
+    .lead-tab.active { background: var(--accent-grad); color: #14171c; border-color: transparent; }
+    .order-doc { background: #fff; color: #1a1a1a; border-radius: 12px; padding: 30px 34px; margin-top: 6px; }
+    .order-doc h2 { font-size: 1.4rem; margin: 0 0 4px; color: #0f766e; }
+    .order-doc .head-meta { color: #555; font-size: .9rem; margin-bottom: 18px; }
+    .cat-block { border: 1px solid #e3e8e8; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+    .cat-name { font-weight: 800; font-size: 1.1rem; color: #0f766e; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
+    .item-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1f1; }
+    .item-row:last-child { border-bottom: none; }
+    .item-name { flex: 1 1 200px; min-width: 160px; }
+    .qty-in { font-family: inherit; font-size: 16px; width: 92px; color: #1a1a1a; background: #fff; border: 1.5px solid #cbd5d3; border-radius: 8px; padding: 7px 10px; text-align: center; }
+    .qty-in:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.15); }
+    .note-in { font-family: inherit; font-size: 16px; flex: 1 1 140px; min-width: 120px; color: #1a1a1a; background: #fff; border: 1.5px solid #cbd5d3; border-radius: 8px; padding: 7px 10px; }
+    .prev-qty { font-size: .78rem; color: #777; min-width: 76px; }
+    .actions-bar { display: flex; gap: 10px; align-items: center; margin: 14px 0 6px; flex-wrap: wrap; }
+    .save-flash { font-size: .9rem; font-weight: 700; color: #14b8a6; }
+    .save-flash.err { color: var(--red); }
+    .loading, .empty { color: var(--muted); }
+    .hist-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .hist-table th, .hist-table td { text-align: right; padding: 7px 9px; border-bottom: 1px solid #eef1f1; }
+    .hist-table th { color: #0f766e; }
+    .pill { font-size: .74rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
+    .pill.miss { background: #fbeccd; color: #9a6a12; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    @media print {
+      body { background: #fff; }
+      .topbar, .controls, .lead-tabs, .actions-bar, h1, .sub { display: none !important; }
+      .wrap { max-width: none; padding: 0; }
+      .order-doc { border-radius: 0; padding: 8px 0; }
+    }
+
+    /* ── Mobile responsive (≤640px) — same recipe as the other pages. RTL-safe (logical props). */
+    @media (max-width: 640px) {
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav {
+        order: 2; flex-basis: 100%; width: 100%;
+        flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; -ms-overflow-style: none;
+        margin-block-start: 2px; padding-block-end: 2px;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; }
+      .nav a { min-height: 40px; display: inline-flex; align-items: center; padding-block: 9px; }
+      button, select, input { min-height: 40px; }
+      input, select, textarea { font-size: 16px; }
+      .item-row { flex-wrap: wrap; }
+      .note-in { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Staff access gate — same pattern as /workorders. The shared code is NEVER in this page's
+    // source: the lead types it and the server verifies (verifyToken) against STAFF_WRITE_TOKEN.
+    async function staffGate() {
+      var EXEC = window.__EXEC_URL__ || '';
+      try {
+        var saved = sessionStorage.getItem('ezone_staff_token') || '';
+        if (saved) { window.__STAFF_TOKEN__ = saved; return; }
+      } catch (e) {}
+      for (var tries = 0; tries < 3; tries++) {
+        var entered = window.prompt('קוד גישה לצוות (רמי / צחי / רועי):');
+        if (entered == null) break;
+        try {
+          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
+          var json = await res.json();
+          if (json && json.valid) {
+            window.__STAFF_TOKEN__ = entered;
+            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+      }
+      document.documentElement.innerHTML = '';
+      window.location.replace('/');
+      return new Promise(function () {});
+    }
+  </script>
+
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inventory" class="active">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+  </div>
+  <div class="wrap">
+    <h1>ספירת מלאי חודשית</h1>
+    <p class="sub">ספירה פעם בחודש לכל בית, ע״י אחראי התחזוקה של הבית: טואלטיקה (כולל נייר טואלט), חומרי ניקוי ומזון. שליחה חוזרת לאותו חודש מחליפה את הספירה המוצגת (ההיסטוריה נשמרת בגיליון).</p>
+
+    <div class="lead-tabs" id="modeTabs"></div>
+
+    <div class="controls">
+      <label>בית:</label><select id="houseSel"></select>
+      <label>חודש:</label><input type="month" id="monthIn" />
+      <label>נספר ע״י:</label><select id="counterSel"></select>
+    </div>
+
+    <div id="out"><p class="loading">טוען…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    // Mirrors src/schema.js — INVENTORY_CATEGORIES / INVENTORY_COUNTERS.
+    const CATEGORIES = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
+    const COUNTERS = ['רמי', 'צחי', 'רועי'];
+    const TAB_COUNT = 'ספירה', TAB_STATUS = 'מצב חודשי';
+    const TABS = [TAB_COUNT, TAB_STATUS];
+    let houses = [], catalog = [], counts = [];
+    let activeTab = TAB_COUNT;
+
+    async function post(action, payload) {
+      const res = await fetch(EXEC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, token: window.__STAFF_TOKEN__ || '', payload }),
+      });
+      return res.json();
+    }
+
+    function currentMonth() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+
+    async function load() {
+      try {
+        const [houseRes, itemRes, countRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=inventoryItems').then(r => r.json()),
+          fetch(EXEC_URL + '?action=inventoryCounts').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        houses = (houseRes.data || []);
+        catalog = (itemRes.data || []);
+        counts = (countRes && countRes.ok) ? (countRes.data || []) : [];
+        initControls();
+        renderTabs();
+        render();
+      } catch (e) {
+        document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
+      }
+    }
+
+    function initControls() {
+      const hs = document.getElementById('houseSel');
+      hs.innerHTML = houses.map(h => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
+      hs.onchange = onHouseChange;
+      const cs = document.getElementById('counterSel');
+      cs.innerHTML = COUNTERS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      const mi = document.getElementById('monthIn');
+      mi.value = currentMonth();
+      mi.onchange = render;
+      onHouseChange();
+    }
+
+    // Default the counter to the house's own maintenance lead (overridable).
+    function onHouseChange() {
+      const name = document.getElementById('houseSel').value;
+      const h = houses.find(x => x && x.name === name);
+      const lead = h && COUNTERS.indexOf(h.technician) !== -1 ? h.technician : COUNTERS[0];
+      document.getElementById('counterSel').value = lead;
+      render();
+    }
+
+    function renderTabs() {
+      document.getElementById('modeTabs').innerHTML = TABS.map(t =>
+        `<button class="lead-tab ${t === activeTab ? 'active' : ''}" onclick="pickTab('${t}')">${t}</button>`).join('');
+    }
+    window.pickTab = (t) => { activeTab = t; renderTabs(); render(); };
+
+    // Active catalog items grouped by category, preserving CATEGORIES order (mirror of groupCatalog).
+    function groupedCatalog() {
+      const out = {};
+      CATEGORIES.forEach(c => out[c] = []);
+      catalog.forEach(r => {
+        if (!r || !r.item_text) return;
+        if (String(r.active).toUpperCase() === 'FALSE') return;
+        if (!Object.prototype.hasOwnProperty.call(out, r.category)) return;
+        out[r.category].push(r.item_text);
+      });
+      return out;
+    }
+
+    // Latest count for house+month (mirror of latestCountFor in src/inventory.js).
+    function latestCountFor(house, month) {
+      const mine = counts.filter(r => r && String(r.house) === String(house) && String(r.month) === String(month));
+      if (mine.length === 0) return null;
+      let winner = null;
+      mine.forEach(r => { if (!winner || String(r.counted_at) > String(winner.counted_at)) winner = r; });
+      const items = mine.filter(r => r.count_id === winner.count_id);
+      return { count_id: winner.count_id, counted_by: winner.counted_by, counted_at: winner.counted_at, items };
+    }
+
+    function render() {
+      if (activeTab === TAB_STATUS) return renderStatus();
+      return renderCountForm();
+    }
+
+    // ── Tab: ספירה — quantity per item, grouped by category; prefilled from the latest count. ──
+    function renderCountForm() {
+      const house = document.getElementById('houseSel').value;
+      const month = document.getElementById('monthIn').value;
+      const grouped = groupedCatalog();
+      const prev = latestCountFor(house, month);
+      const prevQty = {};
+      if (prev) prev.items.forEach(it => { prevQty[it.item] = it.quantity; });
+
+      const blocks = CATEGORIES.map(cat => {
+        const items = grouped[cat] || [];
+        if (items.length === 0) return '';
+        const rows = items.map((name, i) => {
+          const id = cat + '::' + name;
+          const pq = Object.prototype.hasOwnProperty.call(prevQty, name) ? prevQty[name] : '';
+          return `<div class="item-row">
+            <span class="item-name">${esc(name)}</span>
+            <span class="prev-qty">${pq !== '' ? 'נספר: ' + esc(pq) : ''}</span>
+            <input class="qty-in" type="number" min="0" step="1" inputmode="numeric" placeholder="כמות"
+                   data-cat="${esc(cat)}" data-item="${esc(name)}" value="${pq !== '' ? esc(pq) : ''}" />
+            <input class="note-in" type="text" maxlength="200" placeholder="הערה (רשות)" data-note-for="${esc(id)}" />
+          </div>`;
+        }).join('');
+        return `<div class="cat-block"><div class="cat-name">${esc(cat)} <span class="count-badge">${items.length} פריטים</span></div>${rows}</div>`;
+      }).join('');
+
+      const meta = prev
+        ? `ספירה אחרונה לחודש זה: ${esc(prev.counted_by)} · ${new Date(prev.counted_at).toLocaleDateString('he-IL')} — הערכים למטה ממולאים ממנה`
+        : 'טרם נשלחה ספירה לחודש זה';
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>ספירת מלאי — ${esc(house)} · ${esc(month)}</h2>
+        <div class="head-meta">${meta}</div>
+        ${blocks || '<p>אין פריטים פעילים בקטלוג (גיליון InventoryItems)</p>'}
+        <div class="actions-bar">
+          <button class="btn go" id="submitBtn" onclick="submitCount(this)">שליחת ספירה</button>
+          <span class="save-flash" id="flash"></span>
+        </div>
+      </div>`;
+    }
+
+    window.submitCount = async (btn) => {
+      const house = document.getElementById('houseSel').value;
+      const month = document.getElementById('monthIn').value;
+      const counted_by = document.getElementById('counterSel').value;
+      const flash = document.getElementById('flash');
+      flash.className = 'save-flash'; flash.textContent = '';
+
+      // Collect only FILLED rows; client-side validation mirrors the server rule.
+      const items = [];
+      let bad = null;
+      document.querySelectorAll('.qty-in').forEach(inp => {
+        const v = inp.value.trim();
+        if (v === '') return;
+        const n = Number(v);
+        if (!isFinite(n) || n < 0) { bad = inp.dataset.item; return; }
+        const noteEl = document.querySelector(`[data-note-for="${CSS.escape(inp.dataset.cat + '::' + inp.dataset.item)}"]`);
+        items.push({ category: inp.dataset.cat, item: inp.dataset.item, quantity: n, notes: noteEl ? noteEl.value.trim() : '' });
+      });
+      if (bad) { flash.className = 'save-flash err'; flash.textContent = 'כמות לא תקינה: ' + bad; return; }
+      if (items.length === 0) { flash.className = 'save-flash err'; flash.textContent = 'לא מולאה אף כמות'; return; }
+      if (!month) { flash.className = 'save-flash err'; flash.textContent = 'בחר/י חודש'; return; }
+
+      btn.disabled = true; flash.textContent = 'שולח…';
+      try {
+        const j = await post('submitInventory', { house, month, counted_by, items });
+        if (j && j.ok) {
+          flash.textContent = 'נשמר ✓ (' + j.items + ' פריטים)';
+          // reflect locally so the form/status refresh without a full reload
+          const counted_at = new Date().toISOString();
+          items.forEach(it => counts.push({ count_id: j.count_id, house, month, counted_by, counted_at,
+            category: it.category, item: it.item, quantity: it.quantity, notes: it.notes }));
+          setTimeout(render, 900);
+        } else {
+          flash.className = 'save-flash err'; flash.textContent = (j && j.error) || 'שגיאה';
+        }
+      } catch (e) { flash.className = 'save-flash err'; flash.textContent = 'שגיאה בשליחה'; }
+      btn.disabled = false;
+    };
+
+    // ── Tab: מצב חודשי — which houses were counted this month, by whom, and the latest numbers. ──
+    function renderStatus() {
+      const month = document.getElementById('monthIn').value;
+      const today = new Date().toLocaleDateString('he-IL');
+      const rows = houses.map(h => {
+        const c = latestCountFor(h.name, month);
+        const state = c
+          ? `<span class="pill">נספר · ${esc(c.counted_by)} · ${new Date(c.counted_at).toLocaleDateString('he-IL')}</span>`
+          : '<span class="pill miss">טרם נספר</span>';
+        return `<tr><td><b>${esc(h.name)}</b></td><td>${esc(h.technician || '')}</td><td>${state}</td><td>${c ? c.items.length + ' פריטים' : ''}</td></tr>`;
+      }).join('');
+      const house = document.getElementById('houseSel').value;
+      const detail = latestCountFor(house, month);
+      let detailHtml = '';
+      if (detail) {
+        const byCat = {};
+        detail.items.forEach(it => { (byCat[it.category] = byCat[it.category] || []).push(it); });
+        detailHtml = '<h2 style="margin-top:22px">פירוט — ' + esc(house) + '</h2>' + CATEGORIES.map(cat => {
+          const its = byCat[cat] || [];
+          if (its.length === 0) return '';
+          const lis = its.map(it => `<tr><td>${esc(it.item)}</td><td>${esc(it.quantity)}</td><td>${esc(it.notes || '')}</td></tr>`).join('');
+          return `<div class="cat-block"><div class="cat-name">${esc(cat)}</div><table class="hist-table"><thead><tr><th>פריט</th><th>כמות</th><th>הערה</th></tr></thead><tbody>${lis}</tbody></table></div>`;
+        }).join('');
+      }
+      document.getElementById('out').innerHTML = `<div class="order-doc">
+        <h2>מצב ספירות — ${esc(month)}</h2>
+        <div class="head-meta">הופק: ${today} · הבית הנבחר למעלה מציג פירוט מלא למטה</div>
+        <table class="hist-table"><thead><tr><th>בית</th><th>אחראי תחזוקה</th><th>סטטוס</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+        ${detailHtml}
+        <div class="actions-bar"><button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button></div>
+      </div>`;
+    }
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    staffGate().then(load);
+  </script>
+</body>
+</html>

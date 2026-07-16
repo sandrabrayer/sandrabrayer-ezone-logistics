@@ -121,7 +121,7 @@ function writeAuditEntry(requestId, fromStatus, toStatus, by, note) {
 var STAFF_WRITE_ACTIONS_ = [
   'approve', 'reject', 'defer', 'assign', 'markExternal', 'assignBatch',
   'setStatus', 'createInspection', 'addFinding', 'confirmFinding',
-  'deleteRequest', 'editRequest', 'setExecution',
+  'deleteRequest', 'editRequest', 'setExecution', 'submitInventory',
 ];
 
 function writeRequiresToken_(action) {
@@ -161,6 +161,8 @@ function doGet(e) {
     case 'checklist':   result = readObjects_('ChecklistItems'); break;
     case 'inspections': result = readObjects_('Inspections'); break;
     case 'findings':    result = readObjects_('InspectionFindings'); break;
+    case 'inventoryItems':  result = readObjects_('InventoryItems'); break;
+    case 'inventoryCounts': result = readObjects_('InventoryCounts'); break;
     // Verify a typed staff code against the server secret. Returns only a boolean — never
     // echoes the secret. The frontend gates the staff pages on { valid: true }.
     case 'verifyToken':
@@ -208,6 +210,7 @@ function doPost(e) {
     case 'confirmFinding':   return handleConfirmFinding_(body.payload || {});
     case 'deleteRequest':    return handleDeleteRequest_(body.payload || {});
     case 'editRequest':      return handleEditRequest_(body.payload || {});
+    case 'submitInventory':  return handleSubmitInventory_(body.payload || {});
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -657,4 +660,65 @@ function handleEditRequest_(p) {
   fields.approval_required = approvalRequired_(merged.estimated_cost, merged.urgency);
   updateRequest_(p.id, fields, req.status, req.status, p.by, 'נערך ע"י ' + p.by);
   return jsonOut_({ ok: true });
+}
+
+// ===== Inventory module (increment 25) — monthly stock count per house (מלאי) =====
+// Mirrors src/inventory.js validation. One InventoryCounts row PER ITEM, sharing a count_id.
+// Re-submitting the same house+month appends a NEW count (no destructive edits — the sheet
+// keeps full history); the frontend shows the latest counted_at per house+month.
+// Staff-token gated (submitInventory is in STAFF_WRITE_ACTIONS_): only רמי/צחי/רועי submit.
+
+var INVENTORY_CATEGORIES_ = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
+var INVENTORY_COUNTERS_ = ['רמי', 'צחי', 'רועי'];
+
+function isValidMonth_(m) {
+  return typeof m === 'string' && /^20[2-9][0-9]-(0[1-9]|1[0-2])$/.test(m);
+}
+
+function handleSubmitInventory_(p) {
+  // -- validation (mirror of validateInventorySubmission in src/inventory.js) --
+  if (!p || typeof p !== 'object') return jsonOut_({ ok: false, error: 'Missing payload' });
+  if (!p.house) return jsonOut_({ ok: false, error: 'Missing house' });
+  if (!isValidMonth_(p.month)) return jsonOut_({ ok: false, error: 'month must be YYYY-MM' });
+  if (INVENTORY_COUNTERS_.indexOf(p.counted_by) === -1) return jsonOut_({ ok: false, error: 'Invalid counted_by' });
+  if (!p.items || !p.items.length) return jsonOut_({ ok: false, error: 'Missing items' });
+
+  var filled = [];
+  for (var i = 0; i < p.items.length; i++) {
+    var it = p.items[i];
+    if (!it || !it.item) return jsonOut_({ ok: false, error: 'Item missing name' });
+    if (INVENTORY_CATEGORIES_.indexOf(it.category) === -1) {
+      return jsonOut_({ ok: false, error: 'Invalid category: ' + it.category });
+    }
+    var blank = (it.quantity === '' || it.quantity === null || it.quantity === undefined);
+    if (blank) continue;                                    // unfilled row → skipped
+    var n = Number(it.quantity);
+    if (isNaN(n) || !isFinite(n) || n < 0) {
+      return jsonOut_({ ok: false, error: 'quantity must be a number ≥ 0 (' + it.item + ')' });
+    }
+    filled.push({ category: it.category, item: it.item, quantity: n, notes: String(it.notes || '').slice(0, 500) });
+  }
+  if (filled.length === 0) return jsonOut_({ ok: false, error: 'No quantities filled' });
+
+  // -- write: one row per item, single batched setValues (not N appendRow calls) --
+  var countId = genId_('INV');
+  var countedAt = new Date().toISOString();
+  var sheet = getSheet_('InventoryCounts');
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rows = filled.map(function (it) {
+    var obj = {
+      count_id: countId, house: p.house, month: p.month,
+      counted_by: p.counted_by, counted_at: countedAt,
+      category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
+    };
+    return headers.map(function (h) {
+      return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
+    });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+
+  // Audit trail: one entry per submission (not per item).
+  writeAuditEntry(countId, '', 'ספירת מלאי', p.counted_by,
+    'ספירה חודשית ' + p.month + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
+  return jsonOut_({ ok: true, count_id: countId, items: filled.length });
 }

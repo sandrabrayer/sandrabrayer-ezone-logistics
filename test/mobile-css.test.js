@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, '..', 'src');
 
-const PAGES = ['index.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html'];
+const PAGES = ['index.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html', 'inventory.html'];
 
 for (const page of PAGES) {
   const html = readFileSync(join(srcDir, page), 'utf8');

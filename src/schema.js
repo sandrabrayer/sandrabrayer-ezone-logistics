@@ -66,6 +66,18 @@ export const HEADERS = {
 
   // The fixed core checklist Olga fills per visit. Ad-hoc additions are stored as findings.
   ChecklistItems: ['domain', 'item_text', 'active'],
+
+  // ---- Inventory module (increment 25) ----
+  // Catalog of countable items, editable in the Sheet (set active=FALSE to hide, add rows to extend).
+  InventoryItems: ['category', 'item_text', 'active'],
+
+  // One row PER ITEM per submitted count. count_id groups one submission (house × month × lead);
+  // re-submitting the same house+month appends a new count_id — the LATEST counted_at wins on display.
+  InventoryCounts: [
+    'count_id', 'house', 'month',            // month = YYYY-MM
+    'counted_by', 'counted_at',
+    'category', 'item', 'quantity', 'notes',
+  ],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -200,4 +212,46 @@ export const SEED_CHECKLIST_ITEMS = [
   { domain: 'kitchen', item_text: 'מוצרי חשמל תקינים ובמקומם', active: 'TRUE' },
   { domain: 'kitchen', item_text: 'אחסון מזון תקין ובטיחותי', active: 'TRUE' },
   { domain: 'kitchen', item_text: 'בדיקת מחסן ומלאים', active: 'TRUE' },
+];
+
+// ---- Inventory vocabularies + seed (increment 25) ----
+
+// Hebrew display values ARE the stored values (same convention as statuses).
+export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
+
+// Who may submit a monthly count: the house maintenance leads (+ רועי as backstop).
+export const INVENTORY_COUNTERS = ['רמי', 'צחי', 'רועי'];
+
+// Seed catalog — editable in the Sheet (active=FALSE hides, new rows extend; no code change needed).
+export const SEED_INVENTORY_ITEMS = [
+  // טואלטיקה
+  { category: 'טואלטיקה', item_text: 'נייר טואלט', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'מגבות נייר', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'טישו', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'סבון ידיים', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'שמפו', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'סבון רחצה', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'משחת שיניים', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'מברשות שיניים', active: 'TRUE' },
+  // חומרי ניקוי
+  { category: 'חומרי ניקוי', item_text: 'אקונומיקה', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'נוזל רצפות', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'נוזל כלים', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'ספוגים', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'מטליות', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'שקיות אשפה', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'תרסיס חיטוי', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'אבקת/ג׳ל כביסה', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'מרכך כביסה', active: 'TRUE' },
+  // מזון
+  { category: 'מזון', item_text: 'אורז', active: 'TRUE' },
+  { category: 'מזון', item_text: 'פסטה', active: 'TRUE' },
+  { category: 'מזון', item_text: 'קמח', active: 'TRUE' },
+  { category: 'מזון', item_text: 'סוכר', active: 'TRUE' },
+  { category: 'מזון', item_text: 'מלח', active: 'TRUE' },
+  { category: 'מזון', item_text: 'שמן', active: 'TRUE' },
+  { category: 'מזון', item_text: 'קפה', active: 'TRUE' },
+  { category: 'מזון', item_text: 'תה', active: 'TRUE' },
+  { category: 'מזון', item_text: 'שימורים', active: 'TRUE' },
+  { category: 'מזון', item_text: 'דגני בוקר', active: 'TRUE' },
 ];

@@ -19,7 +19,8 @@ test('the staff write set is exactly the mutating actions minus public createReq
   assert.deepEqual([...STAFF_WRITE_ACTIONS].sort(), [
     'addFinding', 'approve', 'assign', 'assignBatch', 'confirmFinding', 'createInspection',
     'defer', 'deleteRequest', 'editRequest', 'markExternal', 'reject', 'setStatus',
-  ]);
+    'setExecution', 'submitInventory',
+  ].sort());
 });
 
 test('tokenOk: only an exact match passes', () => {

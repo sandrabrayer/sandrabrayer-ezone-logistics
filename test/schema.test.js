@@ -6,10 +6,10 @@ import {
   EXECUTION_STATUS, EXECUTION_STATUS_CHOICES, ASSIGNABLE_LEADS,
 } from '../src/schema.js';
 
-test('all sheets are defined (core + inspection module)', () => {
+test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
     'AuditLog', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
-    'Inspections', 'Requests', 'Technicians',
+    'Inspections', 'InventoryCounts', 'InventoryItems', 'Requests', 'Technicians',
   ]);
 });
 
