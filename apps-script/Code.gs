@@ -392,7 +392,7 @@ function handleAssign_(p) {
   var req = getRequestById(p.id);
   if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
   // Approved → in progress (no separate "assigned" status, §5). Assignment sets the lead.
-  // Also allow RE-assigning the lead on a task already בביצוע (the "הפניה לביצוע" tab lets Roy
+  // Also allow RE-assigning the lead on a task already בביצוע (the "העברה לביצוע" tab lets Roy
   // change רמי/צחי/רועי on a live task) — no status change in that case.
   var reassigningInProgress = (req.status === ST.IN_PROGRESS);
   if (!reassigningInProgress && !canTransition_(req.status, ST.IN_PROGRESS)) {
@@ -403,7 +403,7 @@ function handleAssign_(p) {
   if (p.trade != null) fields.trade = p.trade;
   if (!reassigningInProgress) fields.status = ST.IN_PROGRESS;
   var note = reassigningInProgress
-    ? 'הופנה מחדש ל-' + p.assigned_to
+    ? 'הועבר מחדש ל-' + p.assigned_to
     : 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : '');
   updateRequest_(p.id, fields, req.status, fields.status || req.status, p.by, note);
   return jsonOut_({ ok: true });

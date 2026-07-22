@@ -120,7 +120,7 @@ export const EXECUTION_STATUS_CHOICES = [
   EXECUTION_STATUS.DONE, EXECUTION_STATUS.NOT_DONE, EXECUTION_STATUS.OTHER,
 ];
 
-// Internal leads Roy can refer a task to on the "הפניה לביצוע" tab (per-task dropdown).
+// Internal leads Roy can refer a task to on the "העברה לביצוע" tab (per-task dropdown).
 // רועי included so Roy can take a task himself; external work stays on the בעלי מקצוע tab.
 export const ASSIGNABLE_LEADS = ['רמי', 'צחי', 'רועי'];
 

@@ -163,6 +163,13 @@
       return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
     }
 
+    // A YYYY-MM month shown as MM/YYYY (mirror of formatMonthDisplay in src/inventory.js).
+    // Callers wrap it in <span dir="ltr"> so the digits never flip in the RTL layout.
+    function fmtMonth(month) {
+      const m = typeof month === 'string' ? month.match(/^(\d{4})-(\d{2})$/) : null;
+      return m ? m[2] + '/' + m[1] : esc(String(month == null ? '' : month));
+    }
+
     async function load() {
       try {
         const [houseRes, itemRes, countRes] = await Promise.all([
@@ -266,7 +273,7 @@
         ? `ספירה אחרונה לחודש זה: ${esc(prev.counted_by)} · ${new Date(prev.counted_at).toLocaleDateString('he-IL')} — הערכים למטה ממולאים ממנה`
         : 'טרם נשלחה ספירה לחודש זה';
       document.getElementById('out').innerHTML = `<div class="order-doc">
-        <h2>ספירת מלאי — ${esc(house)} · ${esc(month)}</h2>
+        <h2>ספירת מלאי — ${esc(house)} · <span dir="ltr">${fmtMonth(month)}</span></h2>
         <div class="head-meta">${meta}</div>
         ${blocks || '<p>אין פריטים פעילים בקטלוג (גיליון InventoryItems)</p>'}
         <div class="actions-bar">
@@ -340,7 +347,7 @@
         }).join('');
       }
       document.getElementById('out').innerHTML = `<div class="order-doc">
-        <h2>מצב ספירות — ${esc(month)}</h2>
+        <h2>מצב ספירות — <span dir="ltr">${fmtMonth(month)}</span></h2>
         <div class="head-meta">הופק: ${today} · הבית הנבחר למעלה מציג פירוט מלא למטה</div>
         <table class="hist-table"><thead><tr><th>בית</th><th>אחראי תחזוקה</th><th>סטטוס</th><th></th></tr></thead><tbody>${rows}</tbody></table>
         ${detailHtml}

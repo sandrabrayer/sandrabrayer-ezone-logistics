@@ -3,6 +3,36 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — terminology "העברה לביצוע" + RTL-safe dates
+
+**What:** Two UI fixes — renamed the "refer to execution" wording to "transfer to execution"
+(הפנה/הפניה → הועבר/העברה) across the app, and stopped `YYYY-MM`/`YYYY-MM-DD` dates from flipping
+in the RTL layout.
+
+**Terminology (הפנה / הפני → הועבר / העברה)** — one consistent term throughout the refer→transfer flow:
+- `src/dashboard.html`: approved-card button `הפנה לביצוע` → **`הועבר לביצוע`**; status group header
+  `מאושר — להפניה לביצוע` → **`מאושר — להעברה לביצוע`**; card status label `↩ הופנה ל:` → `↩ הועבר ל:`;
+  and the refer/assign modal (title `להעביר דרישה`, `סוג העברה`, confirm button `העבר`,
+  `לא להעביר עכשיו`, page subtitle `אישור, העברה ומעקב`).
+- `src/workorders.html`: the first tab (`REFER_TAB`, page sub, empty-state headers) `הפניה לביצוע` →
+  **`העברה לביצוע`**, and `הממתינות להפניה` → `הממתינות להעברה`.
+- `apps-script/Code.gs`: audit-log note on re-assignment `הופנה מחדש ל-` → **`הועבר מחדש ל-`** (affects
+  new entries only). Comments in `Code.gs` / `src/schema.js` and the test name in
+  `test/schema.test.js` updated to match. Test-data sample descriptions left untouched.
+
+**RTL-safe dates** — digits no longer reorder inside the right-to-left layout:
+- `src/inventory.js`: new pure `formatMonthDisplay(month)` — `2026-07` → `07/2026` (MM/YYYY),
+  malformed input returned unchanged. Mirrored inline as `fmtMonth` in `src/inventory.html`.
+- `src/inventory.html`: the count title (`ספירת מלאי — רעננה · 07/2026`) and the monthly-status
+  header now render **MM/YYYY** wrapped in an LTR bidi isolate (`<span dir="ltr">`).
+- Same isolate applied to the other date renders: the dashboard deferral date
+  (`src/dashboard.html`, `נדחה ל-`) and the inspection / re-inspection dates in `src/reports.html`.
+
+**Cache / tests**
+- Service-worker cache bumped `ezone-logistics-v1` → **`-v2`** so the cache-first pages
+  (`/inventory`, `/workorders`, `/reports`) pick up the new markup instead of serving stale copies.
+- New `formatMonthDisplay` test in `test/inventory.test.js`; full suite `node --test` green (150 tests).
+
 ## [Increment 25] — ספירת מלאי: monthly inventory count per house
 
 **What:** New staff-gated `/inventory` page + "מלאי" nav tab on every page. Once a month, the

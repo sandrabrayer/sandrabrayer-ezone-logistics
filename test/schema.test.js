@@ -31,7 +31,7 @@ test('execution-status vocabulary: three pickable values + empty default', () =>
   assert.equal(EXECUTION_STATUS.DONE, 'בוצע');
 });
 
-test('assignable leads on הפניה לביצוע are רמי / צחי / רועי', () => {
+test('assignable leads on העברה לביצוע are רמי / צחי / רועי', () => {
   assert.deepEqual(ASSIGNABLE_LEADS, ['רמי', 'צחי', 'רועי']);
 });
 

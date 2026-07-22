@@ -192,7 +192,7 @@
         const defects = fs.filter(f => f.finding_type === 'physical_defect').length;
         return `<div class="list-item" onclick="openReport('${ins.id}')">
           <div>
-            <div class="t">${esc(ins.house)} — ${fmtDate(ins.inspection_date)}</div>
+            <div class="t">${esc(ins.house)} — <span dir="ltr">${fmtDate(ins.inspection_date)}</span></div>
             <div class="m">מבקר/ת: ${esc(ins.inspector)} · ${fs.length} ממצאים${ins.patient_count !== '' ? ' · ' + esc(ins.patient_count) + ' מטופלים' : ''}</div>
           </div>
           ${defects ? `<span class="badge def">${defects} ליקויים</span>` : '<span class="badge">תקין</span>'}
@@ -255,7 +255,7 @@
 
       document.getElementById('reportDoc').innerHTML = `
         <h2>דוח בקרה — ${esc(ins.house)}</h2>
-        <div class="head-meta">תאריך: ${fmtDate(ins.inspection_date)} · מבקר/ת: ${esc(ins.inspector)}${ins.reinspect_date ? ' · בקרה חוזרת מתוכננת: ' + fmtDate(ins.reinspect_date) : ''}</div>
+        <div class="head-meta">תאריך: <span dir="ltr">${fmtDate(ins.inspection_date)}</span> · מבקר/ת: ${esc(ins.inspector)}${ins.reinspect_date ? ' · בקרה חוזרת מתוכננת: <span dir="ltr">' + fmtDate(ins.reinspect_date) + '</span>' : ''}</div>
         ${bg.length ? `<div class="bg">${bg.join(' &nbsp;•&nbsp; ')}</div>` : ''}
         ${ins.general_notes ? `<p class="summary">${esc(ins.general_notes)}</p>` : ''}
         ${domainBlocks || '<p>לא תועדו ממצאים.</p>'}

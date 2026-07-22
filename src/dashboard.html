@@ -167,7 +167,7 @@
   </div>
   <div class="wrap">
     <h1>דשבורד</h1>
-    <p class="sub">ניהול דרישות — אישור, הפניה ומעקב</p>
+    <p class="sub">ניהול דרישות — אישור, העברה ומעקב</p>
 
     <div class="controls">
       <span><label>משתמש:</label>
@@ -216,9 +216,9 @@
   <!-- Refer / assign modal: internal lead (auto by house) vs external trade -->
   <div class="modal-overlay" id="referModal">
     <div class="modal-box">
-      <h3 class="modal-title">להפנות דרישה</h3>
+      <h3 class="modal-title">להעביר דרישה</h3>
       <div class="modal-field">
-        <label>סוג הפנייה</label>
+        <label>סוג העברה</label>
         <div class="seg" style="display:flex;gap:8px">
           <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="internal" checked style="position:absolute;opacity:0">אחראי בית (פנימי)</label>
           <label style="flex:1;text-align:center;padding:8px;border:1.5px solid var(--card-line);border-radius:9px;cursor:pointer"><input type="radio" name="referType" value="external" style="position:absolute;opacity:0">בעל מקצוע (חיצוני)</label>
@@ -232,11 +232,11 @@
       <div class="modal-field" id="referExternalField" style="display:none">
         <label for="referTrade">בעל מקצוע</label>
         <select id="referTrade"></select>
-        <label style="margin-top:10px"><input type="checkbox" id="referMarkOnly" style="width:auto;margin-inline-end:6px">רק לסמן לאיגום עתידי (לא להפנות עכשיו)</label>
+        <label style="margin-top:10px"><input type="checkbox" id="referMarkOnly" style="width:auto;margin-inline-end:6px">רק לסמן לאיגום עתידי (לא להעביר עכשיו)</label>
       </div>
       <div class="modal-actions">
         <button class="act" id="referCancel">ביטול</button>
-        <button class="act go" id="referConfirm">הפנה</button>
+        <button class="act go" id="referConfirm">העבר</button>
       </div>
     </div>
   </div>
@@ -254,7 +254,7 @@
     const GROUPS = [
       { key: 'pending', title: 'ממתין לאישור', statuses: [ST.REQUEST, ST.PENDING], color: '#2dd4bf' },
       { key: 'deferred', title: 'נדחה לתאריך', statuses: [ST.DEFERRED], color: '#e0a23a' },
-      { key: 'approved', title: 'מאושר — להפניה לביצוע', statuses: [ST.APPROVED], color: '#60a5fa' },
+      { key: 'approved', title: 'מאושר — להעברה לביצוע', statuses: [ST.APPROVED], color: '#60a5fa' },
       { key: 'inprogress', title: 'בביצוע', statuses: [ST.IN_PROGRESS], color: '#34d399' },
       { key: 'done', title: 'הושלם / סגור', statuses: [ST.COMPLETED, ST.CLOSED], color: '#8b93a0' },
       { key: 'rejected', title: 'לא מאושר', statuses: [ST.NOT_APPROVED], color: '#e0584a' },
@@ -475,8 +475,8 @@
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
-            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.deferred_until ? ' · נדחה ל-' + fmtDate(r.deferred_until) : ''}</div>
-            ${r.assigned_to ? `<div class="meta" style="color:var(--accent-2);font-weight:700;margin-top:4px">↩ הופנה ל: ${escapeHtml(r.assigned_to)}${r.assignment_type === 'external' ? ' (בעל מקצוע)' : ' (אחראי בית)'}${r.batch_id ? ' · 🔗 ביקור מרוכז' : ''}</div>` : (r.trade && r.assignment_type === 'external' ? `<div class="meta" style="color:var(--amber);font-weight:700;margin-top:4px">סומן ל: ${escapeHtml(r.trade)} — ממתין לאיגום</div>` : '')}
+            <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.deferred_until ? ' · נדחה ל-<span dir="ltr">' + fmtDate(r.deferred_until) + '</span>' : ''}</div>
+            ${r.assigned_to ? `<div class="meta" style="color:var(--accent-2);font-weight:700;margin-top:4px">↩ הועבר ל: ${escapeHtml(r.assigned_to)}${r.assignment_type === 'external' ? ' (בעל מקצוע)' : ' (אחראי בית)'}${r.batch_id ? ' · 🔗 ביקור מרוכז' : ''}</div>` : (r.trade && r.assignment_type === 'external' ? `<div class="meta" style="color:var(--amber);font-weight:700;margin-top:4px">סומן ל: ${escapeHtml(r.trade)} — ממתין לאיגום</div>` : '')}
           </div>
         </div>
         <div class="actions">${actionsFor(r)}</div>
@@ -491,7 +491,7 @@
         btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
         btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
-        btns.push(`<button class="act go" onclick="doAssign('${id}')">הפנה לביצוע</button>`);
+        btns.push(`<button class="act go" onclick="doAssign('${id}')">הועבר לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
         btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
@@ -561,7 +561,7 @@
     });
     const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
 
-    // "הפנות ל" — modal: internal (lead auto-resolved from the request's house) or external (trade).
+    // "העברה ל" — modal: internal (lead auto-resolved from the request's house) or external (trade).
     let _referId = null;
     const referModal = document.getElementById('referModal');
     const referTradeSel = document.getElementById('referTrade');
