@@ -23,7 +23,7 @@
  * dependency on the service-worker globals, so the test suite can evaluate this
  * exact file and assert on them directly.
  */
-var CACHE = 'ezone-logistics-v1';
+var CACHE = 'ezone-logistics-v2';
 var SHELL = [
   './',
   './index.html',

@@ -19,6 +19,17 @@ export function isValidMonth(m) {
   return typeof m === 'string' && /^20[2-9][0-9]-(0[1-9]|1[0-2])$/.test(m);
 }
 
+/**
+ * A YYYY-MM month formatted for display as MM/YYYY (e.g. '2026-07' → '07/2026').
+ * The UI wraps the result in an LTR bidi isolate (<span dir="ltr">…</span>) so the
+ * slash-separated digits never reorder inside the RTL layout. Input that is not a
+ * well-formed YYYY-MM string is returned unchanged (defensive — never throws).
+ */
+export function formatMonthDisplay(month) {
+  const m = typeof month === 'string' ? month.match(/^(\d{4})-(\d{2})$/) : null;
+  return m ? m[2] + '/' + m[1] : String(month == null ? '' : month);
+}
+
 /** True for a countable quantity: a finite number ≥ 0 (string numerics accepted). */
 export function isValidQuantity(q) {
   if (q === '' || q === null || q === undefined) return false;

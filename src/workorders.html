@@ -50,7 +50,7 @@
     .u.normal { background: #d7f2ee; color: #0f766e; }
     .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
     .empty { color: var(--muted); }
-    /* interactive per-task rows (הפניה לביצוע / סטטוס ביצוע tabs) */
+    /* interactive per-task rows (העברה לביצוע / סטטוס ביצוע tabs) */
     .task-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid #eef1f1; }
     .task-row:last-child { border-bottom: none; }
     .task-main { flex: 1 1 240px; min-width: 200px; }
@@ -138,7 +138,7 @@
   </div>
   <div class="wrap">
     <h1>משימות פתוחות וסטטוס</h1>
-    <p class="sub">הפניה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
+    <p class="sub">העברה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
 
     <div class="lead-tabs" id="leadTabs"></div>
     <div class="actions-bar">
@@ -149,8 +149,8 @@
 
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
-    const LEADS = ['רמי', 'צחי', 'רועי'];       // pickable internal leads (הפניה לביצוע dropdown)
-    const REFER_TAB = 'הפניה לביצוע';
+    const LEADS = ['רמי', 'צחי', 'רועי'];       // pickable internal leads (העברה לביצוע dropdown)
+    const REFER_TAB = 'העברה לביצוע';
     const EXTERNAL_TAB = 'בעלי מקצוע';
     const EXEC_TAB = 'סטטוס ביצוע';
     const TABS = [REFER_TAB, EXTERNAL_TAB, EXEC_TAB];
@@ -219,12 +219,12 @@
         .slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || String(a.house).localeCompare(String(b.house), 'he'));
     }
 
-    // ── Tab: הפניה לביצוע — per-task lead dropdown (רמי / צחי / רועי), saved to the sheet. ──
+    // ── Tab: העברה לביצוע — per-task lead dropdown (רמי / צחי / רועי), saved to the sheet. ──
     function renderRefer() {
       const items = liveReferred();
       const today = new Date().toLocaleDateString('he-IL');
       if (items.length === 0) {
-        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>הפניה לביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>העברה לביצוע</h2><div class="head-meta">${today}</div><p>אין כרגע משימות פתוחות ✓</p></div>`;
         return;
       }
       const rows = items.map(r => {
@@ -237,7 +237,7 @@
         </div>`;
       }).join('');
       document.getElementById('out').innerHTML = `<div class="order-doc">
-        <h2>הפניה לביצוע</h2>
+        <h2>העברה לביצוע</h2>
         <div class="head-meta">הופק: ${today} · ${items.length} משימות פתוחות · בחר/י אחראי לכל משימה</div>
         ${rows}
       </div>`;
@@ -310,7 +310,7 @@
       const ext = requests.filter(r => r && r.assignment_type === 'external' && r.trade && DONE.indexOf(r.status) === -1);
       const today = new Date().toLocaleDateString('he-IL');
       if (ext.length === 0) {
-        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — בעלי מקצוע</h2><div class="head-meta">${today}</div><p>אין כרגע עבודות חיצוניות מאושרות הממתינות להפניה ✓</p></div>`;
+        document.getElementById('out').innerHTML = `<div class="order-doc"><h2>משימות שבועיות — בעלי מקצוע</h2><div class="head-meta">${today}</div><p>אין כרגע עבודות חיצוניות מאושרות הממתינות להעברה ✓</p></div>`;
         return;
       }
       const byTrade = {};

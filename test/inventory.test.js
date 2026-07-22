@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  currentMonth, isValidMonth, isValidQuantity,
+  currentMonth, isValidMonth, isValidQuantity, formatMonthDisplay,
   validateInventorySubmission, groupCatalog, latestCountFor, latestByHouse,
 } from '../src/inventory.js';
 import {
@@ -48,6 +48,19 @@ test('isValidMonth accepts YYYY-MM only', () => {
   assert.equal(isValidMonth('07-2026'), false);
   assert.equal(isValidMonth(''), false);
   assert.equal(isValidMonth(undefined), false);
+});
+
+test('formatMonthDisplay renders YYYY-MM as MM/YYYY (LTR-safe, month-first)', () => {
+  // The reported RTL bug: '2026-07' must show as 07/2026, not 2026-07.
+  assert.equal(formatMonthDisplay('2026-07'), '07/2026');
+  assert.equal(formatMonthDisplay('2026-01'), '01/2026');
+  assert.equal(formatMonthDisplay('2099-12'), '12/2099');
+  // Malformed input is returned unchanged rather than throwing.
+  assert.equal(formatMonthDisplay('2026-7'), '2026-7');
+  assert.equal(formatMonthDisplay('July'), 'July');
+  assert.equal(formatMonthDisplay(''), '');
+  assert.equal(formatMonthDisplay(null), '');
+  assert.equal(formatMonthDisplay(undefined), '');
 });
 
 test('isValidQuantity: finite number ≥ 0, string numerics OK, blanks rejected', () => {
