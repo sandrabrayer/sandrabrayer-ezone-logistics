@@ -224,6 +224,7 @@ function handleCreateRequest_(input) {
   // Stamp the derived approval_required flag (§6).
   row.approval_required = approvalRequired_(row.estimated_cost, row.urgency);
   appendRequest(row);
+  rebuildDigest();
   return jsonOut_({ ok: true, id: row.id });
 }
 
@@ -350,6 +351,7 @@ function handleApprove_(p) {
   updateRequest_(p.id,
     { status: ST.APPROVED, approved_by: p.by, approved_at: new Date().toISOString() },
     req.status, ST.APPROVED, p.by, p.note || '');
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -366,6 +368,7 @@ function handleReject_(p) {
   updateRequest_(p.id,
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },
     req.status, ST.NOT_APPROVED, p.by, p.reason || '');
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -382,6 +385,7 @@ function handleDefer_(p) {
   updateRequest_(p.id,
     { status: ST.DEFERRED, deferred_until: p.deferred_until },
     req.status, ST.DEFERRED, p.by, 'נדחה ל-' + p.deferred_until);
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -406,6 +410,7 @@ function handleAssign_(p) {
     ? 'הועבר מחדש ל-' + p.assigned_to
     : 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : '');
   updateRequest_(p.id, fields, req.status, fields.status || req.status, p.by, note);
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -425,6 +430,7 @@ function handleMarkExternal_(p) {
   updateRequest_(p.id,
     { assignment_type: 'external', trade: p.trade },
     req.status, req.status, p.by, 'סומן כעבודה חיצונית: ' + p.trade);
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -446,6 +452,7 @@ function handleAssignBatch_(p) {
       req.status, ST.IN_PROGRESS, p.by, 'הוקצה בביקור מרוכז ' + batchId);
     done.push(id);
   }
+  rebuildDigest();
   return jsonOut_({ ok: true, batch_id: batchId, assigned: done });
 }
 
@@ -463,6 +470,7 @@ function handleSetStatus_(p) {
     if (p.completion_notes) fields.completion_notes = p.completion_notes;
   }
   updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -485,6 +493,7 @@ function handleSetExecution_(p) {
     updateRequest_(p.id,
       { execution_status: 'בוצע', status: ST.COMPLETED, completed_at: new Date().toISOString() },
       req.status, ST.COMPLETED, p.by, 'סומן כבוצע');
+    rebuildDigest();
     return jsonOut_({ ok: true, completed: true });
   }
 
@@ -492,6 +501,7 @@ function handleSetExecution_(p) {
   updateRequest_(p.id,
     { execution_status: p.value },
     req.status, req.status, p.by, 'סטטוס ביצוע: ' + p.value);
+  rebuildDigest();
   return jsonOut_({ ok: true, completed: false });
 }
 
@@ -532,6 +542,7 @@ function handleCreateInspection_(p) {
     domain_kitchen_summary: p.domain_kitchen_summary || '',
     general_notes: p.general_notes || '', reinspect_date: p.reinspect_date || '', status: 'in-progress',
   });
+  rebuildDigest();
   return jsonOut_({ ok: true, id: id });
 }
 
@@ -552,6 +563,7 @@ function handleAddFinding_(p) {
     suggested_category: p.suggested_category || '',
     linked_request_id: '', confirmed_by: '', confirmed_at: '',
   });
+  rebuildDigest();
   return jsonOut_({ ok: true, id: id });
 }
 
@@ -588,6 +600,7 @@ function handleConfirmFinding_(p) {
 
   // Link the finding back to the request.
   updateFinding_(finding.id, { linked_request_id: row.id, confirmed_by: p.by, confirmed_at: new Date().toISOString() });
+  rebuildDigest();
   return jsonOut_({ ok: true, request_id: row.id });
 }
 
@@ -628,6 +641,7 @@ function handleDeleteRequest_(p) {
       // Audit the deletion BEFORE removing the row (keeps a record of what was deleted).
       writeAuditEntry(p.id, data[r][headers.indexOf('status')], 'נמחק', p.by, p.note || 'נמחק ע"י ' + p.by);
       sheet.deleteRow(r + 1);
+      rebuildDigest();
       return jsonOut_({ ok: true });
     }
   }
@@ -659,6 +673,7 @@ function handleEditRequest_(p) {
   // Recompute approval_required from the (possibly new) cost/urgency.
   fields.approval_required = approvalRequired_(merged.estimated_cost, merged.urgency);
   updateRequest_(p.id, fields, req.status, req.status, p.by, 'נערך ע"י ' + p.by);
+  rebuildDigest();
   return jsonOut_({ ok: true });
 }
 
@@ -720,5 +735,6 @@ function handleSubmitInventory_(p) {
   // Audit trail: one entry per submission (not per item).
   writeAuditEntry(countId, '', 'ספירת מלאי', p.counted_by,
     'ספירה חודשית ' + p.month + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
+  rebuildDigest();
   return jsonOut_({ ok: true, count_id: countId, items: filled.length });
 }

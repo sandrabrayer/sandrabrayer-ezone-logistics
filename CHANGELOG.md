@@ -3,6 +3,47 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — read-only digest export for the coordinators app
+
+**What:** A new **read-only digest** so the coordinators app can consume Logistics data with
+**zero access to financial fields**. The digest is a **separate spreadsheet** (NOT the main
+Logistics sheet — Google Sheets sharing is per-file, not per-tab, so digest tabs in the main
+sheet would expose `estimated_cost` / `actual_cost`). It holds **exactly two tabs**
+(`OpenTickets`, `WeeklyCounts`) and nothing else; `brayersandra@gmail.com` gets Viewer only.
+
+**Contract** — `DIGEST-CONTRACT.md` (new, repo root) freezes the schema: house-id map (four OPEN
+houses — רעננה→raanana, רמות השבים→ramot, קיסריה עפרוני→efroni, ריהאב→rehab; הפרדס / שדה אליעזר
+excluded as pre-opening; unmapped houses omitted, never guessed), both tab column orders, the
+active-ticket rule (status NOT `סגור` and NOT `לא מאושר`), and the invariants (no financial
+fields ever; columns append-only; consumers read by header name).
+
+**Apps Script (`apps-script/digest.gs`, new)**
+- `setupDigest()` — run once manually: creates the digest spreadsheet (or reuses an existing
+  `DIGEST_SHEET_ID`), writes both header rows, grants Viewer to `brayersandra@gmail.com`, stores
+  the id in Script Property `DIGEST_SHEET_ID`, and `Logger.log()`s it. Idempotent.
+- `rebuildDigest()` — wipes and rewrites both tabs from `Requests` / `AuditLog` / `Houses` /
+  `InventoryCounts`. Wrapped in `LockService`, fully idempotent, and defensive (no-op until set
+  up, errors logged not thrown) so a digest hiccup can't break a staff write.
+- `installDigestTrigger()` — run once: 15-minute time-driven backstop for eventual consistency.
+- `Code.gs`: every write handler now calls `rebuildDigest()` on its success path so the digest
+  refreshes right after each write (the trigger is the catch-up backstop).
+- **Money scrubber** applied to `title` and `shortagesSummary`: strips `₪`, `ש"ח`, `שח`, `NIS`,
+  `ILS` and any adjacent digit groups; bare quantities (counts, not prices) are kept, and marker
+  letters inside real words (משחק, TENNIS) are boundary-guarded.
+- **WeeklyCounts** always emits 4 houses × last 8 weeks so gaps surface as `לא בוצעה`. Inventory
+  is still MONTHLY (no weekly counts built yet): an optional `week_start` column is read if
+  present; until it exists every row is `לא בוצעה` with an empty `shortagesSummary` — monthly
+  counts are never fabricated into weekly data.
+
+**Pure logic + tests**
+- `src/digest.js` (new): dependency-free helpers mirrored verbatim in `digest.gs` — house-id map,
+  active-ticket filter, money scrubber, title truncation (single line, ≤80, ellipsis), Sunday
+  (Israeli) week-start, and last-N-week-starts.
+- `test/digest.test.js` (new): `node --test` coverage for all of the above (21 tests).
+
+**Deploy** — after redeploy, run `setupDigest()` once (creates the file + grants Viewer + logs
+the id), then `installDigestTrigger()` once (15-minute backstop).
+
 ## [Unreleased] — terminology "העברה לביצוע" + RTL-safe dates
 
 **What:** Two UI fixes — renamed the "refer to execution" wording to "transfer to execution"
