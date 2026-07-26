@@ -44,9 +44,6 @@
     .cat-block { border: 1px solid #e3e8e8; border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
     .cat-name { font-weight: 800; font-size: 1.1rem; color: #0f766e; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
     .count-badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #d7f2ee; color: #0f766e; }
-    .kitchen-badge { font-size: .74rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; background: #fde8cf; color: #9a5b12; margin-inline-start: 6px; }
-    .kitchen-note { background: #fff7ec; border: 1px solid #f0d9b5; color: #8a5a12; border-radius: 8px; padding: 8px 12px; font-size: .86rem; margin-bottom: 10px; }
-    .prev-qty.from-kitchen { color: #9a5b12; font-weight: 700; }
     .item-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1f1; }
     .item-row:last-child { border-bottom: none; }
     .item-name { flex: 1 1 200px; min-width: 160px; }
@@ -129,7 +126,7 @@
   </div>
   <div class="wrap">
     <h1>ספירת מלאי שבועית</h1>
-    <p class="sub">ספירה שבועית לכל בית (שבוע ישראלי, מתחיל בראשון), ע״י רכז/ת הבית: טואלטיקה (כולל נייר טואלט), חומרי ניקוי ומזון. שליחה חוזרת לאותו שבוע מחליפה את הספירה המוצגת (ההיסטוריה נשמרת בגיליון). אם המטבח כבר שלח ספירת מזון לשבוע — הערכים ממולאים מראש לאישור.</p>
+    <p class="sub">ספירה שבועית לכל בית (שבוע ישראלי, מתחיל בראשון), ע״י רכז/ת הבית: טואלטיקה (כולל נייר טואלט) וחומרי ניקוי. שליחה חוזרת לאותו שבוע מחליפה את הספירה המוצגת (ההיסטוריה נשמרת בגיליון). מזון מנוהל באפליקציית המטבח.</p>
 
     <div class="lead-tabs" id="modeTabs"></div>
 
@@ -145,8 +142,8 @@
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
     // Mirrors src/schema.js — INVENTORY_CATEGORIES / INVENTORY_COUNTERS / INVENTORY_HOUSE_COORDINATORS.
-    const CATEGORIES = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
-    const FOOD_CATEGORY = 'מזון';
+    // Logistics owns ONLY טואלטיקה + חומרי ניקוי (food is owned by ezone-kitchen).
+    const CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'];
     const COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
     const HOUSE_COORDINATORS = {
       'קיסריה עפרוני': 'שירה', 'ריהאב': 'יעקב', 'רעננה': 'אורן',
@@ -258,32 +255,15 @@
       return out;
     }
 
-    // A count row's source; blank reads as 'coordinator' (mirror of resolveSource).
-    function rowSource(r) {
-      const s = r && r.source != null ? String(r.source).trim() : '';
-      return s === '' ? 'coordinator' : s;
-    }
-
-    // Latest count for house+week, optionally scoped to a source (mirror of latestCountFor).
-    function latestCountFor(house, week, source) {
+    // Latest count for house+week (mirror of latestCountFor in src/inventory.js).
+    function latestCountFor(house, week) {
       const mine = counts.filter(r => r && String(r.house) === String(house) &&
-        String(r.week_start) === String(week) && (source == null || rowSource(r) === source));
+        String(r.week_start) === String(week));
       if (mine.length === 0) return null;
       let winner = null;
       mine.forEach(r => { if (!winner || String(r.counted_at) > String(winner.counted_at)) winner = r; });
       const items = mine.filter(r => r.count_id === winner.count_id);
-      return { count_id: winner.count_id, counted_by: winner.counted_by, counted_at: winner.counted_at, source: rowSource(winner), items };
-    }
-
-    // Prefill map for house+week (mirror of weeklyPrefill): kitchen מזון seeds first, a prior
-    // coordinator count overrides. byItem[item] = { quantity, notes, source }.
-    function weeklyPrefill(house, week) {
-      const coordinator = latestCountFor(house, week, 'coordinator');
-      const kitchen = latestCountFor(house, week, 'kitchen');
-      const byItem = {};
-      if (kitchen) kitchen.items.forEach(it => { byItem[it.item] = { quantity: it.quantity, notes: it.notes || '', source: 'kitchen' }; });
-      if (coordinator) coordinator.items.forEach(it => { byItem[it.item] = { quantity: it.quantity, notes: it.notes || '', source: 'coordinator' }; });
-      return { byItem, coordinator, kitchen };
+      return { count_id: winner.count_id, counted_by: winner.counted_by, counted_at: winner.counted_at, items };
     }
 
     function render() {
@@ -291,54 +271,39 @@
       return renderCountForm();
     }
 
-    // ── Tab: ספירה — quantity per item, grouped by category; prefilled from the latest coordinator
-    //    count, and (for מזון) from the kitchen's count when the coordinator hasn't counted yet. ──
+    // ── Tab: ספירה — quantity per item, grouped by category; prefilled from the latest count. ──
     function renderCountForm() {
       const house = document.getElementById('houseSel').value;
       const week = document.getElementById('weekSel').value;
       const grouped = groupedCatalog();
-      const pre = weeklyPrefill(house, week);
-      const byItem = pre.byItem;
+      const prev = latestCountFor(house, week);
+      const prevQty = {}, prevNote = {};
+      if (prev) prev.items.forEach(it => { prevQty[it.item] = it.quantity; prevNote[it.item] = it.notes || ''; });
 
       const blocks = CATEGORIES.map(cat => {
         const items = grouped[cat] || [];
         if (items.length === 0) return '';
-        const isFood = cat === FOOD_CATEGORY;
-        const kitchenSeeded = isFood && pre.kitchen && !pre.coordinator;
         const rows = items.map((name) => {
           const id = cat + '::' + name;
-          const pf = Object.prototype.hasOwnProperty.call(byItem, name) ? byItem[name] : null;
-          const pq = pf ? pf.quantity : '';
-          const fromKitchen = pf && pf.source === 'kitchen';
-          const label = pq !== '' ? (fromKitchen ? 'מהמטבח: ' + esc(pq) : 'נספר: ' + esc(pq)) : '';
-          const note = pf && pf.notes ? esc(pf.notes) : '';
+          const pq = Object.prototype.hasOwnProperty.call(prevQty, name) ? prevQty[name] : '';
+          const note = prevNote[name] ? esc(prevNote[name]) : '';
           return `<div class="item-row">
             <span class="item-name">${esc(name)}</span>
-            <span class="prev-qty${fromKitchen ? ' from-kitchen' : ''}">${label}</span>
+            <span class="prev-qty">${pq !== '' ? 'נספר: ' + esc(pq) : ''}</span>
             <input class="qty-in" type="number" min="0" step="1" inputmode="numeric" placeholder="כמות"
                    data-cat="${esc(cat)}" data-item="${esc(name)}" value="${pq !== '' ? esc(pq) : ''}" />
             <input class="note-in" type="text" maxlength="200" placeholder="הערה (רשות)" data-note-for="${esc(id)}" value="${note}" />
           </div>`;
         }).join('');
-        const badge = kitchenSeeded ? '<span class="kitchen-badge">מולא מהמטבח — לאישור</span>' : '';
-        return `<div class="cat-block"><div class="cat-name">${esc(cat)} <span class="count-badge">${items.length} פריטים</span>${badge}</div>${rows}</div>`;
+        return `<div class="cat-block"><div class="cat-name">${esc(cat)} <span class="count-badge">${items.length} פריטים</span></div>${rows}</div>`;
       }).join('');
 
-      let meta;
-      if (pre.coordinator) {
-        meta = `ספירה אחרונה לשבוע זה: ${esc(pre.coordinator.counted_by)} · ${new Date(pre.coordinator.counted_at).toLocaleDateString('he-IL')} — הערכים למטה ממולאים ממנה`;
-      } else if (pre.kitchen) {
-        meta = `המטבח שלח ספירת מזון לשבוע זה (${new Date(pre.kitchen.counted_at).toLocaleDateString('he-IL')}) — ערכי המזון ממולאים מראש. אשר/י או תקן/י ושלח/י.`;
-      } else {
-        meta = 'טרם נשלחה ספירה לשבוע זה';
-      }
-      const kitchenBanner = (pre.kitchen && !pre.coordinator)
-        ? '<div class="kitchen-note">🍳 קטע המזון מולא מספירת המטבח. אשר/י את הכמויות (או תקן/י) — השליחה נרשמת כספירת רכז/ת, וספירת המטבח נשמרת בנפרד.</div>'
-        : '';
+      const meta = prev
+        ? `ספירה אחרונה לשבוע זה: ${esc(prev.counted_by)} · ${new Date(prev.counted_at).toLocaleDateString('he-IL')} — הערכים למטה ממולאים ממנה`
+        : 'טרם נשלחה ספירה לשבוע זה';
       document.getElementById('out').innerHTML = `<div class="order-doc">
         <h2>ספירת מלאי — ${esc(house)} · <span dir="ltr">${fmtWeek(week)}</span></h2>
         <div class="head-meta">${meta}</div>
-        ${kitchenBanner}
         ${blocks || '<p>אין פריטים פעילים בקטלוג (גיליון InventoryItems)</p>'}
         <div class="actions-bar">
           <button class="btn go" id="submitBtn" onclick="submitCount(this)">שליחת ספירה</button>
@@ -371,14 +336,14 @@
 
       btn.disabled = true; flash.textContent = 'שולח…';
       try {
-        // Coordinator submit — the server stamps source='coordinator' and derives month.
+        // Coordinator submit — the server derives month from week_start.
         const j = await post('submitInventory', { house, week_start, counted_by, items });
         if (j && j.ok) {
           flash.textContent = 'נשמר ✓ (' + j.items + ' פריטים)';
           // reflect locally so the form/status refresh without a full reload
           const counted_at = new Date().toISOString();
           const month = monthFromWeek(week_start);
-          items.forEach(it => counts.push({ count_id: j.count_id, house, month, week_start, source: 'coordinator',
+          items.forEach(it => counts.push({ count_id: j.count_id, house, month, week_start,
             counted_by, counted_at, category: it.category, item: it.item, quantity: it.quantity, notes: it.notes }));
           setTimeout(render, 900);
         } else {
@@ -388,35 +353,24 @@
       btn.disabled = false;
     };
 
-    // ── Tab: מצב שבועי — which houses were counted THIS WEEK vs טרם נספר, by whom, latest numbers.
-    //    "נספר" means a COORDINATOR count exists; a kitchen-only count shows as "מטבח בלבד". ──
+    // ── Tab: מצב שבועי — which houses were counted THIS WEEK vs טרם נספר, by whom, latest numbers. ──
     function renderStatus() {
       const week = document.getElementById('weekSel').value;
       const today = new Date().toLocaleDateString('he-IL');
       const rows = houses.map(h => {
-        const coord = latestCountFor(h.name, week, 'coordinator');
-        const kitchen = latestCountFor(h.name, week, 'kitchen');
-        let state, count;
-        if (coord) {
-          state = `<span class="pill">נספר · ${esc(coord.counted_by)} · ${new Date(coord.counted_at).toLocaleDateString('he-IL')}</span>`;
-          count = coord.items.length + ' פריטים';
-        } else if (kitchen) {
-          state = '<span class="pill miss">מטבח בלבד — טרם אושר</span>';
-          count = kitchen.items.length + ' פריטי מזון';
-        } else {
-          state = '<span class="pill miss">טרם נספר</span>';
-          count = '';
-        }
-        return `<tr><td><b>${esc(h.name)}</b></td><td>${esc(HOUSE_COORDINATORS[h.name] || '')}</td><td>${state}</td><td>${count}</td></tr>`;
+        const c = latestCountFor(h.name, week);
+        const state = c
+          ? `<span class="pill">נספר · ${esc(c.counted_by)} · ${new Date(c.counted_at).toLocaleDateString('he-IL')}</span>`
+          : '<span class="pill miss">טרם נספר</span>';
+        return `<tr><td><b>${esc(h.name)}</b></td><td>${esc(HOUSE_COORDINATORS[h.name] || '')}</td><td>${state}</td><td>${c ? c.items.length + ' פריטים' : ''}</td></tr>`;
       }).join('');
       const house = document.getElementById('houseSel').value;
-      const detail = latestCountFor(house, week, 'coordinator') || latestCountFor(house, week, 'kitchen');
+      const detail = latestCountFor(house, week);
       let detailHtml = '';
       if (detail) {
-        const srcLabel = detail.source === 'kitchen' ? ' (ספירת מטבח)' : '';
         const byCat = {};
         detail.items.forEach(it => { (byCat[it.category] = byCat[it.category] || []).push(it); });
-        detailHtml = '<h2 style="margin-top:22px">פירוט — ' + esc(house) + esc(srcLabel) + '</h2>' + CATEGORIES.map(cat => {
+        detailHtml = '<h2 style="margin-top:22px">פירוט — ' + esc(house) + '</h2>' + CATEGORIES.map(cat => {
           const its = byCat[cat] || [];
           if (its.length === 0) return '';
           const lis = its.map(it => `<tr><td>${esc(it.item)}</td><td>${esc(it.quantity)}</td><td>${esc(it.notes || '')}</td></tr>`).join('');

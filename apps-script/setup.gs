@@ -36,12 +36,12 @@ var HEADERS = {
   ],
   ChecklistItems: ['domain', 'item_text', 'active'],
   InventoryItems: ['category', 'item_text', 'active'],
-  // week_start + source APPENDED at the end (increment 26). Existing sheets gain them via the
-  // append branch in setupSheet() — no reorder, no data loss.
+  // week_start APPENDED at the end (increment 26). Existing sheets gain it via the append branch
+  // in setupSheet() — no reorder, no data loss.
   InventoryCounts: [
     'count_id', 'house', 'month', 'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
-    'week_start', 'source',
+    'week_start',
   ],
 };
 
@@ -83,8 +83,10 @@ var SEED_CHECKLIST = [
   ['kitchen', 'בדיקת מחסן ומלאים', 'TRUE'],
 ];
 
-// Inventory catalog seed (increment 25) — edit in the Sheet, no code change needed
-// (active=FALSE hides an item, new rows extend the list).
+// Inventory catalog seed — edit in the Sheet, no code change needed (active=FALSE hides an item,
+// new rows extend the list). Increment 26: the מזון rows are seeded active=FALSE — food moved to
+// ezone-kitchen, but the rows stay so increment-25 historical counts still resolve. Do NOT delete
+// them (setupSheet only writes seeds on a FRESH sheet; this preserves the retired-but-kept intent).
 var SEED_INVENTORY_ITEMS = [
   ['טואלטיקה', 'נייר טואלט', 'TRUE'],
   ['טואלטיקה', 'מגבות נייר', 'TRUE'],
@@ -103,16 +105,17 @@ var SEED_INVENTORY_ITEMS = [
   ['חומרי ניקוי', 'תרסיס חיטוי', 'TRUE'],
   ['חומרי ניקוי', 'אבקת/ג׳ל כביסה', 'TRUE'],
   ['חומרי ניקוי', 'מרכך כביסה', 'TRUE'],
-  ['מזון', 'אורז', 'TRUE'],
-  ['מזון', 'פסטה', 'TRUE'],
-  ['מזון', 'קמח', 'TRUE'],
-  ['מזון', 'סוכר', 'TRUE'],
-  ['מזון', 'מלח', 'TRUE'],
-  ['מזון', 'שמן', 'TRUE'],
-  ['מזון', 'קפה', 'TRUE'],
-  ['מזון', 'תה', 'TRUE'],
-  ['מזון', 'שימורים', 'TRUE'],
-  ['מזון', 'דגני בוקר', 'TRUE'],
+  // מזון RETIRED (increment 26) — kept as active=FALSE so increment-25 history resolves.
+  ['מזון', 'אורז', 'FALSE'],
+  ['מזון', 'פסטה', 'FALSE'],
+  ['מזון', 'קמח', 'FALSE'],
+  ['מזון', 'סוכר', 'FALSE'],
+  ['מזון', 'מלח', 'FALSE'],
+  ['מזון', 'שמן', 'FALSE'],
+  ['מזון', 'קפה', 'FALSE'],
+  ['מזון', 'תה', 'FALSE'],
+  ['מזון', 'שימורים', 'FALSE'],
+  ['מזון', 'דגני בוקר', 'FALSE'],
 ];
 
 function setupSheet() {

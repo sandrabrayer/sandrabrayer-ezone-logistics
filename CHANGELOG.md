@@ -3,57 +3,48 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
-## [Unreleased] — increment 26: weekly inventory + kitchen ingest
+## [Unreleased] — increment 26: weekly inventory (Logistics categories only)
 
-**What:** Inventory counts move from **monthly** to **weekly** (Sunday-based Israeli week), the
-counters become the house **coordinators**, and the kitchen gets its own **fail-closed ingest**
-so cooks can submit a מזון-only count that the coordinator confirms rather than re-counts.
+**What:** Inventory counts move from **monthly** to **weekly** (Sunday-based Israeli week) and the
+counters become the house **coordinators**. Logistics now owns **only the categories no other app
+owns — טואלטיקה and חומרי ניקוי**. Food (מזון) is dropped: **ezone-kitchen is the system of record
+for food** (per-house stock with units/min/par levels, monthly food budgets, purchases, menus and
+occupancy-driven consumption); Logistics does not duplicate any of it.
 
 **Data model (`src/schema.js`, `apps-script/setup.gs`)**
-- `InventoryCounts` gains **two columns, APPENDED AT THE END** — never reordered/removed:
-  - `week_start` — `YYYY-MM-DD`, the Sunday that begins the Israeli week.
-  - `source` — `'coordinator'` / `'kitchen'`. A **blank** cell on an existing row reads as
-    `'coordinator'` (backfill rule — no data migration).
-  - `month` stays populated (derived from `week_start` on new rows, kept as-is on historical
-    rows) so nothing that still reads it breaks.
-- `setupSheet()` appends both columns to existing sheets idempotently (its existing append branch).
+- `InventoryCounts` gains **one column, APPENDED AT THE END** — never reordered/removed:
+  `week_start` (`YYYY-MM-DD`, the Sunday that begins the Israeli week). `month` stays populated
+  (derived from `week_start` on new rows, kept as-is on historical rows) so nothing that still
+  reads it breaks. `setupSheet()` appends it to existing sheets idempotently.
+- `INVENTORY_CATEGORIES` drops `מזון` → `['טואלטיקה', 'חומרי ניקוי']`. The seeded `מזון` catalog
+  rows are **kept** but flagged **`active=FALSE`** (not deleted) so increment-25 historical counts
+  that reference those item names still resolve; they are hidden from the count form. `setupSheet()`
+  only seeds a fresh sheet, so no migration is needed on this branch.
 - `INVENTORY_COUNTERS` are now the coordinators — שירה (קיסריה עפרוני) · יעקב (ריהאב) ·
   אורן (רעננה) · אביב (רמות השבים) · צחי (שדה אליעזר) · רועי — with רמי/צחי kept accepted as a
-  backstop. New `INVENTORY_HOUSE_COORDINATORS` map and `INVENTORY_SOURCES`.
+  backstop. New `INVENTORY_HOUSE_COORDINATORS` map.
 
 **Pure logic (`src/inventory.js`, tested under `node --test`)**
 - Week math: `weekStart` / `currentWeekStart` / `isValidWeekStart` (must be a Sunday) /
   `monthFromWeekStart` / `recentWeekStarts`, plus `formatWeekDisplay` (`YYYY-MM-DD` → `DD/MM/YYYY`)
   reusing `formatMonthDisplay`'s LTR bidi-isolate approach for RTL-safe dates.
-- `resolveSource` (blank = coordinator), `validateKitchenCount` + `foodItemSet` + `kitchenRows`
-  (מזון-locked, catalog-gated), and `weeklyPrefill` (kitchen seeds the מזון section, a prior
-  coordinator count overrides). `validateInventorySubmission` / `latestCountFor` / `latestByHouse`
-  now key on `week_start` and accept an optional source filter.
+- `validateInventorySubmission` / `latestCountFor` / `latestByHouse` now key on `week_start`.
 
 **Server (`apps-script/Code.gs`)**
-- `submitInventory` writes weekly rows with `source='coordinator'` (batched `setValues` + one
-  `AuditLog` entry, `rebuildDigest()` on success), deriving `month` from `week_start`.
-- New **`submitKitchenCount`** action, gated by its **OWN** Script Property
-  **`KITCHEN_COUNT_SECRET`** (fail-closed: missing/mismatched secret ⇒ reject, never write) —
-  independent of `STAFF_WRITE_TOKEN`. **HARD CONSTRAINTS:** category is forced to `מזון` (any
-  other category rejected — the kitchen can never write טואלטיקה/חומרי ניקוי); items are validated
-  against the active `InventoryItems` מזון catalog (unknown items rejected, not created); house is
-  validated against `Houses`; `weekStart` must be a Sunday; `countedBy` ≤ 60, `notes` ≤ 200. Writes
-  one batched `setValues` with `source='kitchen'` + a single `AuditLog` entry (`ספירת מטבח`) +
-  `rebuildDigest()`.
+- `submitInventory` writes weekly rows (batched `setValues` + one `AuditLog` entry,
+  `rebuildDigest()` on success), deriving `month` from `week_start`. Category validation is limited
+  to the two Logistics categories. Staff-token gated as before.
 
-**Coordinator prefill (`src/inventory.html`)**
+**UI (`src/inventory.html`)**
 - Week picker (recent Sundays) defaulting to the **current week**; `נספר ע״י` defaults to the
-  house coordinator. `מצב שבועי` tab replaces `מצב חודשי` (counted-this-week vs טרם נספר;
-  kitchen-only shows as "מטבח בלבד — טרם אושר"). When a kitchen count exists for the house+week,
-  the מזון section is **prefilled from it and clearly labelled "מהמטבח / מולא מהמטבח — לאישור"** so
-  the coordinator confirms rather than re-counts. Their submit still writes `source='coordinator'`
-  — both rows are kept, nothing overwritten.
+  house coordinator. `מצב שבועי` tab replaces `מצב חודשי` (counted-this-week vs טרם נספר). The
+  count form offers only טואלטיקה and חומרי ניקוי; the intro notes food is managed in the kitchen app.
 
 **Digest (`apps-script/digest.gs`)** — no schema change to `DIGEST-CONTRACT.md`
-- `WeeklyCounts` now carries real data: `status='בוצעה'` **only** when a `source='coordinator'`
-  row exists for that house+week (a kitchen-only count does **not** satisfy it — it shows as
-  `לא בוצעה`). `shortagesSummary` draws from **both** sources (qty-0 items + notes), money-scrubbed.
+- `WeeklyCounts` `status='בוצעה'` whenever a Logistics count row exists for that house+week (else
+  `לא בוצעה`). `shortagesSummary` draws from the **Logistics** count only (qty-0 items + notes),
+  money-scrubbed. A clear `TODO` marks where **food shortages** will be merged in from the kitchen
+  digest in a later increment — deliberately not stubbed or faked.
 
 ## [Unreleased] — digest house-id vocabulary → v2 (shared with ezone-kitchen)
 

@@ -252,11 +252,14 @@ function buildOpenTicketRows_() {
 /**
  * WeeklyCounts rows — always 4 houses × last 8 weeks (32 rows) so gaps surface as 'לא בוצעה'.
  *
- * Increment 26: inventory is WEEKLY and rows carry `week_start` + `source`. status is 'בוצעה'
- * ONLY when a source='coordinator' row exists for that house+week — a kitchen-only count does
- * NOT satisfy it (the coordinator is the confirming human). shortagesSummary draws from BOTH
- * sources (items at qty 0, with any note), so a kitchen count still surfaces shortages even
- * before the coordinator confirms. A blank source reads as 'coordinator' (backfill rule).
+ * Increment 26: inventory is WEEKLY and rows carry `week_start`. status is 'בוצעה' whenever a
+ * Logistics count row exists for that house+week; otherwise 'לא בוצעה'. shortagesSummary draws
+ * from the Logistics count (טואלטיקה + חומרי ניקוי) — items at qty 0, with any note.
+ *
+ * NOTE / TODO (food shortages): Logistics no longer counts מזון — ezone-kitchen owns food. Food
+ * shortages will arrive in a LATER increment from the kitchen digest and be merged in here. This
+ * is intentionally NOT stubbed or faked — until that increment lands, shortagesSummary reflects
+ * Logistics categories only.
  *
  * We still read week_start defensively: if the column is absent (pre-migration sheet), every
  * row emits 'לא בוצעה' with an empty shortagesSummary — we never fabricate weekly data.
@@ -267,7 +270,7 @@ function buildWeeklyCountRows_() {
 
   var counts = readObjects_('InventoryCounts');
   var hasWeek = counts.length > 0 && Object.prototype.hasOwnProperty.call(counts[0], 'week_start');
-  var byKey = {}; // 'houseId|weekStart' -> { updatedAt, hasCoordinator, shortages[] }
+  var byKey = {}; // 'houseId|weekStart' -> { updatedAt, shortages[] }
 
   if (hasWeek) {
     counts.forEach(function (c) {
@@ -276,11 +279,10 @@ function buildWeeklyCountRows_() {
       var wk = digestDateOnly_(c.week_start);
       if (!wk) return;
       var key = house + '|' + wk;
-      var bucket = byKey[key] || (byKey[key] = { updatedAt: '', hasCoordinator: false, shortages: [] });
-      if (digestResolveSource_(c.source) === 'coordinator') bucket.hasCoordinator = true;
+      var bucket = byKey[key] || (byKey[key] = { updatedAt: '', shortages: [] });
       var ts = digestIso_(c.counted_at);
       if (ts && ts > bucket.updatedAt) bucket.updatedAt = ts;
-      // A shortage = an item counted at qty 0; carry any note alongside it. Both sources count.
+      // A shortage = an item counted at qty 0; carry any note alongside it.
       var qtyZero = (c.quantity === 0 || String(c.quantity).trim() === '0');
       if (qtyZero) {
         var label = String(c.item || '');
@@ -294,33 +296,20 @@ function buildWeeklyCountRows_() {
   DIGEST_HOUSE_ID_ORDER_.forEach(function (house) {
     weeks.forEach(function (wk) {
       var bucket = hasWeek ? byKey[house + '|' + wk] : null;
-      if (bucket && bucket.hasCoordinator) {
-        // Coordinator confirmed → 'בוצעה', shortages from both sources.
+      if (bucket) {
+        // A count exists for this house/week → 'בוצעה', with any Logistics shortages.
         rows.push([
           house, wk, DIGEST_DONE_,
           digestScrubMoney_(bucket.shortages.join('; ')),
           bucket.updatedAt || nowIso,
         ]);
-      } else if (bucket) {
-        // Kitchen-only (or non-coordinator) count → NOT 'בוצעה', but its shortages still surface.
-        rows.push([
-          house, wk, DIGEST_NOT_DONE_,
-          digestScrubMoney_(bucket.shortages.join('; ')),
-          bucket.updatedAt || nowIso,
-        ]);
       } else {
-        // No count at all for this house/week → not-done, no shortages.
+        // No count for this house/week → not-done, no shortages.
         rows.push([house, wk, DIGEST_NOT_DONE_, '', nowIso]);
       }
     });
   });
   return rows;
-}
-
-// Resolve a count row's source; a blank cell reads as 'coordinator' (mirror of resolveSource).
-function digestResolveSource_(v) {
-  var s = v == null ? '' : String(v).trim();
-  return s === '' ? 'coordinator' : s;
 }
 
 // ===== Trigger =====
