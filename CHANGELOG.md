@@ -3,6 +3,24 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 27: UI polish — typography weights
+
+**What:** CSS-only pass across all six pages (index, dashboard, workorders, inventory, inspection,
+reports) to make heading and tab weights consistent and less heavy. No markup, logic, backend or
+`Code.gs`/apps-script changes; Hebrew RTL rendering is untouched (only `font-weight` values change).
+
+**Per page (each has its own inline `<style>` block — applied consistently, there is no shared
+stylesheet):**
+- **Page titles & card/section titles → `font-weight: 700`** (were `800`): `h1` on every page;
+  `.attention h2` and `.group h2` (dashboard); `h2` (inspection); `.order-house-name` (workorders);
+  `.cat-name` (inventory); `.rollup-lead-name` (reports). Titles already at `700` (`.req .title`,
+  `.list-item .t`, `.rollup-house-name`) were left as-is.
+- **Nav tabs & tab buttons → `font-weight: 600`, active → `700`**: `.nav a` on every page goes from
+  `700` to `600`, and `.nav a.active` now sets an explicit `700`. The `.lead-tab` buttons
+  (ספירה / מצב שבועי in inventory; lead tabs in workorders) go from `800` to `600`, with
+  `.lead-tab.active` now `700`.
+- **Form labels unchanged** (`label`, `.seg` segmented controls keep their existing weights).
+
 ## [Unreleased] — increment 26: weekly inventory (Logistics categories only)
 
 **What:** Inventory counts move from **monthly** to **weekly** (Sunday-based Israeli week) and the
