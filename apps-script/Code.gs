@@ -677,24 +677,79 @@ function handleEditRequest_(p) {
   return jsonOut_({ ok: true });
 }
 
-// ===== Inventory module (increment 25) — monthly stock count per house (מלאי) =====
+// ===== Inventory module (increments 25–26) — WEEKLY stock count per house (מלאי) =====
 // Mirrors src/inventory.js validation. One InventoryCounts row PER ITEM, sharing a count_id.
-// Re-submitting the same house+month appends a NEW count (no destructive edits — the sheet
-// keeps full history); the frontend shows the latest counted_at per house+month.
-// Staff-token gated (submitInventory is in STAFF_WRITE_ACTIONS_): only רמי/צחי/רועי submit.
+// Re-submitting the same house+week appends a NEW count (no destructive edits — the sheet keeps
+// full history); the frontend shows the latest counted_at per house+week.
+//
+// SCOPE (increment 26): Logistics owns ONLY טואלטיקה and חומרי ניקוי. Food (מזון) is owned by
+// ezone-kitchen (its own system of record) — Logistics does not duplicate it. Counts are WEEKLY:
+// each row carries week_start (YYYY-MM-DD Sunday), APPENDED at the end of the header (setValues
+// maps by header name, so the appended column just fills in). month is still written (derived
+// from week_start) so nothing that still reads it breaks.
+// Staff-token gated (submitInventory is in STAFF_WRITE_ACTIONS_): only the coordinators submit.
 
-var INVENTORY_CATEGORIES_ = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
-var INVENTORY_COUNTERS_ = ['רמי', 'צחי', 'רועי'];
+var INVENTORY_CATEGORIES_ = ['טואלטיקה', 'חומרי ניקוי'];
+// Coordinators (increment 26), + רמי/צחי/רועי accepted as a backstop. Mirror of INVENTORY_COUNTERS.
+var INVENTORY_COUNTERS_ = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
 
 function isValidMonth_(m) {
   return typeof m === 'string' && /^20[2-9][0-9]-(0[1-9]|1[0-2])$/.test(m);
+}
+
+// Sunday-based Israeli week-start, computed in UTC (mirror of weekStart in src/inventory.js).
+function weekStart_(date) {
+  var d = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+  if (isNaN(d.getTime())) return '';
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.toISOString().slice(0, 10);
+}
+
+// A YYYY-MM-DD that is BOTH well-formed AND a Sunday (mirror of isValidWeekStart).
+function isValidWeekStart_(w) {
+  if (typeof w !== 'string') return false;
+  if (!/^20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(w)) return false;
+  return weekStart_(w) === w;
+}
+
+// The YYYY-MM month a valid week_start falls in — for the derived `month` column.
+function monthFromWeekStart_(w) {
+  return isValidWeekStart_(w) ? w.slice(0, 7) : '';
+}
+
+/**
+ * Write validated count rows in ONE batched setValues + a single AuditLog entry.
+ * `filled` = [{category,item,quantity,notes}].
+ */
+function writeInventoryRows_(house, weekStartStr, countedBy, filled, auditAction, auditNote) {
+  var countId = genId_('INV');
+  var countedAt = new Date().toISOString();
+  var month = monthFromWeekStart_(weekStartStr);
+  var sheet = getSheet_('InventoryCounts');
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rows = filled.map(function (it) {
+    var obj = {
+      count_id: countId, house: house, month: month,
+      counted_by: countedBy, counted_at: countedAt,
+      category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
+      week_start: weekStartStr,
+    };
+    return headers.map(function (h) {
+      return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
+    });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+  writeAuditEntry(countId, '', auditAction, countedBy, auditNote);
+  rebuildDigest();
+  return { count_id: countId, items: filled.length };
 }
 
 function handleSubmitInventory_(p) {
   // -- validation (mirror of validateInventorySubmission in src/inventory.js) --
   if (!p || typeof p !== 'object') return jsonOut_({ ok: false, error: 'Missing payload' });
   if (!p.house) return jsonOut_({ ok: false, error: 'Missing house' });
-  if (!isValidMonth_(p.month)) return jsonOut_({ ok: false, error: 'month must be YYYY-MM' });
+  if (!isValidWeekStart_(p.week_start)) return jsonOut_({ ok: false, error: 'week_start must be a Sunday (YYYY-MM-DD)' });
   if (INVENTORY_COUNTERS_.indexOf(p.counted_by) === -1) return jsonOut_({ ok: false, error: 'Invalid counted_by' });
   if (!p.items || !p.items.length) return jsonOut_({ ok: false, error: 'Missing items' });
 
@@ -715,26 +770,8 @@ function handleSubmitInventory_(p) {
   }
   if (filled.length === 0) return jsonOut_({ ok: false, error: 'No quantities filled' });
 
-  // -- write: one row per item, single batched setValues (not N appendRow calls) --
-  var countId = genId_('INV');
-  var countedAt = new Date().toISOString();
-  var sheet = getSheet_('InventoryCounts');
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var rows = filled.map(function (it) {
-    var obj = {
-      count_id: countId, house: p.house, month: p.month,
-      counted_by: p.counted_by, counted_at: countedAt,
-      category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
-    };
-    return headers.map(function (h) {
-      return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
-    });
-  });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-
-  // Audit trail: one entry per submission (not per item).
-  writeAuditEntry(countId, '', 'ספירת מלאי', p.counted_by,
-    'ספירה חודשית ' + p.month + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
-  rebuildDigest();
-  return jsonOut_({ ok: true, count_id: countId, items: filled.length });
+  var res = writeInventoryRows_(
+    p.house, p.week_start, p.counted_by, filled, 'ספירת מלאי',
+    'ספירה שבועית ' + p.week_start + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
+  return jsonOut_({ ok: true, count_id: res.count_id, items: res.items });
 }

@@ -71,12 +71,18 @@ export const HEADERS = {
   // Catalog of countable items, editable in the Sheet (set active=FALSE to hide, add rows to extend).
   InventoryItems: ['category', 'item_text', 'active'],
 
-  // One row PER ITEM per submitted count. count_id groups one submission (house × month × lead);
-  // re-submitting the same house+month appends a new count_id — the LATEST counted_at wins on display.
+  // One row PER ITEM per submitted count. count_id groups one submission (house × week × counter);
+  // re-submitting the same house+week appends a new count_id — the LATEST counted_at wins on display.
+  //
+  // Increment 26: counts moved from MONTHLY to WEEKLY. `week_start` (YYYY-MM-DD, the Sunday that
+  // begins the Israeli week) is APPENDED AT THE END — never reorder or remove the original columns.
+  // `month` stays populated (derived from week_start on new rows; kept as-is on historical rows) so
+  // nothing downstream that still reads it breaks.
   InventoryCounts: [
-    'count_id', 'house', 'month',            // month = YYYY-MM
+    'count_id', 'house', 'month',            // month = YYYY-MM (historical + derived from week_start)
     'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
+    'week_start',                            // YYYY-MM-DD, Sunday (Israeli week) — appended inc. 26
   ],
 };
 
@@ -217,12 +223,33 @@ export const SEED_CHECKLIST_ITEMS = [
 // ---- Inventory vocabularies + seed (increment 25) ----
 
 // Hebrew display values ARE the stored values (same convention as statuses).
-export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
+//
+// Increment 26: מזון (food) is dropped — ezone-kitchen is the system of record for food (per-house
+// stock with units/min/par, budgets, purchases, menus, occupancy-driven consumption). Logistics
+// owns ONLY the categories no other app owns: טואלטיקה and חומרי ניקוי. The seeded מזון catalog
+// rows are kept but flagged active=FALSE (see SEED_INVENTORY_ITEMS) so increment-25 history renders.
+export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'];
 
-// Who may submit a monthly count: the house maintenance leads (+ רועי as backstop).
-export const INVENTORY_COUNTERS = ['רמי', 'צחי', 'רועי'];
+// Who may submit a weekly count (increment 26): the house COORDINATORS, not the maintenance
+// leads. Each open/pre-opening house has a coordinator; רועי is the cross-house backstop and
+// רמי/צחי stay accepted as a maintenance-lead backstop (צחי is also קיסריה/צפון's coordinator).
+export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
+
+// House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
+// people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (ריהאב) · אורן (רעננה) ·
+// אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop).
+export const INVENTORY_HOUSE_COORDINATORS = {
+  'קיסריה עפרוני': 'שירה',
+  'ריהאב': 'יעקב',
+  'רעננה': 'אורן',
+  'רמות השבים': 'אביב',
+  'שדה אליעזר': 'צחי',
+};
 
 // Seed catalog — editable in the Sheet (active=FALSE hides, new rows extend; no code change needed).
+// The מזון rows are seeded active=FALSE (increment 26): food moved to ezone-kitchen, but the rows
+// stay so increment-25 historical counts that reference these item names still resolve. They are
+// hidden from the count form (groupCatalog skips inactive rows AND non-INVENTORY_CATEGORIES rows).
 export const SEED_INVENTORY_ITEMS = [
   // טואלטיקה
   { category: 'טואלטיקה', item_text: 'נייר טואלט', active: 'TRUE' },
@@ -243,15 +270,16 @@ export const SEED_INVENTORY_ITEMS = [
   { category: 'חומרי ניקוי', item_text: 'תרסיס חיטוי', active: 'TRUE' },
   { category: 'חומרי ניקוי', item_text: 'אבקת/ג׳ל כביסה', active: 'TRUE' },
   { category: 'חומרי ניקוי', item_text: 'מרכך כביסה', active: 'TRUE' },
-  // מזון
-  { category: 'מזון', item_text: 'אורז', active: 'TRUE' },
-  { category: 'מזון', item_text: 'פסטה', active: 'TRUE' },
-  { category: 'מזון', item_text: 'קמח', active: 'TRUE' },
-  { category: 'מזון', item_text: 'סוכר', active: 'TRUE' },
-  { category: 'מזון', item_text: 'מלח', active: 'TRUE' },
-  { category: 'מזון', item_text: 'שמן', active: 'TRUE' },
-  { category: 'מזון', item_text: 'קפה', active: 'TRUE' },
-  { category: 'מזון', item_text: 'תה', active: 'TRUE' },
-  { category: 'מזון', item_text: 'שימורים', active: 'TRUE' },
-  { category: 'מזון', item_text: 'דגני בוקר', active: 'TRUE' },
+  // מזון — RETIRED in increment 26 (food is owned by ezone-kitchen). Kept as active=FALSE so
+  // historical increment-25 counts referencing these names still resolve; hidden from the form.
+  { category: 'מזון', item_text: 'אורז', active: 'FALSE' },
+  { category: 'מזון', item_text: 'פסטה', active: 'FALSE' },
+  { category: 'מזון', item_text: 'קמח', active: 'FALSE' },
+  { category: 'מזון', item_text: 'סוכר', active: 'FALSE' },
+  { category: 'מזון', item_text: 'מלח', active: 'FALSE' },
+  { category: 'מזון', item_text: 'שמן', active: 'FALSE' },
+  { category: 'מזון', item_text: 'קפה', active: 'FALSE' },
+  { category: 'מזון', item_text: 'תה', active: 'FALSE' },
+  { category: 'מזון', item_text: 'שימורים', active: 'FALSE' },
+  { category: 'מזון', item_text: 'דגני בוקר', active: 'FALSE' },
 ];

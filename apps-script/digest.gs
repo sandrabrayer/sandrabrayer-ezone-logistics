@@ -36,14 +36,16 @@ var DIGEST_NOT_DONE_ = 'לא בוצעה';
 // ---- Pure helpers (mirror of src/digest.js) ----
 
 // House id map — the four OPEN houses with a coordinator. הפרדס / שדה אליעזר are pre-opening
-// (excluded). Any house that does not map is OMITTED, never guessed.
+// (excluded). Any house that does not map is OMITTED, never guessed. IDs use the SHARED
+// ezone-kitchen vocabulary (contract v2); the mapping applies at the digest boundary ONLY —
+// Logistics still keys on the Hebrew house NAME internally.
 var DIGEST_HOUSE_IDS_ = {
-  'רעננה': 'raanana',
-  'רמות השבים': 'ramot',
-  'קיסריה עפרוני': 'efroni',
-  'ריהאב': 'rehab',
+  'רעננה': 'raanana-asher',
+  'רמות השבים': 'ramot-hashavim',
+  'קיסריה עפרוני': 'caesarea-ofroni',
+  'ריהאב': 'caesarea-rehab',
 };
-var DIGEST_HOUSE_ID_ORDER_ = ['raanana', 'ramot', 'efroni', 'rehab'];
+var DIGEST_HOUSE_ID_ORDER_ = ['raanana-asher', 'ramot-hashavim', 'caesarea-ofroni', 'caesarea-rehab'];
 
 function digestHouseId_(name) {
   if (name == null) return null;
@@ -250,15 +252,22 @@ function buildOpenTicketRows_() {
 /**
  * WeeklyCounts rows — always 4 houses × last 8 weeks (32 rows) so gaps surface as 'לא בוצעה'.
  *
- * Inventory is currently MONTHLY (no weekly counts built yet). We read an OPTIONAL `week_start`
- * column on InventoryCounts if it exists; until it does, every row is emitted as 'לא בוצעה'
- * with an empty shortagesSummary. We do NOT fabricate weekly data from the monthly counts.
+ * Increment 26: inventory is WEEKLY and rows carry `week_start`. status is 'בוצעה' whenever a
+ * Logistics count row exists for that house+week; otherwise 'לא בוצעה'. shortagesSummary draws
+ * from the Logistics count (טואלטיקה + חומרי ניקוי) — items at qty 0, with any note.
+ *
+ * NOTE / TODO (food shortages): Logistics no longer counts מזון — ezone-kitchen owns food. Food
+ * shortages will arrive in a LATER increment from the kitchen digest and be merged in here. This
+ * is intentionally NOT stubbed or faked — until that increment lands, shortagesSummary reflects
+ * Logistics categories only.
+ *
+ * We still read week_start defensively: if the column is absent (pre-migration sheet), every
+ * row emits 'לא בוצעה' with an empty shortagesSummary — we never fabricate weekly data.
  */
 function buildWeeklyCountRows_() {
   var weeks = digestRecentWeekStarts_(new Date(), DIGEST_WEEKS_);
   var nowIso = new Date().toISOString();
 
-  // Detect the optional week_start column and, if present, index counts by house-id × week.
   var counts = readObjects_('InventoryCounts');
   var hasWeek = counts.length > 0 && Object.prototype.hasOwnProperty.call(counts[0], 'week_start');
   var byKey = {}; // 'houseId|weekStart' -> { updatedAt, shortages[] }
@@ -288,13 +297,14 @@ function buildWeeklyCountRows_() {
     weeks.forEach(function (wk) {
       var bucket = hasWeek ? byKey[house + '|' + wk] : null;
       if (bucket) {
+        // A count exists for this house/week → 'בוצעה', with any Logistics shortages.
         rows.push([
           house, wk, DIGEST_DONE_,
           digestScrubMoney_(bucket.shortages.join('; ')),
           bucket.updatedAt || nowIso,
         ]);
       } else {
-        // No weekly count for this house/week → surfaced as not-done, no shortages.
+        // No count for this house/week → not-done, no shortages.
         rows.push([house, wk, DIGEST_NOT_DONE_, '', nowIso]);
       }
     });

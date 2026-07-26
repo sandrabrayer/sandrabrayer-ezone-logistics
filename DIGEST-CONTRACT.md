@@ -1,4 +1,4 @@
-# Digest export — frozen contract
+# Digest export — frozen contract (v2)
 
 The Logistics app publishes a **read-only digest** so the coordinators app can consume
 Logistics data with **zero access to financial fields**. The digest lives in a **separate
@@ -12,9 +12,11 @@ coordinators repo.
 
 --- FROZEN CONTRACT ---
 
-House ids: raanana (רעננה) · ramot (רמות השבים) · efroni (קיסריה עפרוני) ·
-rehab (ריהאב). הפרדס and שדה אליעזר are excluded (pre-opening, no coordinator).
-Houses that do not map are omitted, never guessed.
+House ids (v2): raanana-asher (רעננה) · ramot-hashavim (רמות השבים) ·
+caesarea-ofroni (קיסריה עפרוני) · caesarea-rehab (ריהאב). הפרדס and שדה אליעזר are
+excluded (pre-opening, no coordinator). Houses that do not map are omitted, never guessed.
+The house-id vocabulary is SHARED with ezone-kitchen so all E-Zone apps key houses on one
+namespace; ids apply at the digest boundary only (Logistics keys on the Hebrew name internally).
 
 Tab OpenTickets — columns in this exact order:
   1 house            house id
