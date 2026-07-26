@@ -25,7 +25,7 @@
     .brand .sub { color: var(--muted); font-weight: 500; }
     .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; background: var(--accent-grad); }
     .wrap { max-width: 680px; margin: 0 auto; padding: 22px 18px 64px; }
-    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+    h1 { font-size: 1.6rem; font-weight: 700; margin: 6px 0 2px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
     .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
     .card { background: var(--card); background: linear-gradient(var(--card), var(--card)) padding-box, var(--accent-grad) border-box; border: 1px solid transparent; border-radius: var(--radius); padding: 20px 18px; margin-bottom: 18px; box-shadow: 0 0 30px -10px var(--glow); }
     label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 6px; }
@@ -34,7 +34,7 @@
     input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
     select option { background: #161a20; color: var(--ink); }
     textarea { resize: vertical; min-height: 56px; }
-    h2 { font-size: 1.1rem; font-weight: 800; margin: 4px 0 12px; }
+    h2 { font-size: 1.1rem; font-weight: 700; margin: 4px 0 12px; }
     .domain-title { color: var(--accent-2); }
     .check { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
     .check .t { flex: 1; }
@@ -57,9 +57,9 @@
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .pill { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); }
     .nav { display: flex; gap: 6px; flex-wrap: wrap; }
-    .nav a { font-size: .82rem; font-weight: 700; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a { font-size: .82rem; font-weight: 600; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
     .nav a:hover { color: var(--ink); border-color: var(--card-line); }
-    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    .nav a.active { font-weight: 700; color: #14171c; background: var(--accent-grad); }
 
     /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
        Fully scoped to this media query so the desktop layout stays pixel-identical.
