@@ -10,15 +10,20 @@
 // The four OPEN houses that have a coordinator. הפרדס and שדה אליעזר are pre-opening (no
 // coordinator) and are deliberately excluded. Any house name that does not map is OMITTED
 // from the digest — never guessed.
+//
+// The ids use the SHARED ezone-kitchen vocabulary (contract v2) so every E-Zone app keys houses
+// on one namespace. IDs apply at the digest boundary ONLY — inside Logistics, Requests.house /
+// Inspections.house / InventoryCounts.house still key on the Hebrew NAME (renaming would orphan
+// historical rows).
 export const HOUSE_IDS = {
-  'רעננה': 'raanana',
-  'רמות השבים': 'ramot',
-  'קיסריה עפרוני': 'efroni',
-  'ריהאב': 'rehab',
+  'רעננה': 'raanana-asher',
+  'רמות השבים': 'ramot-hashavim',
+  'קיסריה עפרוני': 'caesarea-ofroni',
+  'ריהאב': 'caesarea-rehab',
 };
 
 // The digest's four house ids, in their canonical (WeeklyCounts) order.
-export const DIGEST_HOUSE_IDS = ['raanana', 'ramot', 'efroni', 'rehab'];
+export const DIGEST_HOUSE_IDS = ['raanana-asher', 'ramot-hashavim', 'caesarea-ofroni', 'caesarea-rehab'];
 
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */
 export function houseId(name) {

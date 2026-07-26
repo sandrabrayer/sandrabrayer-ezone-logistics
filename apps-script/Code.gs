@@ -132,6 +132,12 @@ function getWriteToken_() {
   return PropertiesService.getScriptProperties().getProperty('STAFF_WRITE_TOKEN') || '';
 }
 
+// The kitchen ingest's OWN secret — a separate Script Property so the cooks app can never touch
+// the staff-only writes. Fail-closed: if it is unset, tokenOk_ rejects every kitchen request.
+function getKitchenSecret_() {
+  return PropertiesService.getScriptProperties().getProperty('KITCHEN_COUNT_SECRET') || '';
+}
+
 /**
  * Constant-time equality of the provided token against the server secret. Fail-closed:
  * false if the server secret is unset/empty, if the provided token is empty, or on length
@@ -187,10 +193,16 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
-  // Fail-closed auth on staff writes: they must carry the shared token, verified server-side
-  // against the STAFF_WRITE_TOKEN Script Property. createRequest (public intake) is exempt.
-  // This is the real gate — the public /exec is world-callable, so never trust the Node layer.
-  if (writeRequiresToken_(body.action) && !tokenOk_((body && body.token) || '', getWriteToken_())) {
+  // Fail-closed auth. The kitchen ingest is gated by its OWN secret (KITCHEN_COUNT_SECRET),
+  // NOT the shared staff token — a leaked kitchen secret must never unlock the staff writes.
+  // Every other staff write must carry the shared STAFF_WRITE_TOKEN. createRequest (public
+  // intake) is exempt. This is the real gate — the public /exec is world-callable, so never
+  // trust the Node layer. tokenOk_ is fail-closed: a missing/empty server secret rejects.
+  if (body.action === 'submitKitchenCount') {
+    if (!tokenOk_((body && body.token) || '', getKitchenSecret_())) {
+      return jsonOut_({ ok: false, error: 'Unauthorized' });
+    }
+  } else if (writeRequiresToken_(body.action) && !tokenOk_((body && body.token) || '', getWriteToken_())) {
     return jsonOut_({ ok: false, error: 'Unauthorized' });
   }
 
@@ -210,7 +222,8 @@ function doPost(e) {
     case 'confirmFinding':   return handleConfirmFinding_(body.payload || {});
     case 'deleteRequest':    return handleDeleteRequest_(body.payload || {});
     case 'editRequest':      return handleEditRequest_(body.payload || {});
-    case 'submitInventory':  return handleSubmitInventory_(body.payload || {});
+    case 'submitInventory':    return handleSubmitInventory_(body.payload || {});
+    case 'submitKitchenCount': return handleSubmitKitchenCount_(body.payload || {});
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -677,24 +690,80 @@ function handleEditRequest_(p) {
   return jsonOut_({ ok: true });
 }
 
-// ===== Inventory module (increment 25) — monthly stock count per house (מלאי) =====
+// ===== Inventory module (increments 25–26) — WEEKLY stock count per house (מלאי) =====
 // Mirrors src/inventory.js validation. One InventoryCounts row PER ITEM, sharing a count_id.
-// Re-submitting the same house+month appends a NEW count (no destructive edits — the sheet
-// keeps full history); the frontend shows the latest counted_at per house+month.
-// Staff-token gated (submitInventory is in STAFF_WRITE_ACTIONS_): only רמי/צחי/רועי submit.
+// Re-submitting the same house+week appends a NEW count (no destructive edits — the sheet keeps
+// full history); the frontend shows the latest counted_at per house+week.
+//
+// Increment 26: counts are WEEKLY. Each row carries week_start (YYYY-MM-DD Sunday) and source
+// ('coordinator' / 'kitchen'), both APPENDED at the end of the header (setValues maps by header
+// name, so appended columns just fill in). month is still written (derived from week_start) so
+// nothing that still reads it breaks. Two write paths:
+//   - submitInventory (coordinator): STAFF_WRITE_TOKEN gated, source='coordinator', all categories.
+//   - submitKitchenCount (kitchen): KITCHEN_COUNT_SECRET gated, source='kitchen', מזון ONLY.
 
 var INVENTORY_CATEGORIES_ = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
-var INVENTORY_COUNTERS_ = ['רמי', 'צחי', 'רועי'];
+// Coordinators (increment 26), + רמי/צחי/רועי accepted as a backstop. Mirror of INVENTORY_COUNTERS.
+var INVENTORY_COUNTERS_ = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
+var KITCHEN_CATEGORY_ = 'מזון';
 
 function isValidMonth_(m) {
   return typeof m === 'string' && /^20[2-9][0-9]-(0[1-9]|1[0-2])$/.test(m);
+}
+
+// Sunday-based Israeli week-start, computed in UTC (mirror of weekStart in src/inventory.js).
+function weekStart_(date) {
+  var d = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+  if (isNaN(d.getTime())) return '';
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.toISOString().slice(0, 10);
+}
+
+// A YYYY-MM-DD that is BOTH well-formed AND a Sunday (mirror of isValidWeekStart).
+function isValidWeekStart_(w) {
+  if (typeof w !== 'string') return false;
+  if (!/^20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(w)) return false;
+  return weekStart_(w) === w;
+}
+
+// The YYYY-MM month a valid week_start falls in — for the derived `month` column.
+function monthFromWeekStart_(w) {
+  return isValidWeekStart_(w) ? w.slice(0, 7) : '';
+}
+
+/**
+ * Write validated count rows in ONE batched setValues + a single AuditLog entry. Shared by both
+ * write paths. `filled` = [{category,item,quantity,notes}]; `source` = 'coordinator'/'kitchen'.
+ */
+function writeInventoryRows_(house, weekStartStr, countedBy, source, filled, auditAction, auditNote) {
+  var countId = genId_('INV');
+  var countedAt = new Date().toISOString();
+  var month = monthFromWeekStart_(weekStartStr);
+  var sheet = getSheet_('InventoryCounts');
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rows = filled.map(function (it) {
+    var obj = {
+      count_id: countId, house: house, month: month,
+      counted_by: countedBy, counted_at: countedAt,
+      category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
+      week_start: weekStartStr, source: source,
+    };
+    return headers.map(function (h) {
+      return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
+    });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+  writeAuditEntry(countId, '', auditAction, countedBy, auditNote);
+  rebuildDigest();
+  return { count_id: countId, items: filled.length };
 }
 
 function handleSubmitInventory_(p) {
   // -- validation (mirror of validateInventorySubmission in src/inventory.js) --
   if (!p || typeof p !== 'object') return jsonOut_({ ok: false, error: 'Missing payload' });
   if (!p.house) return jsonOut_({ ok: false, error: 'Missing house' });
-  if (!isValidMonth_(p.month)) return jsonOut_({ ok: false, error: 'month must be YYYY-MM' });
+  if (!isValidWeekStart_(p.week_start)) return jsonOut_({ ok: false, error: 'week_start must be a Sunday (YYYY-MM-DD)' });
   if (INVENTORY_COUNTERS_.indexOf(p.counted_by) === -1) return jsonOut_({ ok: false, error: 'Invalid counted_by' });
   if (!p.items || !p.items.length) return jsonOut_({ ok: false, error: 'Missing items' });
 
@@ -715,26 +784,76 @@ function handleSubmitInventory_(p) {
   }
   if (filled.length === 0) return jsonOut_({ ok: false, error: 'No quantities filled' });
 
-  // -- write: one row per item, single batched setValues (not N appendRow calls) --
-  var countId = genId_('INV');
-  var countedAt = new Date().toISOString();
-  var sheet = getSheet_('InventoryCounts');
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var rows = filled.map(function (it) {
-    var obj = {
-      count_id: countId, house: p.house, month: p.month,
-      counted_by: p.counted_by, counted_at: countedAt,
-      category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
-    };
-    return headers.map(function (h) {
-      return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
-    });
-  });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+  var res = writeInventoryRows_(
+    p.house, p.week_start, p.counted_by, 'coordinator', filled, 'ספירת מלאי',
+    'ספירה שבועית ' + p.week_start + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
+  return jsonOut_({ ok: true, count_id: res.count_id, items: res.items });
+}
 
-  // Audit trail: one entry per submission (not per item).
-  writeAuditEntry(countId, '', 'ספירת מלאי', p.counted_by,
-    'ספירה חודשית ' + p.month + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
-  rebuildDigest();
-  return jsonOut_({ ok: true, count_id: countId, items: filled.length });
+/**
+ * Kitchen ingest (increment 26). Gated by KITCHEN_COUNT_SECRET (see doPost). HARD CONSTRAINTS:
+ *  - category is FORCED to מזון; any request carrying another category is rejected. The kitchen
+ *    can never write טואלטיקה or חומרי ניקוי.
+ *  - every item is validated against the ACTIVE מזון catalog; unknown items are rejected, not
+ *    silently created.
+ * Mirror of validateKitchenCount in src/inventory.js. Payload:
+ *   { house, weekStart (YYYY-MM-DD Sunday), countedBy (<=60), items:[{item,quantity,notes}] }.
+ */
+function handleSubmitKitchenCount_(p) {
+  if (!p || typeof p !== 'object') return jsonOut_({ ok: false, error: 'Missing payload' });
+  if (!p.house) return jsonOut_({ ok: false, error: 'Missing house' });
+  // House must be a real, known house.
+  var houses = getHouses();
+  var known = false;
+  for (var h = 0; h < houses.length; h++) {
+    if (String(houses[h].name) === String(p.house)) { known = true; break; }
+  }
+  if (!known) return jsonOut_({ ok: false, error: 'Unknown house: ' + p.house });
+  if (!isValidWeekStart_(p.weekStart)) return jsonOut_({ ok: false, error: 'weekStart must be a Sunday (YYYY-MM-DD)' });
+  if (typeof p.countedBy !== 'string' || p.countedBy.trim() === '') return jsonOut_({ ok: false, error: 'Missing countedBy' });
+  if (p.countedBy.length > 60) return jsonOut_({ ok: false, error: 'countedBy must be <= 60 chars' });
+  // Reject any payload-level category that is not מזון.
+  if (p.category != null && String(p.category) !== KITCHEN_CATEGORY_) {
+    return jsonOut_({ ok: false, error: 'Kitchen may only write ' + KITCHEN_CATEGORY_ });
+  }
+  if (!p.items || !p.items.length) return jsonOut_({ ok: false, error: 'Missing items' });
+
+  // Build the allowed set from the ACTIVE מזון catalog.
+  var catalog = readObjects_('InventoryItems');
+  var allowed = {};
+  for (var c = 0; c < catalog.length; c++) {
+    var row = catalog[c];
+    if (!row || !row.item_text) continue;
+    if (String(row.active).toUpperCase() === 'FALSE') continue;
+    if (row.category !== KITCHEN_CATEGORY_) continue;
+    allowed[String(row.item_text)] = true;
+  }
+
+  var filled = [];
+  for (var i = 0; i < p.items.length; i++) {
+    var it = p.items[i];
+    if (!it || !it.item) return jsonOut_({ ok: false, error: 'Item missing name' });
+    // Per-item category guard — locked to מזון at the item level too.
+    if (it.category != null && String(it.category) !== KITCHEN_CATEGORY_) {
+      return jsonOut_({ ok: false, error: 'Kitchen may only write ' + KITCHEN_CATEGORY_ });
+    }
+    if (!allowed[String(it.item)]) return jsonOut_({ ok: false, error: 'Unknown item: ' + it.item });
+    if (it.notes != null && String(it.notes).length > 200) {
+      return jsonOut_({ ok: false, error: 'notes must be <= 200 chars (' + it.item + ')' });
+    }
+    var blank = (it.quantity === '' || it.quantity === null || it.quantity === undefined);
+    if (blank) continue;
+    var n = Number(it.quantity);
+    if (isNaN(n) || !isFinite(n) || n < 0) {
+      return jsonOut_({ ok: false, error: 'quantity must be a number ≥ 0 (' + it.item + ')' });
+    }
+    // category is FORCED to מזון regardless of what (if anything) the payload claimed.
+    filled.push({ category: KITCHEN_CATEGORY_, item: String(it.item), quantity: n, notes: String(it.notes || '').slice(0, 200) });
+  }
+  if (filled.length === 0) return jsonOut_({ ok: false, error: 'No quantities filled' });
+
+  var res = writeInventoryRows_(
+    p.house, p.weekStart, p.countedBy, 'kitchen', filled, 'ספירת מטבח',
+    'ספירת מטבח ' + p.weekStart + ' — ' + p.house + ' (' + filled.length + ' פריטים)');
+  return jsonOut_({ ok: true, count_id: res.count_id, items: res.items });
 }

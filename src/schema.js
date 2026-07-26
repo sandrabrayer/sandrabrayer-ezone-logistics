@@ -71,12 +71,20 @@ export const HEADERS = {
   // Catalog of countable items, editable in the Sheet (set active=FALSE to hide, add rows to extend).
   InventoryItems: ['category', 'item_text', 'active'],
 
-  // One row PER ITEM per submitted count. count_id groups one submission (house × month × lead);
-  // re-submitting the same house+month appends a new count_id — the LATEST counted_at wins on display.
+  // One row PER ITEM per submitted count. count_id groups one submission (house × week × counter);
+  // re-submitting the same house+week appends a new count_id — the LATEST counted_at wins on display.
+  //
+  // Increment 26: counts moved from MONTHLY to WEEKLY. `week_start` (YYYY-MM-DD, the Sunday that
+  // begins the Israeli week) and `source` ('coordinator' / 'kitchen') are APPENDED AT THE END —
+  // never reorder or remove the original columns. `month` stays populated (derived from week_start
+  // on new rows; kept as-is on historical rows) so nothing downstream that still reads it breaks.
+  // A BLANK source on a historical row reads as 'coordinator' (backfill rule, no data migration).
   InventoryCounts: [
-    'count_id', 'house', 'month',            // month = YYYY-MM
+    'count_id', 'house', 'month',            // month = YYYY-MM (historical + derived from week_start)
     'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
+    'week_start',                            // YYYY-MM-DD, Sunday (Israeli week) — appended inc. 26
+    'source',                                // 'coordinator' / 'kitchen'; blank = 'coordinator'
   ],
 };
 
@@ -219,8 +227,25 @@ export const SEED_CHECKLIST_ITEMS = [
 // Hebrew display values ARE the stored values (same convention as statuses).
 export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי', 'מזון'];
 
-// Who may submit a monthly count: the house maintenance leads (+ רועי as backstop).
-export const INVENTORY_COUNTERS = ['רמי', 'צחי', 'רועי'];
+// Who may submit a weekly count (increment 26): the house COORDINATORS, not the maintenance
+// leads. Each open/pre-opening house has a coordinator; רועי is the cross-house backstop and
+// רמי/צחי stay accepted as a maintenance-lead backstop (צחי is also קיסריה/צפון's coordinator).
+export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
+
+// House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
+// people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (ריהאב) · אורן (רעננה) ·
+// אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop).
+export const INVENTORY_HOUSE_COORDINATORS = {
+  'קיסריה עפרוני': 'שירה',
+  'ריהאב': 'יעקב',
+  'רעננה': 'אורן',
+  'רמות השבים': 'אביב',
+  'שדה אליעזר': 'צחי',
+};
+
+// Where a count row came from. A blank cell on a historical row reads as 'coordinator'
+// (backfill rule — see resolveSource in src/inventory.js). The kitchen ingest writes 'kitchen'.
+export const INVENTORY_SOURCES = { COORDINATOR: 'coordinator', KITCHEN: 'kitchen' };
 
 // Seed catalog — editable in the Sheet (active=FALSE hides, new rows extend; no code change needed).
 export const SEED_INVENTORY_ITEMS = [

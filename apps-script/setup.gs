@@ -36,9 +36,12 @@ var HEADERS = {
   ],
   ChecklistItems: ['domain', 'item_text', 'active'],
   InventoryItems: ['category', 'item_text', 'active'],
+  // week_start + source APPENDED at the end (increment 26). Existing sheets gain them via the
+  // append branch in setupSheet() — no reorder, no data loss.
   InventoryCounts: [
     'count_id', 'house', 'month', 'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
+    'week_start', 'source',
   ],
 };
 
