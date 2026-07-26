@@ -3,6 +3,76 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 28] — Users, roles, and the new approval chain
+
+**What:** Replaces the old Roy→Sandra threshold split with a role-based approval chain, adds a
+`Users` sheet as the identity roster, and enforces roles server-side on every write action (not
+just in the UI). Also a small header cleanup: the topbar drops the "E-ZONE" text for an emblem +
+the app's Hebrew name.
+
+**Added**
+- `Users` sheet (`name | role | house | active`) — roles `coordinator / maintenance / field_ops /
+  ops_manager / ceo`. `house` encodes scope: `*` = all houses, `cluster:a+b` = maintenance
+  clusters, a literal house name = a coordinator's own house. Seeded (all active): רועי field_ops,
+  אולגה ops_manager, סנדרה ceo, רמי maintenance (sharon), צחי maintenance (caesarea+north), and the
+  four house coordinators (שירה/יעקב/אורן/אביב). `setupSheet()` seeds by name/key, so reruns add
+  only missing rows — never duplicates.
+- `ceo_ceiling` Config key (default blank = disabled). Intentionally **not** a numeric key: blank
+  must stay blank (coercing `''`→`0` would route everything to the CEO).
+- `src/roles.js` — pure identity + authorization module: `isActive`, `findUser`, `userCoversHouse`
+  (all / cluster / literal), and `authorizeAction` (the per-action role matrix). Fail-closed:
+  unknown or inactive user is authorized for nothing.
+- `test/roles.test.js` — role rejection on every write action, fail-closed identity, coordinator
+  cross-house rejection, and the cluster/literal/all scope resolution.
+- `?action=users` feed (active users only) powering the form's submitter picker and the dashboard.
+- An `inventoryCount` action — plumbing that proves the inventory role gate end-to-end
+  (coordinator own-house only, maintenance backstop, ops roles anywhere); audit-logged for now.
+
+**Changed**
+- `src/approval.js` — the §6 chain (evaluated in order for arrival AND deferred wake-up):
+  **(a)** חירום → `auto` (emergency bypass); **(b)** house is טרום-פתיחה OR `ceo_ceiling` set and
+  `cost > ceo_ceiling` → `ceo`; **(c)** `cost > approval_threshold` → `ops_manager`;
+  **(d)** otherwise, incl. blank cost → `field_ops`. `approvalRequired` is now derived from the
+  chain (true iff it resolves to ops_manager/ceo); `canApprove(role, resolved)` gates by role
+  (CEO can approve anything). `test/approval.test.js` rewritten to cover a–d incl. blank cost,
+  `ceo_ceiling` disabled-vs-set, pre-opening→ceo, emergency bypass, and wake-up re-check.
+- `apps-script/Code.gs` — the mirror of the above. Every write handler
+  (`approve`/`reject`/`defer`/`assign`/`setStatus`/`createRequest`/`inventoryCount`) now looks up
+  the acting user in `Users`, runs `authorizeAction_`, and fails closed on unknown/inactive. The
+  approve/reject gate resolves the approver from the request's house pre-opening status + config;
+  defer/assign/dispatch require field_ops+; coordinators are house-scoped on create/inventory.
+  Emergency approvals are logged as an emergency bypass. `AuditLog` notes now carry the acting
+  user's role.
+- `src/request.js` — `created_by` is no longer a hardcoded roster; the pure builder only checks
+  presence, and "any active user (coordinator own-house only)" is enforced server-side.
+- `src/index.html` / `src/dashboard.html` — header: emblem (a teal package mark reusing the exact
+  `--accent-grad`, ~30px desktop / 28px mobile) + "לוגיסטיקה", RTL-correct, no-wrap; the "E-ZONE"
+  text is gone. Form: submitter picker loads from `?action=users` and locks the house for
+  coordinators. Dashboard: user picker loads active users; approval buttons render **only** for the
+  request's resolved approver (others see a "waiting for <role>" label); defer/assign/complete/close
+  render only for dispatch-tier roles; a "ממתין לאישור שלי" toggle + counter and an ops-manager
+  pending-count badge (Olga's entry point) were added.
+
+**Why:** Approval routing is the core rule of the app; moving it from two named people to roles +
+a Users roster lets the org change who fills each seat without code edits, and server-side
+enforcement means the UI is a convenience, not the security boundary. The pre-opening and CEO-
+ceiling rules give the CEO the specific oversight the business wants without funneling everything
+through her.
+
+**Security:** every write action is authorized server-side against the Users sheet and fails closed
+on unknown/inactive users; coordinators are house-scoped server-side (cross-house writes rejected);
+approve/reject is limited to the resolved approver role (plus CEO); all actions stay audit-logged,
+now with the acting user's role.
+
+**Deploy note:** rerun `setupSheet()` once (idempotent) to create/seed `Users` and add the
+`ceo_ceiling` key, then repaste `apps-script/Code.gs` and redeploy a NEW version — Apps Script does
+not auto-update from GitHub.
+
+**Not yet done:** a real inventory-count sheet behind the `inventoryCount` gate; notifications/
+reminders; smart batching.
+
+---
+
 ## [Increment 3 · step 2] — Roy/Sandra dashboard (board + actions)
 
 **What:** The dashboard where Roy and Sandra see requests by status and act on them. Wires to the

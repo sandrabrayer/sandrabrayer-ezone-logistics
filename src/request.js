@@ -9,16 +9,17 @@
 
 import { STATUSES, URGENCY, CATEGORY } from './schema.js';
 
-// Controlled list of who may submit. Not free text — keeps deferral-reminder routing clean
-// later (reminders go to "whoever deferred", which must be a known identity, not a typo).
-export const SUBMITTERS = ['רמי', 'צחי', 'רועי', 'sandra'];
-
 const VALID_CATEGORIES = new Set(Object.values(CATEGORY));   // רכישה / תיקון / החלפה
 const VALID_URGENCIES = new Set(Object.values(URGENCY));     // רגיל / דחוף / חירום
 
 /**
  * Validate raw form input for a new request. Returns null if valid, else an error string.
  * Note: estimated_cost BLANK is valid (unknown cost is a real case, not an error).
+ *
+ * created_by must be PRESENT here, but "who is a real submitter" is no longer a hardcoded list:
+ * as of increment 28 the authoritative roster is the Users sheet, and request creation is open to
+ * any ACTIVE user (coordinators own-house only). That identity/role check is enforced server-side
+ * (Code.gs authorizeAction via getUsers), which this pure builder cannot see.
  * @param {object} input
  */
 export function validateNewRequest(input) {
@@ -26,7 +27,7 @@ export function validateNewRequest(input) {
   if (!input.house) return 'Missing house';
   if (!VALID_CATEGORIES.has(input.category)) return 'Invalid or missing category';
   if (!VALID_URGENCIES.has(input.urgency)) return 'Invalid or missing urgency';
-  if (!SUBMITTERS.includes(input.created_by)) return 'Invalid or missing created_by';
+  if (!input.created_by) return 'Invalid or missing created_by';
 
   const cost = input.estimated_cost;
   const costBlank = cost === '' || cost === null || cost === undefined;

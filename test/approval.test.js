@@ -1,77 +1,98 @@
-// test/approval.test.js — locks the heart of the app: §6 routing + status transitions.
+// test/approval.test.js — locks the heart of the app: the §6 approval chain (a–d) + status
+// transitions. Increment 28 replaced the old Roy→Sandra threshold split with a role chain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  whoApproves, approvalRequired, canApprove, canTransition, validateApproval, APPROVERS,
+  resolveApprover, approvalRequired, canApprove, canTransition, validateApproval,
 } from '../src/approval.js';
-import { STATUSES, URGENCY } from '../src/schema.js';
+import { STATUSES, URGENCY, ROLES } from '../src/schema.js';
 
-const T = 3000; // threshold
+const T = 3000;        // approval_threshold
+const OPEN = false;    // house NOT pre-opening
+const PRE = true;      // house IS pre-opening (טרום-פתיחה)
+const NO_CEIL = '';    // ceo_ceiling disabled
 
-// ---- whoApproves: routing by amount ----
+// ---- resolveApprover: the chain a–d ----
 
-test('threshold boundary: exactly 3000 → Roy, 3001 → Sandra', () => {
-  assert.equal(whoApproves(3000, URGENCY.NORMAL, T), 'roy');   // ≤ threshold
-  assert.equal(whoApproves(3001, URGENCY.NORMAL, T), 'sandra'); // > threshold
+test('d. otherwise → field_ops, including blank/unknown cost', () => {
+  assert.equal(resolveApprover(500, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS);
+  assert.equal(resolveApprover(3000, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS); // at threshold
+  assert.equal(resolveApprover('', URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS);   // blank
+  assert.equal(resolveApprover(null, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS);
+  assert.equal(resolveApprover(undefined, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS);
 });
 
-test('below threshold → Roy, well above → Sandra', () => {
-  assert.equal(whoApproves(500, URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'sandra');
+test('c. cost > approval_threshold → ops_manager', () => {
+  assert.equal(resolveApprover(3001, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.OPS_MANAGER);
+  assert.equal(resolveApprover(9000, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.OPS_MANAGER);
 });
 
-test('emergency bypasses approval regardless of cost', () => {
-  assert.equal(whoApproves(10000, URGENCY.EMERGENCY, T), 'auto');
-  assert.equal(whoApproves(50, URGENCY.EMERGENCY, T), 'auto');
+test('b. pre-opening house → ceo, regardless of amount (even blank)', () => {
+  assert.equal(resolveApprover(50, URGENCY.NORMAL, PRE, T, NO_CEIL), ROLES.CEO);
+  assert.equal(resolveApprover('', URGENCY.NORMAL, PRE, T, NO_CEIL), ROLES.CEO);
+  assert.equal(resolveApprover(9000, URGENCY.NORMAL, PRE, T, NO_CEIL), ROLES.CEO);
 });
 
-test('blank/unknown cost → Roy (falls under threshold for routing)', () => {
-  assert.equal(whoApproves('', URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(null, URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(undefined, URGENCY.NORMAL, T), 'roy');
+test('a. emergency → auto, bypassing every other rule (even pre-opening)', () => {
+  assert.equal(resolveApprover(9000, URGENCY.EMERGENCY, OPEN, T, NO_CEIL), 'auto');
+  assert.equal(resolveApprover(50, URGENCY.EMERGENCY, PRE, T, '2000'), 'auto');
+});
+
+// ---- ceo_ceiling: disabled (blank) vs set ----
+
+test('ceo_ceiling blank (disabled): a big non-emergency stays ops_manager, never ceo', () => {
+  assert.equal(resolveApprover(100000, URGENCY.NORMAL, OPEN, T, ''), ROLES.OPS_MANAGER);
+  assert.equal(resolveApprover(100000, URGENCY.NORMAL, OPEN, T, null), ROLES.OPS_MANAGER);
+});
+
+test('ceo_ceiling set: cost above it → ceo; at/below it → ops_manager (threshold rule)', () => {
+  const CEIL = 5000;
+  assert.equal(resolveApprover(5001, URGENCY.NORMAL, OPEN, T, CEIL), ROLES.CEO);
+  assert.equal(resolveApprover(5000, URGENCY.NORMAL, OPEN, T, CEIL), ROLES.OPS_MANAGER); // == ceiling
+  assert.equal(resolveApprover(4000, URGENCY.NORMAL, OPEN, T, CEIL), ROLES.OPS_MANAGER); // > threshold
+  assert.equal(resolveApprover(500, URGENCY.NORMAL, OPEN, T, CEIL), ROLES.FIELD_OPS);    // under threshold
+  assert.equal(resolveApprover('', URGENCY.NORMAL, OPEN, T, CEIL), ROLES.FIELD_OPS);     // blank never crosses
 });
 
 // ---- approvalRequired derived flag ----
 
-test('approval_required: true only when cost > threshold and not emergency', () => {
-  assert.equal(approvalRequired(4000, URGENCY.NORMAL, T), true);
-  assert.equal(approvalRequired(3000, URGENCY.NORMAL, T), false); // exactly at threshold
-  assert.equal(approvalRequired(4000, URGENCY.EMERGENCY, T), false); // emergency bypass
-  assert.equal(approvalRequired('', URGENCY.NORMAL, T), false);   // blank
+test('approval_required: true iff resolved approver is ops_manager or ceo', () => {
+  assert.equal(approvalRequired(4000, URGENCY.NORMAL, OPEN, T, NO_CEIL), true);  // ops_manager
+  assert.equal(approvalRequired(50, URGENCY.NORMAL, PRE, T, NO_CEIL), true);     // ceo (pre-opening)
+  assert.equal(approvalRequired(500, URGENCY.NORMAL, OPEN, T, NO_CEIL), false);  // field_ops
+  assert.equal(approvalRequired(3000, URGENCY.NORMAL, OPEN, T, NO_CEIL), false); // at threshold → field_ops
+  assert.equal(approvalRequired(9000, URGENCY.EMERGENCY, OPEN, T, NO_CEIL), false); // auto
+  assert.equal(approvalRequired('', URGENCY.NORMAL, OPEN, T, NO_CEIL), false);   // blank → field_ops
 });
 
-// ---- canApprove: who is authorized ----
+// ---- canApprove: who may act on a resolved request ----
 
-test('Roy cannot approve above threshold; Sandra can', () => {
-  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), false);
-  assert.equal(canApprove(APPROVERS.SANDRA, 4000, URGENCY.NORMAL, T), true);
+test('canApprove: only the resolved role, plus ceo can approve anything', () => {
+  assert.equal(canApprove(ROLES.FIELD_OPS, ROLES.FIELD_OPS), true);
+  assert.equal(canApprove(ROLES.OPS_MANAGER, ROLES.FIELD_OPS), false); // ops_manager ≠ field_ops tier
+  assert.equal(canApprove(ROLES.FIELD_OPS, ROLES.OPS_MANAGER), false); // field_ops can't reach up
+  assert.equal(canApprove(ROLES.OPS_MANAGER, ROLES.OPS_MANAGER), true);
+  assert.equal(canApprove(ROLES.CEO, ROLES.OPS_MANAGER), true);        // ceo overrides
+  assert.equal(canApprove(ROLES.CEO, ROLES.FIELD_OPS), true);
+  assert.equal(canApprove(ROLES.FIELD_OPS, 'auto'), true);             // emergency: any actor
 });
 
-test('Roy can approve at/under threshold', () => {
-  assert.equal(canApprove(APPROVERS.ROY, 3000, URGENCY.NORMAL, T), true);
-  assert.equal(canApprove(APPROVERS.ROY, 500, URGENCY.NORMAL, T), true);
-  assert.equal(canApprove(APPROVERS.ROY, '', URGENCY.NORMAL, T), true); // blank → Roy
-});
+// ---- deferred wake-up: amount re-checked through a–d ----
 
-test('emergency can be approved by anyone (already auto-approved)', () => {
-  assert.equal(canApprove(APPROVERS.ROY, 9000, URGENCY.EMERGENCY, T), true);
-});
-
-// ---- deferred wake-up: amount re-checked ----
-
-test('deferred wake-up re-checks amount: 500 → Roy, 4000 → Sandra', () => {
-  // On wake-up the same routing applies — a small deferred request is Roy's, a large one Sandra's.
-  assert.equal(whoApproves(500, URGENCY.NORMAL, T), 'roy');
-  assert.equal(whoApproves(4000, URGENCY.NORMAL, T), 'sandra');
+test('deferred wake-up re-checks amount: small → field_ops, large → ops_manager, pre-opening → ceo', () => {
+  // A deferred request is re-routed by exactly the same chain when it wakes up.
+  assert.equal(resolveApprover(500, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.FIELD_OPS);
+  assert.equal(resolveApprover(4000, URGENCY.NORMAL, OPEN, T, NO_CEIL), ROLES.OPS_MANAGER);
+  assert.equal(resolveApprover(4000, URGENCY.NORMAL, PRE, T, NO_CEIL), ROLES.CEO);
   // And authority is enforced the same way on wake-up:
-  assert.equal(canApprove(APPROVERS.ROY, 4000, URGENCY.NORMAL, T), false);
+  assert.equal(canApprove(ROLES.FIELD_OPS, resolveApprover(4000, URGENCY.NORMAL, OPEN, T, NO_CEIL)), false);
 });
 
-// ---- status transitions ----
+// ---- status transitions (unchanged) ----
 
 test('legal transitions', () => {
   assert.ok(canTransition(STATUSES.REQUEST, STATUSES.APPROVED));
-  assert.ok(canTransition(STATUSES.DEFERRED, STATUSES.APPROVED));   // wake-up
+  assert.ok(canTransition(STATUSES.DEFERRED, STATUSES.APPROVED));    // wake-up
   assert.ok(canTransition(STATUSES.APPROVED, STATUSES.IN_PROGRESS)); // no separate "assigned"
   assert.ok(canTransition(STATUSES.IN_PROGRESS, STATUSES.COMPLETED));
   assert.ok(canTransition(STATUSES.COMPLETED, STATUSES.CLOSED));
@@ -84,16 +105,16 @@ test('illegal transitions rejected', () => {
 });
 
 test('validateApproval returns APPROVED for an authorized, legal approval', () => {
-  const req = { status: STATUSES.REQUEST, estimated_cost: 500, urgency: URGENCY.NORMAL };
-  assert.equal(validateApproval(req, APPROVERS.ROY, T), STATUSES.APPROVED);
+  const req = { status: STATUSES.REQUEST };
+  assert.equal(validateApproval(req, ROLES.FIELD_OPS, ROLES.FIELD_OPS), STATUSES.APPROVED);
 });
 
-test('validateApproval throws when Roy tries to approve above threshold', () => {
-  const req = { status: STATUSES.REQUEST, estimated_cost: 4000, urgency: URGENCY.NORMAL };
-  assert.throws(() => validateApproval(req, APPROVERS.ROY, T), /not authorized/);
+test('validateApproval throws when the role is not the resolved approver', () => {
+  const req = { status: STATUSES.REQUEST };
+  assert.throws(() => validateApproval(req, ROLES.FIELD_OPS, ROLES.OPS_MANAGER), /not the resolved approver/);
 });
 
 test('validateApproval throws on an illegal status transition', () => {
-  const req = { status: STATUSES.CLOSED, estimated_cost: 500, urgency: URGENCY.NORMAL };
-  assert.throws(() => validateApproval(req, APPROVERS.ROY, T), /Cannot approve/);
+  const req = { status: STATUSES.CLOSED };
+  assert.throws(() => validateApproval(req, ROLES.CEO, ROLES.OPS_MANAGER), /Cannot approve/);
 });

@@ -22,6 +22,7 @@ var HEADERS = {
   Config: ['key', 'value'],
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+  Users: ['name', 'role', 'house', 'active'],
 };
 
 var SEED_HOUSES = [
@@ -41,6 +42,21 @@ var SEED_TECHNICIANS = [
 var SEED_CONFIG = [
   ['approval_threshold', '3000'],
   ['emergency_bypasses_approval', 'TRUE'],
+  ['ceo_ceiling', ''], // blank = disabled (see src/schema.js / src/approval.js)
+];
+
+// Users seed (increment 28). Mirrors SEED_USERS in src/schema.js. house encoding:
+// '*' = all houses, 'cluster:a+b' = maintenance clusters, literal name = coordinator's own house.
+var SEED_USERS = [
+  ['רועי',  'field_ops',   '*',                    'TRUE'],
+  ['אולגה', 'ops_manager', '*',                    'TRUE'],
+  ['סנדרה', 'ceo',         '*',                    'TRUE'],
+  ['רמי',   'maintenance', 'cluster:sharon',       'TRUE'],
+  ['צחי',   'maintenance', 'cluster:caesarea+north', 'TRUE'],
+  ['שירה',  'coordinator', 'קיסריה עפרוני',        'TRUE'],
+  ['יעקב',  'coordinator', 'ריהאב',                'TRUE'],
+  ['אורן',  'coordinator', 'רעננה',                'TRUE'],
+  ['אביב',  'coordinator', 'רמות השבים',           'TRUE'],
 ];
 
 function setupSheet() {
@@ -61,7 +77,11 @@ function setupSheet() {
 
   seedIfEmpty_(ss.getSheetByName('Houses'), SEED_HOUSES);
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
-  seedIfEmpty_(ss.getSheetByName('Config'), SEED_CONFIG);
+
+  // Config + Users seed by KEY/NAME so a rerun adds only missing rows (e.g. the new ceo_ceiling
+  // key on an already-seeded Config) and never duplicates existing ones.
+  ensureRowsByKey_(ss.getSheetByName('Config'), SEED_CONFIG, 0);
+  ensureRowsByKey_(ss.getSheetByName('Users'), SEED_USERS, 0);
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');
@@ -75,4 +95,26 @@ function seedIfEmpty_(sheet, rows) {
   if (!sheet || rows.length === 0) return;
   if (sheet.getLastRow() > 1) return; // already has data
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+/**
+ * Idempotent key-aware seed: append only rows whose key (column `keyCol`) is not already present.
+ * Never touches existing rows, never duplicates — safe to rerun. Used for Config and Users so
+ * new keys/users can be added over time without wiping or double-seeding.
+ */
+function ensureRowsByKey_(sheet, rows, keyCol) {
+  if (!sheet || !rows || rows.length === 0) return;
+  var existing = {};
+  var last = sheet.getLastRow();
+  if (last >= 2) {
+    var keys = sheet.getRange(2, keyCol + 1, last - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) existing[String(keys[i][0])] = true;
+  }
+  var toAppend = [];
+  for (var r = 0; r < rows.length; r++) {
+    if (!existing[String(rows[r][keyCol])]) toAppend.push(rows[r]);
+  }
+  if (toAppend.length) {
+    sheet.getRange(last + 1, 1, toAppend.length, rows[0].length).setValues(toAppend);
+  }
 }

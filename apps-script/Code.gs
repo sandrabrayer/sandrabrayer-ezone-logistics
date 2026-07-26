@@ -77,6 +77,27 @@ function getConfig(key) {
 function getHouses() { return readObjects_('Houses'); }
 function getTechnicians() { return readObjects_('Technicians'); }
 function getRequests() { return readObjects_('Requests'); }
+function getUsers() { return readObjects_('Users'); }
+
+/** Active users only, trimmed to the fields the UI needs (name/role/house). */
+function getActiveUsers_() {
+  return getUsers()
+    .filter(function (u) { return isActive_(u.active); })
+    .map(function (u) { return { name: u.name, role: u.role, house: u.house }; });
+}
+
+/** Fast name → house row map, for cluster-scope resolution. */
+function housesByName_() {
+  var map = {};
+  getHouses().forEach(function (h) { map[String(h.name)] = h; });
+  return map;
+}
+
+function houseIsPreOpening_(house) {
+  var map = housesByName_();
+  var h = map[String(house)];
+  return !!h && String(h.status) === 'pre-opening'; // pre-opening = טרום-פתיחה
+}
 
 function getRequestById(id) {
   var all = getRequests();
@@ -121,6 +142,7 @@ function doGet(e) {
     case 'technicians': result = getTechnicians(); break;
     case 'requests':    result = getRequests(); break;
     case 'config':      result = getAllConfig(); break;
+    case 'users':       result = getActiveUsers_(); break;
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
   }
@@ -130,7 +152,8 @@ function doGet(e) {
 // Controlled vocabularies (mirror of src/schema.js + src/request.js).
 var VALID_CATEGORIES = ['רכישה', 'תיקון', 'החלפה'];
 var VALID_URGENCIES = ['רגיל', 'דחוף', 'חירום'];
-var SUBMITTERS = ['רמי', 'צחי', 'רועי', 'sandra'];
+// created_by is no longer a hardcoded roster: any ACTIVE user may create (Users sheet),
+// coordinators own-house only — enforced in handleCreateRequest_ via authorizeAction_.
 var STATUS_REQUEST = 'דרישה';
 
 function doPost(e) {
@@ -149,6 +172,7 @@ function doPost(e) {
     case 'defer':         return handleDefer_(body.payload || {});
     case 'assign':        return handleAssign_(body.payload || {});
     case 'setStatus':     return handleSetStatus_(body.payload || {});
+    case 'inventoryCount': return handleInventoryCount_(body.payload || {});
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -157,10 +181,16 @@ function doPost(e) {
 function handleCreateRequest_(input) {
   var validationError = validateNewRequest_(input);
   if (validationError) return jsonOut_({ ok: false, error: validationError });
+  // Identity + role gate (increment 28): created_by must be an ACTIVE user; a coordinator may
+  // only create for their own house. Fail-closed on unknown/inactive.
+  var user = findUser_(input.created_by);
+  var authErr = authorizeAction_(user, 'create', { house: input.house });
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
+
   // Server owns id, status, created_at — the client never supplies them.
   var row = buildNewRequest_(input);
-  // Stamp the derived approval_required flag (§6).
-  row.approval_required = approvalRequired_(row.estimated_cost, row.urgency);
+  // Stamp the derived approval_required flag through the §6 chain.
+  row.approval_required = approvalRequired_(row.estimated_cost, row.urgency, houseIsPreOpening_(row.house));
   appendRequest(row);
   return jsonOut_({ ok: true, id: row.id });
 }
@@ -171,7 +201,7 @@ function validateNewRequest_(p) {
   if (!p.house) return 'Missing house';
   if (VALID_CATEGORIES.indexOf(p.category) === -1) return 'Invalid or missing category';
   if (VALID_URGENCIES.indexOf(p.urgency) === -1) return 'Invalid or missing urgency';
-  if (SUBMITTERS.indexOf(p.created_by) === -1) return 'Invalid or missing created_by';
+  if (!p.created_by) return 'Invalid or missing created_by'; // roster check is role-based below
   var blank = (p.estimated_cost === '' || p.estimated_cost == null);
   if (!blank && isNaN(Number(p.estimated_cost))) return 'estimated_cost must be a number or blank';
   return null;
@@ -219,30 +249,118 @@ var ST = {
   NOT_APPROVED: 'לא מאושר', DEFERRED: 'נדחה לתאריך', IN_PROGRESS: 'בביצוע',
   COMPLETED: 'הושלם', CLOSED: 'סגור',
 };
-var APPROVER_ROY = 'רועי';
-var APPROVER_SANDRA = 'sandra';
+// ---- Roles + approval chain (mirror of src/schema.js ROLES + src/approval.js) ----
+var ROLE = {
+  COORDINATOR: 'coordinator', MAINTENANCE: 'maintenance', FIELD_OPS: 'field_ops',
+  OPS_MANAGER: 'ops_manager', CEO: 'ceo',
+};
+var ALL_ROLES_ = ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo'];
+var ALL_HOUSES_MARK_ = '*';
+var CLUSTER_SCOPE_PREFIX_ = 'cluster:';
 
 function costIsBlank_(c) { return c === '' || c === null || c === undefined; }
+function ceilingSet_(v) { return !(v === '' || v === null || v === undefined); }
 
-function approvalRequired_(cost, urgency) {
-  if (urgency === 'חירום') return false;
-  if (costIsBlank_(cost)) return false;
+/**
+ * §6 chain (a–d), evaluated in order. Returns 'auto' | 'ceo' | 'ops_manager' | 'field_ops'.
+ * housePreOpening is passed in by the caller (computed from the Houses sheet status).
+ */
+function resolveApprover_(cost, urgency, housePreOpening) {
+  if (urgency === 'חירום') return 'auto';                    // a. emergency bypass
+  if (housePreOpening) return ROLE.CEO;                      // b. pre-opening house → CEO
+  var ceiling = getConfig('ceo_ceiling');
+  if (ceilingSet_(ceiling) && !costIsBlank_(cost) && Number(cost) > Number(ceiling)) {
+    return ROLE.CEO;                                         // b. over CEO ceiling → CEO
+  }
   var t = Number(getConfig('approval_threshold'));
-  return Number(cost) > t;
+  if (!costIsBlank_(cost) && Number(cost) > t) return ROLE.OPS_MANAGER; // c. over threshold
+  return ROLE.FIELD_OPS;                                     // d. otherwise (incl. blank cost)
 }
 
-function whoApproves_(cost, urgency) {
-  if (urgency === 'חירום') return 'auto';
-  if (costIsBlank_(cost)) return 'roy';
-  var t = Number(getConfig('approval_threshold'));
-  return Number(cost) > t ? 'sandra' : 'roy';
+function approvalRequired_(cost, urgency, housePreOpening) {
+  var who = resolveApprover_(cost, urgency, housePreOpening);
+  return who === ROLE.OPS_MANAGER || who === ROLE.CEO;
 }
 
-function canApprove_(approver, cost, urgency) {
-  var who = whoApproves_(cost, urgency);
-  if (who === 'auto') return true;
-  if (who === 'sandra') return approver === APPROVER_SANDRA;
-  return approver === APPROVER_ROY || approver === APPROVER_SANDRA;
+function canApprove_(role, resolvedApprover) {
+  if (role === ROLE.CEO) return true;
+  if (resolvedApprover === 'auto') return true;
+  return role === resolvedApprover;
+}
+
+// ---- User identity + authorization matrix (mirror of src/roles.js) ----
+var TRUE_STRINGS_ROLE_ = ['true', 'TRUE', 'True', '1', 'yes', 'YES'];
+
+function isActive_(a) {
+  if (a === true) return true;
+  return TRUE_STRINGS_ROLE_.indexOf(String(a).trim()) !== -1;
+}
+
+function findUser_(name) {
+  if (name == null || name === '') return null;
+  var users = getUsers();
+  for (var i = 0; i < users.length; i++) {
+    if (String(users[i].name) === String(name)) return users[i];
+  }
+  return null;
+}
+
+function userCoversHouse_(user, house, byName) {
+  if (!user) return false;
+  var scope = user.house;
+  if (scope === ALL_HOUSES_MARK_) return true;
+  if (typeof scope === 'string' && scope.indexOf(CLUSTER_SCOPE_PREFIX_) === 0) {
+    var clusters = scope.slice(CLUSTER_SCOPE_PREFIX_.length).split('+');
+    var h = byName && byName[String(house)];
+    return !!h && clusters.indexOf(h.cluster) !== -1;
+  }
+  return String(scope) === String(house);
+}
+
+/**
+ * Authorize a write action. Returns null when allowed, else a Hebrew error string. Fail-closed:
+ * unknown/inactive/unrecognized-role → nothing allowed. ctx: { house, byName, resolvedApprover }.
+ */
+function authorizeAction_(user, action, ctx) {
+  ctx = ctx || {};
+  if (!user) return 'משתמש לא מוכר';
+  if (!isActive_(user.active)) return 'משתמש אינו פעיל';
+  if (ALL_ROLES_.indexOf(user.role) === -1) return 'תפקיד לא מוכר';
+
+  var coordinatorOffHouse =
+    user.role === ROLE.COORDINATOR && !userCoversHouse_(user, ctx.house, ctx.byName);
+
+  if (action === 'create') {
+    if (coordinatorOffHouse) return 'רכז/ת מוגבל/ת לבית שלו/ה';
+    return null;
+  }
+  if (action === 'approve' || action === 'reject') {
+    if (user.role === ROLE.CEO) return null;
+    if (ctx.resolvedApprover === 'auto') return null;
+    if (user.role !== ctx.resolvedApprover) return 'התפקיד אינו המאשר הנדרש לבקשה זו';
+    return null;
+  }
+  if (action === 'defer' || action === 'assign') {
+    if ([ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO].indexOf(user.role) === -1) {
+      return 'התפקיד אינו מורשה לפעולה זו';
+    }
+    return null;
+  }
+  if (action === 'inventory') {
+    if ([ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO]
+        .indexOf(user.role) === -1) {
+      return 'התפקיד אינו מורשה להגשת ספירה';
+    }
+    if (coordinatorOffHouse) return 'רכז/ת מוגבל/ת לבית שלו/ה';
+    return null;
+  }
+  return 'פעולה לא מוכרת';
+}
+
+/** Every AuditLog note carries the acting user's role (increment 28). */
+function noteWithRole_(role, base) {
+  var tag = 'תפקיד: ' + role;
+  return base ? base + ' · ' + tag : tag;
 }
 
 var TRANSITIONS_ = {};
@@ -285,12 +403,14 @@ function handleApprove_(p) {
   if (!canTransition_(req.status, ST.APPROVED)) {
     return jsonOut_({ ok: false, error: 'Cannot approve from status "' + req.status + '"' });
   }
-  if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
-    return jsonOut_({ ok: false, error: 'Not authorized for this amount (above threshold requires Sandra)' });
-  }
+  var user = findUser_(p.by);
+  var who = resolveApprover_(req.estimated_cost, req.urgency, houseIsPreOpening_(req.house));
+  var authErr = authorizeAction_(user, 'approve', { resolvedApprover: who });
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
+  var base = who === 'auto' ? 'עקיפת חירום (אישור אוטומטי)' : (p.note || ''); // emergency bypass
   updateRequest_(p.id,
     { status: ST.APPROVED, approved_by: p.by, approved_at: new Date().toISOString() },
-    req.status, ST.APPROVED, p.by, p.note || '');
+    req.status, ST.APPROVED, p.by, noteWithRole_(user.role, base));
   return jsonOut_({ ok: true });
 }
 
@@ -301,12 +421,13 @@ function handleReject_(p) {
   if (!canTransition_(req.status, ST.NOT_APPROVED)) {
     return jsonOut_({ ok: false, error: 'Cannot reject from status "' + req.status + '"' });
   }
-  if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
-    return jsonOut_({ ok: false, error: 'Not authorized for this amount' });
-  }
+  var user = findUser_(p.by);
+  var who = resolveApprover_(req.estimated_cost, req.urgency, houseIsPreOpening_(req.house));
+  var authErr = authorizeAction_(user, 'reject', { resolvedApprover: who });
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
   updateRequest_(p.id,
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },
-    req.status, ST.NOT_APPROVED, p.by, p.reason || '');
+    req.status, ST.NOT_APPROVED, p.by, noteWithRole_(user.role, p.reason || ''));
   return jsonOut_({ ok: true });
 }
 
@@ -319,10 +440,13 @@ function handleDefer_(p) {
   if (!canTransition_(req.status, ST.DEFERRED)) {
     return jsonOut_({ ok: false, error: 'Cannot defer from status "' + req.status + '"' });
   }
-  // Defer is Roy at any amount — a "this can wait" call, not financial (§6).
+  var user = findUser_(p.by);
+  var authErr = authorizeAction_(user, 'defer', {});
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
+  // Defer is a "this can wait" call at any amount (§6); on wake-up the amount is re-checked a–d.
   updateRequest_(p.id,
     { status: ST.DEFERRED, deferred_until: p.deferred_until },
-    req.status, ST.DEFERRED, p.by, 'נדחה ל-' + p.deferred_until);
+    req.status, ST.DEFERRED, p.by, noteWithRole_(user.role, 'נדחה ל-' + p.deferred_until));
   return jsonOut_({ ok: true });
 }
 
@@ -336,9 +460,12 @@ function handleAssign_(p) {
   if (!canTransition_(req.status, ST.IN_PROGRESS)) {
     return jsonOut_({ ok: false, error: 'Can only assign an approved request' });
   }
+  var user = findUser_(p.by);
+  var authErr = authorizeAction_(user, 'assign', {});
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
   updateRequest_(p.id,
     { status: ST.IN_PROGRESS, assigned_to: p.assigned_to, assignment_type: p.assignment_type || '' },
-    req.status, ST.IN_PROGRESS, p.by, 'הוקצה ל-' + p.assigned_to);
+    req.status, ST.IN_PROGRESS, p.by, noteWithRole_(user.role, 'הוקצה ל-' + p.assigned_to));
   return jsonOut_({ ok: true });
 }
 
@@ -349,12 +476,31 @@ function handleSetStatus_(p) {
   if (!canTransition_(req.status, p.to)) {
     return jsonOut_({ ok: false, error: 'Illegal transition ' + req.status + ' → ' + p.to });
   }
+  var user = findUser_(p.by);
+  // Completing / closing is a dispatch-tier action (field_ops+); reuse the assign gate.
+  var authErr = authorizeAction_(user, 'assign', {});
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
   var fields = { status: p.to };
   if (p.to === ST.COMPLETED) {
     fields.completed_at = new Date().toISOString();
     if (p.actual_cost != null) fields.actual_cost = p.actual_cost;
     if (p.completion_notes) fields.completion_notes = p.completion_notes;
   }
-  updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
+  updateRequest_(p.id, fields, req.status, p.to, p.by, noteWithRole_(user.role, p.note || ''));
+  return jsonOut_({ ok: true });
+}
+
+/**
+ * Inventory count submit (increment 28 plumbing). No inventory sheet yet — this endpoint proves
+ * the role gate end-to-end: coordinators may submit for their OWN house only; maintenance is a
+ * backstop; field_ops/ops_manager/ceo may submit anywhere. The count is audit-logged for now.
+ */
+function handleInventoryCount_(p) {
+  if (!p.by || !p.house) return jsonOut_({ ok: false, error: 'Missing by or house' });
+  var user = findUser_(p.by);
+  var authErr = authorizeAction_(user, 'inventory', { house: p.house, byName: housesByName_() });
+  if (authErr) return jsonOut_({ ok: false, error: authErr });
+  writeAuditEntry(p.id || '', '', 'ספירת מלאי', p.by,
+    noteWithRole_(user.role, 'ספירת מלאי — ' + p.house));
   return jsonOut_({ ok: true });
 }

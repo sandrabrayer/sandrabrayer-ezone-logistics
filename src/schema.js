@@ -42,6 +42,11 @@ export const HEADERS = {
 
   // Every status transition, for full traceability. §8, §9.
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+
+  // People + roles that drive the approval chain and server-side role enforcement (increment 28).
+  // `house` scopes a user: '*' = all houses, 'cluster:<a>+<b>' = one or more maintenance clusters,
+  // or a literal house name (coordinators, own house only). `active` FALSE fails closed.
+  Users: ['name', 'role', 'house', 'active'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -72,7 +77,20 @@ export const CATEGORY = {
 };
 
 export const CLUSTERS = { SHARON: 'sharon', CAESAREA: 'caesarea', NORTH: 'north' };
-export const HOUSE_STATUS = { OPEN: 'open', PRE_OPENING: 'pre-opening' };
+export const HOUSE_STATUS = { OPEN: 'open', PRE_OPENING: 'pre-opening' }; // pre-opening = טרום-פתיחה
+
+// Roles that drive the approval chain (§6, increment 28). Slugs are the stored values.
+export const ROLES = {
+  COORDINATOR: 'coordinator',  // רכז/ת בית — own house only
+  MAINTENANCE: 'maintenance',  // אחראי/ת תחזוקה — cluster-scoped
+  FIELD_OPS: 'field_ops',      // מנהל/ת שטח (רועי) — base approver
+  OPS_MANAGER: 'ops_manager',  // מנהל/ת תפעול (אולגה) — above threshold
+  CEO: 'ceo',                  // מנכ"לית (סנדרה) — pre-opening / ceiling / can approve anything
+};
+
+// House-scope encoding used in the Users sheet `house` column and by src/roles.js.
+export const ALL_HOUSES_MARK = '*';       // covers every house
+export const CLUSTER_SCOPE_PREFIX = 'cluster:'; // 'cluster:caesarea+north' → those clusters
 
 // ---- Seed data ----
 
@@ -98,7 +116,24 @@ export const SEED_TECHNICIANS = [
 
 // Config defaults. Stored as strings in the Sheet (Apps Script reads cells as strings);
 // getConfig coerces known keys back to number/boolean — see src/config.js.
+// ceo_ceiling is intentionally NOT a numeric key: blank ('') means "disabled". Coercing ''
+// to a number would make it 0 and route every request to the CEO — so it stays a passthrough
+// string and the approval chain only reads it when non-blank (see src/approval.js).
 export const SEED_CONFIG = [
   { key: 'approval_threshold', value: '3000' },
   { key: 'emergency_bypasses_approval', value: 'TRUE' },
+  { key: 'ceo_ceiling', value: '' }, // blank = disabled; set a number to force CEO above it
+];
+
+// Users seed (increment 28). active TRUE for all. `house` uses the encoding above.
+export const SEED_USERS = [
+  { name: 'רועי',  role: ROLES.FIELD_OPS,   house: ALL_HOUSES_MARK,               active: true },
+  { name: 'אולגה', role: ROLES.OPS_MANAGER, house: ALL_HOUSES_MARK,               active: true },
+  { name: 'סנדרה', role: ROLES.CEO,         house: ALL_HOUSES_MARK,               active: true },
+  { name: 'רמי',   role: ROLES.MAINTENANCE, house: 'cluster:sharon',              active: true },
+  { name: 'צחי',   role: ROLES.MAINTENANCE, house: 'cluster:caesarea+north',      active: true },
+  { name: 'שירה',  role: ROLES.COORDINATOR, house: 'קיסריה עפרוני',               active: true },
+  { name: 'יעקב',  role: ROLES.COORDINATOR, house: 'ריהאב',                       active: true },
+  { name: 'אורן',  role: ROLES.COORDINATOR, house: 'רעננה',                       active: true },
+  { name: 'אביב',  role: ROLES.COORDINATOR, house: 'רמות השבים',                  active: true },
 ];

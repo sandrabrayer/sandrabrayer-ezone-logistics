@@ -28,10 +28,17 @@
       padding: 14px 18px; border-bottom: 1px solid var(--card-line);
       background: linear-gradient(180deg, var(--bg2), transparent);
     }
-    .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
-    .brand .e { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .brand .sub { color: var(--muted); font-weight: 500; }
+    /* brand = app emblem + Hebrew name only (RTL: emblem sits at the start/right of the name) */
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; white-space: nowrap; }
+    .brand .emblem { width: 30px; height: 30px; flex: none; display: block; }
+    .brand .name { color: var(--ink); }
     .tab { font-size: .85rem; font-weight: 800; color: #14171c; padding: 8px 18px; border-radius: 999px; border: none; background: var(--accent-grad); }
+    /* "ממתין לאישור שלי" toggle + ops-manager pending badge */
+    .chk { display: inline-flex; align-items: center; gap: 6px; font-size: .85rem; color: var(--ink); cursor: pointer; }
+    .chk input { width: auto; }
+    .badge { display: inline-flex; align-items: center; gap: 7px; font-size: .8rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); margin-inline-start: auto; }
+    .badge .num { background: var(--accent-grad); color: #06201c; border-radius: 999px; padding: 1px 9px; font-weight: 800; }
+    .badge.zero { opacity: .5; }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 18px 64px; }
     h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 4px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
     .sub { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
@@ -76,13 +83,30 @@
     .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .loading { color: var(--muted); }
-    @media (max-width: 600px) { .counter { min-width: 45%; } }
+    @media (max-width: 600px) { .counter { min-width: 45%; } .brand .emblem { width: 28px; height: 28px; } .badge { margin-inline-start: 0; } }
   </style>
 </head>
 <body>
   <div class="topbar">
     <div class="tab">לוח בקרה</div>
-    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+    <div class="brand">
+      <svg class="emblem" viewBox="0 0 32 32" role="img" aria-label="לוגיסטיקה">
+        <defs>
+          <linearGradient id="emblemGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stop-color="#14b8a6" />
+            <stop offset="0.5" stop-color="#2dd4bf" />
+            <stop offset="1" stop-color="#5eead4" />
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="7" fill="url(#emblemGrad)" />
+        <g fill="none" stroke="#15171c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M16 6.5 25.5 11.75 25.5 20.25 16 25.5 6.5 20.25 6.5 11.75Z" />
+          <path d="M6.5 11.75 16 17 25.5 11.75" />
+          <path d="M16 17 16 25.5" />
+        </g>
+      </svg>
+      <span class="name">לוגיסטיקה</span>
+    </div>
   </div>
   <div class="wrap">
     <h1>לוח בקרה</h1>
@@ -90,10 +114,7 @@
 
     <div class="controls">
       <span><label>משתמש:</label>
-        <select id="who">
-          <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
-        </select>
+        <select id="who"><option value="" disabled selected>טוען…</option></select>
       </span>
       <span><label>בית:</label>
         <select id="filterHouse"><option value="">כל הבתים</option></select>
@@ -104,6 +125,10 @@
           <option value="רמי">רמי</option>
           <option value="צחי">צחי</option>
         </select>
+      </span>
+      <label class="chk"><input type="checkbox" id="mineOnly" /> ממתין לאישור שלי</label>
+      <span class="badge zero" id="opsBadge" title="בקשות הממתינות לאישור מנהל.ת תפעול">
+        ממתין לאישור תפעול <span class="num" id="opsBadgeNum">0</span>
       </span>
     </div>
 
@@ -133,41 +158,75 @@
 
     let allRequests = [];
     let threshold = THRESHOLD_DEFAULT;
+    let ceoCeiling = '';                 // '' = disabled
+    let usersByName = {};                // name → { name, role, house }
+    let houseStatus = {};                // name → status ('open' / 'pre-opening')
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
+
+    // Hebrew labels for the resolved approver role (shown to non-approvers so they see who's needed).
+    const ROLE_LABEL = {
+      field_ops: 'מנהל.ת שטח', ops_manager: 'מנהל.ת תפעול', ceo: 'מנכ"לית',
+      auto: 'אישור אוטומטי (חירום)',
+    };
+    const DISPATCH_ROLES = ['field_ops', 'ops_manager', 'ceo']; // defer / assign / complete / close
+    const PENDING_STATUSES = [ST.REQUEST, ST.PENDING, ST.DEFERRED];
 
     function showMsg(kind, text) { msg.className = 'msg ' + kind; msg.textContent = text; setTimeout(() => { if (kind === 'ok') msg.className = 'msg'; }, 4000); }
     function who() { return document.getElementById('who').value; }
     function blank(c) { return c === '' || c === null || c === undefined; }
-    function num(c) { return blank(c) ? null : Number(c); }
+    function ceilingSet(v) { return !(v === '' || v === null || v === undefined); }
+    function currentRole() { const u = usersByName[who()]; return u ? u.role : null; }
+    function housePreOpening(house) { return houseStatus[house] === 'pre-opening'; }
 
-    function whoApproves(cost, urgency) {
+    // Client mirror of the §6 chain in src/approval.js. Server enforces regardless.
+    function resolveApprover(cost, urgency, house) {
       if (urgency === 'חירום') return 'auto';
-      if (blank(cost)) return 'roy';
-      return Number(cost) > threshold ? 'sandra' : 'roy';
+      if (housePreOpening(house)) return 'ceo';
+      if (ceilingSet(ceoCeiling) && !blank(cost) && Number(cost) > Number(ceoCeiling)) return 'ceo';
+      if (!blank(cost) && Number(cost) > threshold) return 'ops_manager';
+      return 'field_ops';
     }
-    function canApprove(approver, cost, urgency) {
-      const w = whoApproves(cost, urgency);
-      if (w === 'auto') return true;
-      if (w === 'sandra') return approver === 'sandra';
-      return approver === 'רועי' || approver === 'sandra';
+    function canApprove(role, resolved) {
+      if (role === 'ceo') return true;
+      if (resolved === 'auto') return true;
+      return role === resolved;
+    }
+    function canDispatch(role) { return DISPATCH_ROLES.includes(role); }
+    function isPendingApproval(r) { return PENDING_STATUSES.includes(r.status); }
+    function isMinePending(r) {
+      return isPendingApproval(r) && canApprove(currentRole(), resolveApprover(r.estimated_cost, r.urgency, r.house));
     }
 
     async function load() {
       try {
-        const [reqRes, cfgRes, houseRes] = await Promise.all([
+        const [reqRes, cfgRes, houseRes, userRes] = await Promise.all([
           fetch(EXEC_URL + '?action=requests').then(r => r.json()),
           fetch(EXEC_URL + '?action=config').then(r => r.json()),
           fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=users').then(r => r.json()),
         ]);
         if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
         allRequests = reqRes.data || [];
-        if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
-          threshold = Number(cfgRes.data.approval_threshold);
+        if (cfgRes.ok && cfgRes.data) {
+          if (cfgRes.data.approval_threshold != null) threshold = Number(cfgRes.data.approval_threshold);
+          ceoCeiling = cfgRes.data.ceo_ceiling != null ? cfgRes.data.ceo_ceiling : '';
         }
         if (houseRes.ok) {
           const sel = document.getElementById('filterHouse');
-          houseRes.data.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+          houseRes.data.forEach(h => {
+            houseStatus[h.name] = h.status;
+            const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o);
+          });
+        }
+        if (userRes.ok) {
+          const sel = document.getElementById('who');
+          sel.innerHTML = '';
+          usersByName = {};
+          userRes.data.forEach(u => {
+            usersByName[u.name] = u;
+            const o = document.createElement('option'); o.value = u.name; o.textContent = u.name; sel.appendChild(o);
+          });
         }
         render();
       } catch (e) {
@@ -179,7 +238,11 @@
     function filtered() {
       const h = document.getElementById('filterHouse').value;
       const lead = document.getElementById('filterLead').value;
-      return allRequests.filter(r => (!h || r.house === h) && (!lead || r.assigned_to === lead));
+      const mine = document.getElementById('mineOnly').checked;
+      return allRequests.filter(r =>
+        (!h || r.house === h) &&
+        (!lead || r.assigned_to === lead) &&
+        (!mine || isMinePending(r)));
     }
 
     function render() {
@@ -189,9 +252,16 @@
       const pending = reqs.filter(r => [ST.REQUEST, ST.PENDING].includes(r.status)).length;
       const deferred = reqs.filter(r => r.status === ST.DEFERRED).length;
       const closed = reqs.filter(r => [ST.CLOSED, ST.COMPLETED].includes(r.status)).length;
+      const mine = reqs.filter(isMinePending).length; // waiting for the logged-in role to approve
       document.getElementById('counters').innerHTML = [
-        ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
+        ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed], ['ממתין לאישור שלי', mine],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+      // Ops-manager pending badge (Olga's entry point) — global count, independent of the filters.
+      const opsPending = allRequests.filter(r => isPendingApproval(r) &&
+        resolveApprover(r.estimated_cost, r.urgency, r.house) === 'ops_manager').length;
+      document.getElementById('opsBadgeNum').textContent = opsPending;
+      document.getElementById('opsBadge').classList.toggle('zero', opsPending === 0);
 
       board.innerHTML = GROUPS.map(g => {
         const items = reqs.filter(r => g.statuses.includes(r.status));
@@ -221,21 +291,32 @@
       </div>`;
     }
 
+    // Role-gated actions (increment 28): approval buttons render ONLY for the resolved approver of
+    // this request; defer / assign / complete / close render only for dispatch-tier roles. Others
+    // see who the request is waiting on. The server enforces all of this regardless of the UI.
     function actionsFor(r) {
       const s = r.status, id = r.id;
+      const role = currentRole();
       const btns = [];
-      if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
-        const allowed = canApprove(who(), r.estimated_cost, r.urgency);
-        const needSandra = whoApproves(r.estimated_cost, r.urgency) === 'sandra';
-        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}')">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
-        btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
-        btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
+      if (isPendingApproval(r)) {
+        const resolved = resolveApprover(r.estimated_cost, r.urgency, r.house);
+        if (canApprove(role, resolved)) {
+          btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
+          btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
+        }
+        if (canDispatch(role)) {
+          btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
+        }
+        if (!btns.length) btns.push(`<span class="empty">ממתין ל${ROLE_LABEL[resolved] || resolved}</span>`);
       } else if (s === ST.APPROVED) {
-        btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+        if (canDispatch(role)) btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+        else btns.push('<span class="empty">—</span>');
       } else if (s === ST.IN_PROGRESS) {
-        btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+        if (canDispatch(role)) btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+        else btns.push('<span class="empty">—</span>');
       } else if (s === ST.COMPLETED) {
-        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+        if (canDispatch(role)) btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+        else btns.push('<span class="empty">—</span>');
       } else {
         btns.push('<span class="empty">—</span>');
       }
@@ -264,6 +345,7 @@
     document.getElementById('who').addEventListener('change', render);
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
+    document.getElementById('mineOnly').addEventListener('change', render);
     load();
   </script>
 </body>

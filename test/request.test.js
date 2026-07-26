@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  validateNewRequest, buildNewRequest, generateRequestId, SUBMITTERS,
+  validateNewRequest, buildNewRequest, generateRequestId,
 } from '../src/request.js';
 import { STATUSES, CATEGORY, URGENCY } from '../src/schema.js';
 
@@ -45,9 +45,13 @@ test('unknown urgency is rejected', () => {
   assert.match(validateNewRequest({ ...valid, urgency: 'מתישהו' }), /urgency/);
 });
 
-test('created_by must be from the controlled submitter list', () => {
-  assert.match(validateNewRequest({ ...valid, created_by: 'מישהו אחר' }), /created_by/);
-  for (const who of SUBMITTERS) {
+test('created_by must be present; the active-user roster is enforced server-side (Users sheet)', () => {
+  // The pure builder only checks presence now — "any active user" is a Users-sheet/role check
+  // that lives in Code.gs (authorizeAction). Missing created_by is still rejected here.
+  assert.match(validateNewRequest({ ...valid, created_by: '' }), /created_by/);
+  assert.match(validateNewRequest({ ...valid, created_by: undefined }), /created_by/);
+  // Any non-empty submitter passes the pure validator (server decides if they're a real user).
+  for (const who of ['רועי', 'שירה', 'רמי', 'אולגה']) {
     assert.equal(validateNewRequest({ ...valid, created_by: who }), null);
   }
 });

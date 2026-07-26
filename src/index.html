@@ -44,12 +44,11 @@
       padding: 14px 18px; border-bottom: 1px solid var(--card-line);
       background: linear-gradient(180deg, var(--bg2), transparent);
     }
-    .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
-    .brand .e {
-      background: var(--accent-grad); -webkit-background-clip: text;
-      background-clip: text; color: transparent;
-    }
-    .brand .sub { color: var(--muted); font-weight: 500; }
+    /* brand = app emblem + Hebrew name only (RTL: emblem sits at the start/right of the name) */
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; white-space: nowrap; }
+    .brand .emblem { width: 30px; height: 30px; flex: none; display: block; }
+    .brand .name { color: var(--ink); }
+    @media (max-width: 600px) { .brand .emblem { width: 28px; height: 28px; } }
     /* active tab: solid cement pill, like the family */
     .tab {
       font-size: .85rem; font-weight: 800; color: #14171c;
@@ -120,7 +119,24 @@
 <body>
   <div class="topbar">
     <div class="tab">לוגיסטיקה</div>
-    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+    <div class="brand">
+      <svg class="emblem" viewBox="0 0 32 32" role="img" aria-label="לוגיסטיקה">
+        <defs>
+          <linearGradient id="emblemGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stop-color="#14b8a6" />
+            <stop offset="0.5" stop-color="#2dd4bf" />
+            <stop offset="1" stop-color="#5eead4" />
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="7" fill="url(#emblemGrad)" />
+        <g fill="none" stroke="#15171c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M16 6.5 25.5 11.75 25.5 20.25 16 25.5 6.5 20.25 6.5 11.75Z" />
+          <path d="M6.5 11.75 16 17 25.5 11.75" />
+          <path d="M16 17 16 25.5" />
+        </g>
+      </svg>
+      <span class="name">לוגיסטיקה</span>
+    </div>
   </div>
   <div class="wrap">
     <header>
@@ -132,11 +148,7 @@
       <div class="field">
         <label for="created_by">מגיש הבקשה</label>
         <select id="created_by" required>
-          <option value="" disabled selected>בחר/י…</option>
-          <option value="רמי">רמי</option>
-          <option value="צחי">צחי</option>
-          <option value="רועי">רועי</option>
-          <option value="sandra">Sandra</option>
+          <option value="" disabled selected class="loading">טוען משתמשים…</option>
         </select>
       </div>
 
@@ -193,8 +205,41 @@
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
 
     const houseSelect = document.getElementById('house');
+    const createdBySelect = document.getElementById('created_by');
     const msg = document.getElementById('msg');
     const btn = document.getElementById('submitBtn');
+
+    // Active users drive the submitter picker (increment 28 — any active user may create a request;
+    // a coordinator is locked to their own house). Roster comes from the Users sheet via ?action=users.
+    let usersByName = {};
+    async function loadUsers() {
+      try {
+        const res = await fetch(EXEC_URL + '?action=users');
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'load failed');
+        createdBySelect.innerHTML = '<option value="" disabled selected>בחר/י…</option>';
+        usersByName = {};
+        json.data.forEach(u => {
+          usersByName[u.name] = u;
+          const o = document.createElement('option');
+          o.value = u.name; o.textContent = u.name;
+          createdBySelect.appendChild(o);
+        });
+      } catch (e) {
+        createdBySelect.innerHTML = '<option value="" disabled selected>שגיאה בטעינת משתמשים</option>';
+      }
+    }
+
+    // A coordinator may only submit for their own house — lock the house select to it.
+    function applyHouseScope() {
+      const u = usersByName[createdBySelect.value];
+      if (u && u.role === 'coordinator') {
+        houseSelect.value = u.house;
+        houseSelect.disabled = true;
+      } else {
+        houseSelect.disabled = false;
+      }
+    }
 
     // Populate houses from the live feed confirmed in increment 1.
     async function loadHouses() {
@@ -226,7 +271,7 @@
 
     async function submit() {
       const payload = {
-        created_by: document.getElementById('created_by').value,
+        created_by: createdBySelect.value,
         house: houseSelect.value,
         category: checked('category'),
         urgency: checked('urgency'),
@@ -260,7 +305,8 @@
     }
 
     function resetForm() {
-      document.getElementById('created_by').selectedIndex = 0;
+      createdBySelect.selectedIndex = 0;
+      houseSelect.disabled = false;
       houseSelect.selectedIndex = 0;
       document.querySelectorAll('input[name="category"]').forEach(r => r.checked = false);
       document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
@@ -270,7 +316,9 @@
     }
 
     btn.addEventListener('click', submit);
+    createdBySelect.addEventListener('change', applyHouseScope);
     loadHouses();
+    loadUsers();
   </script>
 </body>
 </html>
