@@ -36,7 +36,7 @@
       background:
         radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%),
         var(--bg);
-      font-family: 'Heebo', sans-serif; line-height: 1.5;
+      font-family: 'Heebo', "Segoe UI", system-ui, -apple-system, Arial, sans-serif; line-height: 1.5;
       -webkit-font-smoothing: antialiased;
     }
     .topbar {
@@ -58,9 +58,8 @@
     }
     .wrap { max-width: 560px; margin: 0 auto; padding: 22px 18px 64px; }
     header h1 {
-      font-size: 1.6rem; font-weight: 700; margin: 6px 0 2px; letter-spacing: -.01em;
-      background: var(--accent-grad); -webkit-background-clip: text;
-      background-clip: text; color: transparent; width: fit-content;
+      font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; letter-spacing: -.01em;
+      color: #ffffff; width: fit-content;
     }
     header p { color: var(--muted); margin: 0 0 18px; font-size: .95rem; }
     /* card with the family's glowing accent border */
@@ -116,9 +115,9 @@
     .msg.err { display: block; background: rgba(224,88,74,.1); color: #ef8478; border: 1px solid rgba(224,88,74,.35); }
     .loading { color: var(--muted); font-size: .85rem; }
     .nav { display: flex; gap: 6px; flex-wrap: wrap; }
-    .nav a { font-size: .82rem; font-weight: 600; color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
+    .nav a { font-size: .92rem; font-weight: 700; color: #c8cdd6; text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; transition: all .12s; }
     .nav a:hover { color: var(--ink); border-color: var(--card-line); }
-    .nav a.active { font-weight: 700; color: #14171c; background: var(--accent-grad); }
+    .nav a.active { font-weight: 800; color: #14171c; background: var(--accent-grad); }
 
     /* ── Mobile responsive (≤640px) — step 1: two-row topbar, ≥40px touch targets, iOS no-zoom.
        Fully scoped to this media query so the desktop layout stays pixel-identical.
