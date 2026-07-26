@@ -3,6 +3,43 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 28: UI polish — heavier titles & nav on the dark theme
+
+**What:** CSS-only pass across all six pages (index, dashboard, workorders, inventory, inspection,
+reports) so page titles and nav tabs *look* bolder/heavier on the dark background. Each page owns its
+own inline `<style>` block (no shared stylesheet); changes were applied consistently. No markup,
+logic, backend, or apps-script changes. Hebrew RTL rendering is untouched. This partially reverses
+increment 27 (which had lightened these weights) and pushes further — no existing `font-weight` was
+lowered.
+
+**Titles on the dark background → `font-weight: 800`, ~15% larger, `color: #ffffff`, `letter-spacing: -.01em`:**
+- `h1` on every page: now solid white `800` (previously the teal gradient-clipped `700`); size kept
+  at `1.6rem`. The brand wordmark (`.brand .e`) keeps its teal gradient — only page `h1`s change.
+- `.attention h2` / `.group h2` (dashboard) and `h2` (inspection): `1.05–1.1rem` → `1.2–1.25rem`,
+  `700` → `800`, now explicit `#ffffff` (were inheriting the muted `--ink`). Inspection's teal
+  `.domain-title` accent is preserved (its own rule still wins).
+- `.rollup-lead-name` (reports): `1rem` → `1.15rem`, `700` → `800`, now `#ffffff`.
+
+**Titles on the WHITE document cards → heavier but kept readable (deliberate deviation):**
+- `.order-house-name` (workorders) and `.cat-name` (inventory) sit on white `.order-doc` cards. They
+  got `font-weight: 800`, `1.1rem` → `1.25rem`, and `letter-spacing: -.01em`, but their dark-teal
+  `#0f766e` color was **kept** rather than changed to `#ffffff` — white text on a white card would be
+  invisible, which would defeat the "look heavier/clearer" goal.
+
+**Nav tabs (`.nav a`) → heavier & brighter:**
+- Inactive: `font-size .82rem` → `.92rem`, `font-weight 600` → `700`, `color var(--muted)` (#8b93a0)
+  → `#c8cdd6` (brighter, per spec's "at least #c8cdd6").
+- Active (`.nav a.active`): `700` → `800`. Text color kept at the near-black `#14171c` on the bright
+  teal gradient pill (deliberate deviation from the requested `#ffffff`): white on the light-teal
+  pill is low-contrast, so dark text stays the more legible and "heaviest-looking" option.
+
+**Lead tabs (`.lead-tab`, workorders + inventory):** `font-weight 600` → `800`; `.lead-tab.active`
+`700` → `800`. Active text kept `#14171c` on the gradient pill for the same contrast reason as nav.
+
+**Font stack:** every page's `body` font-family now declares
+`'Heebo', "Segoe UI", system-ui, -apple-system, Arial, sans-serif` so Windows falls back to a real
+bold face for Hebrew when Heebo isn't available.
+
 ## [Unreleased] — increment 27: UI polish — typography weights
 
 **What:** CSS-only pass across all six pages (index, dashboard, workorders, inventory, inspection,
