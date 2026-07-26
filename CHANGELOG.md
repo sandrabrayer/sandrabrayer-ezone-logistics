@@ -3,6 +3,29 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 29: UI polish — legible control-row labels on the dark theme
+
+**What:** CSS-only follow-up making the filter/control-row labels readable on the dark background.
+No markup, logic, backend, or apps-script changes. Hebrew RTL rendering untouched. No `font-weight`
+was lowered.
+
+**Control-row labels (`.controls label`) → `color: #e8ecf2`, `font-weight: 600`** (were
+`color: var(--muted)` #8b93a0, no explicit weight):
+- **inventory** — the בית: / שבוע: / נספר ע״י: labels in the count controls row (the reported case).
+- **dashboard** — the משתמש: / בית: / אחראי: filter labels in its `.controls` row.
+- **workorders** — same `.controls label` rule updated for stylesheet consistency (the page's static
+  markup currently renders lead-tabs/actions instead of a `.controls` row, so this has no visible
+  effect today, but keeps the three dark-theme control rows defined identically).
+
+**Not touched (intentionally):** index, inspection and reports have no dim control-row/filter labels
+on the dark background — their `<label>`s are *form* labels already at the brighter `--ink` (#eef1f5)
+and `font-weight: 700`; recoloring/reweighting them would lower weight and isn't the reported issue.
+Labels on the white document cards (e.g. the workorders order-doc `אחראי:` label) are left as-is per
+the "dark background only" scope.
+
+**Intro paragraph (inventory `.sub`)** — the ספירה שבועית explainer under the `h1`: `color`
+`var(--muted)` (#8b93a0) → `#b8bfc9` so it's no longer dimmed.
+
 ## [Unreleased] — increment 28: UI polish — heavier titles & nav on the dark theme
 
 **What:** CSS-only pass across all six pages (index, dashboard, workorders, inventory, inspection,
