@@ -44,12 +44,9 @@
       padding: 14px 18px; border-bottom: 1px solid var(--card-line);
       background: linear-gradient(180deg, var(--bg2), transparent);
     }
-    .brand { font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; }
-    .brand .e {
-      background: var(--accent-grad); -webkit-background-clip: text;
-      background-clip: text; color: transparent;
-    }
-    .brand .sub { color: var(--muted); font-weight: 500; }
+    .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .02em; font-size: 1.05rem; white-space: nowrap; }
+    .brand-emblem { width: 30px; height: 30px; flex: 0 0 auto; display: block; }
+    .brand-name { color: var(--ink); }
     /* active tab: solid cement pill, like the family */
     .tab {
       font-size: .85rem; font-weight: 800; color: #14171c;
@@ -127,6 +124,7 @@
       html, body { overflow-x: hidden; max-width: 100vw; }
       /* topbar wraps: brand (+ .tab) on top, .nav on its own scrollable row below */
       .topbar { flex-wrap: wrap; gap: 10px; }
+      .brand-emblem { width: 28px; height: 28px; }
       .nav {
         order: 2; flex-basis: 100%; width: 100%;
         flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -156,7 +154,7 @@
 <body>
   <div class="topbar">
     <nav class="nav"><a href="/" class="active">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
-    <div class="brand"><span class="e">E-ZONE</span> <span class="sub">Logistics</span></div>
+    <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span class="brand-name">לוגיסטיקה</span></div>
   </div>
   <div class="wrap">
     <header>

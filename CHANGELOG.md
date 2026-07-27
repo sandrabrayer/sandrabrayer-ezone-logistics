@@ -3,6 +3,23 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — topbar brand: emblem + Hebrew name (drop the "E-ZONE" wordmark)
+
+**What:** The topbar header drops the `E-ZONE` text wordmark. Every page now shows the app's
+**existing PWA emblem** (`/icon-v1-192.png`) next to the app's Hebrew name **`לוגיסטיקה`** — icon
++ name only. The icon and colors are unchanged (no recolour, no new icon set).
+
+**Details**
+- The brand markup on all six pages (`index`, `dashboard`, `inspection`, `reports`, `workorders`,
+  `inventory`) changes from `E-ZONE Logistics` (text-only) to `<img class="brand-emblem"> לוגיסטיקה`.
+  Since the header was previously text-only (no emblem), the app's existing icon is placed next to
+  the name.
+- Emblem sized **30px desktop / 28px mobile**; the brand is a nowrap inline-flex row so it never
+  wraps or crowds the nav, and it stays RTL-correct (emblem leads on the right, name to its left).
+  The name uses the existing `--ink` token — no new colors introduced.
+- `test/header.test.js` (new) locks, per page: no `E-ZONE` text, the emblem `<img>` pointing at the
+  existing `/icon-v1-192.png`, the Hebrew name, the 30/28px sizing, and the nowrap rule.
+
 ## [Unreleased] — increment 29: UI polish — legible control-row labels on the dark theme
 
 **What:** CSS-only follow-up making the filter/control-row labels readable on the dark background.
@@ -136,7 +153,6 @@ house-id namespace. `src/digest.js` and its mirror `apps-script/digest.gs`:
 boundary only (renaming would orphan historical rows). `DIGEST-CONTRACT.md` bumped to **v2** with
 the new ids and a note that the vocabulary is shared with ezone-kitchen; `test/digest.test.js`
 updated. No sheet schema change, no `setupSheet()` needed.
-
 ## [Unreleased] — read-only digest export for the coordinators app
 
 **What:** A new **read-only digest** so the coordinators app can consume Logistics data with
