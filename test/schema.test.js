@@ -3,14 +3,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HEADERS, SHEET_NAMES, SEED_HOUSES, SEED_TECHNICIANS, SEED_CONFIG, CLUSTERS,
-  EXECUTION_STATUS, EXECUTION_STATUS_CHOICES, ASSIGNABLE_LEADS,
+  EXECUTION_STATUS, EXECUTION_STATUS_CHOICES, ASSIGNABLE_LEADS, SEED_USERS, USER_ROLES,
 } from '../src/schema.js';
 
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
     'AuditLog', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
     'Inspections', 'InventoryCounts', 'InventoryItems', 'Requests', 'Technicians',
-  ]);
+    'Users',
+  ].sort());
 });
 
 test('Requests sheet has all 24 columns in order (execution_status appended last)', () => {
@@ -67,8 +68,30 @@ test('seeded technicians are the two internal leads', () => {
   assert.deepEqual(SEED_TECHNICIANS.map((t) => t.name).sort(), ['צחי', 'רמי']);
 });
 
-test('Config seeds the threshold and the emergency-bypass flag', () => {
+test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo_ceiling', () => {
   const keys = SEED_CONFIG.map((c) => c.key);
   assert.ok(keys.includes('approval_threshold'));
   assert.ok(keys.includes('emergency_bypasses_approval'));
+  assert.ok(keys.includes('ceo_ceiling'));
+  // ceo_ceiling ships blank (disabled) — never hardcoded to a value.
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'ceo_ceiling').value, '');
+});
+
+test('Users sheet: headers + the seeded roster (roles from the controlled set)', () => {
+  assert.deepEqual(HEADERS.Users, ['name', 'role', 'house', 'active']);
+  const byName = Object.fromEntries(SEED_USERS.map((u) => [u.name, u]));
+  assert.equal(byName['רועי'].role, 'field_ops');
+  assert.equal(byName['אולגה'].role, 'ops_manager');
+  assert.equal(byName['סנדרה'].role, 'ceo');
+  assert.equal(byName['רמי'].role, 'maintenance');
+  assert.equal(byName['צחי'].role, 'maintenance');
+  assert.equal(byName['שירה'].role, 'coordinator');
+  // field_ops / ops_manager / ceo carry no own house (all houses); every user active + a valid role.
+  assert.equal(byName['רועי'].house, '');
+  assert.equal(byName['אולגה'].house, '');
+  assert.equal(byName['סנדרה'].house, '');
+  for (const u of SEED_USERS) {
+    assert.equal(u.active, 'TRUE');
+    assert.ok(USER_ROLES.includes(u.role), `unknown role: ${u.role}`);
+  }
 });

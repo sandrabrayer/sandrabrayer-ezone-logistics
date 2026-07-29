@@ -28,18 +28,51 @@ Five tabs: `Requests`, `Houses`, `Config`, `Technicians`, `AuditLog`.
 Header definitions live in `src/schema.js` (single source of truth shared by the Sheet
 setup script and the tests). See `apps-script/setup.gs` to provision a fresh Sheet.
 
-## Approval rules (summary)
+## Approval rules — chain B (summary)
 
-Routing depends **only** on amount, every time:
+Routing returns a **role** (from `src/roles.js`), not a person. Rules are evaluated in order:
 
-| Case | Who |
-|---|---|
-| Cost ≤ threshold (or blank/unknown) | Roy |
-| Cost > threshold | Sandra |
-| Emergency (חירום) | Auto-approved, bypasses approval |
-| Defer to date (נדחה לתאריך) | Roy, any amount |
+| # | Case | Role |
+|---|---|---|
+| 1 | Emergency (חירום) | Auto-approved, bypasses approval |
+| 2 | House is pre-opening (טרום-פתיחה), **or** `ceo_ceiling` set and cost exceeds it | `ceo` |
+| 3 | Cost > `approval_threshold` | `ops_manager` |
+| 4 | Otherwise (incl. blank/unknown cost) | `field_ops` |
+| — | Defer to date (נדחה לתאריך) | `field_ops` / `ops_manager` / `ceo`, any amount |
 
-Threshold lives in `Config.approval_threshold` (₪3,000) — **configurable, never hardcoded**.
+On a deferral wake-up the amount is re-checked through rules 1–4 from scratch. Both values live in
+`Config` (`approval_threshold` = ₪3,000; `ceo_ceiling` = blank/disabled) — **configurable, never
+hardcoded**. The routing logic is `src/approval.js`, mirrored verbatim in `apps-script/Code.gs`.
+
+Only the role a request resolves to may approve/reject it (the CEO may always approve); enforcement
+is server-side **and** in Code.gs — the UI may hide buttons, but hiding is never the control.
+
+## Authentication
+
+Login is identity-based (increment 30, matching the ezone-managers / ezone-staffing standard):
+
+- `POST /api/login` with `{ name, pin }` → an HMAC-signed session token carrying the user's name +
+  role + issued-at. The role comes from the `Users` sheet (source of truth); the PIN is the shared
+  gate (constant-time compare). Login is rate-limited to 8 attempts / 15 min per IP (fail-closed).
+- Every data request is Bearer-authenticated; the token is never put in a query string, the page
+  source, or browser storage that could leak it (it lives in memory only). Tokens expire after
+  `SESSION_DAYS` days — expired / tampered / missing tokens are rejected with 401.
+- `apps-script/Code.gs` verifies the **same** token independently against its `SESSION_SECRET`
+  Script Property — the Node layer is never trusted. (The old shared `STAFF_WRITE_TOKEN` is removed.)
+
+### Required environment variables (fail-closed at startup)
+
+The server **refuses to start** if any is missing or empty — set them **before** deploying:
+
+| Var | Where | Notes |
+|---|---|---|
+| `APPS_SCRIPT_EXEC_URL` | Railway env | This app's `/exec` URL |
+| `APP_PIN` | Railway env | Shared login PIN |
+| `SESSION_SECRET` | Railway env **and** Apps Script Script Property | ≥ 32 chars; identical in both places |
+| `SESSION_DAYS` | Railway env | Token lifetime in days |
+
+Secrets live only in Railway env vars / Apps Script Script Properties — never in the repo. See
+`.env.example`.
 
 ## Develop
 
@@ -57,9 +90,15 @@ npm test         # runs the node:test suite in test/
 
 1. Create a new Google Sheet (this app's own — not the Dashboard one).
 2. Extensions → Apps Script → paste `apps-script/Code.gs` and `apps-script/setup.gs`.
-3. Run `setupSheet()` once to create and seed the five tabs.
-4. Deploy → New deployment → Web app. Record the deployment ID and `/exec` URL.
-5. Put the `/exec` URL in the frontend `.env` (see `.env.example`) — **never commit the real URL.**
+3. Run `setupSheet()` to create and seed the tabs. It is idempotent: re-running never duplicates a
+   row and never overwrites an edited one. **Re-run it after upgrading to increment 30** to add the
+   new `Users` sheet and the new `ceo_ceiling` Config key.
+4. Project Settings → Script Properties → add `SESSION_SECRET` with the **same** value as the Node
+   `SESSION_SECRET` env var (so Code.gs can verify session tokens). The old `STAFF_WRITE_TOKEN`
+   property is no longer used and can be removed.
+5. Deploy → New deployment → Web app. Record the deployment ID and `/exec` URL.
+6. Put the `/exec` URL and the other required env vars in the frontend `.env` (see `.env.example`)
+   — **never commit real secrets.**
 
 After every redeploy, verify via DevTools → Network → Response (ecosystem discipline).
 

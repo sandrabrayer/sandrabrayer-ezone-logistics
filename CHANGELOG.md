@@ -3,6 +3,63 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 30: auth to the staffing standard + roles + approval chain B
+
+**Why:** the old shared-PIN + `STAFF_WRITE_TOKEN` scheme carried no identity, and role enforcement
+needs identity. This brings auth to the ezone-managers / ezone-staffing standard (HMAC session
+tokens) and adds real roles so approvals route to — and are enforced against — a *role*, not a
+hardcoded person ("Roy alone").
+
+**Auth (replaces the shared PIN / `STAFF_WRITE_TOKEN`, both deleted):**
+- `POST /api/login` `{ name, pin }` → an HMAC-SHA256 session token carrying the user's **name +
+  role + issued-at**. PIN is a constant-time compare against `APP_PIN`; the role is resolved from
+  the new `Users` sheet (source of truth), never from client input.
+- Login is **rate-limited** to 8 attempts / 15 min per IP, fail-closed, in-memory. Failed attempts
+  are logged **without echoing the PIN**.
+- Every data request is **Bearer**-authenticated (`/api/data` reads, `/api/action` writes). The
+  token is never in a query string, the page source, or persisted browser storage — it lives in
+  memory only. Tokens **expire after `SESSION_DAYS` days**; expired / tampered / missing → 401.
+- `apps-script/Code.gs` verifies the **same** token independently against its `SESSION_SECRET`
+  Script Property — the Node layer is never trusted — and resolves the actor from the token. The
+  `STAFF_WRITE_TOKEN` gate is removed there too.
+- All secret/HMAC comparisons are constant-time.
+
+**New required env vars (server refuses to start if any is missing/empty — set them BEFORE deploy;
+that is intended):** `SESSION_SECRET` (≥ 32 chars; also set as an Apps Script Script Property),
+`SESSION_DAYS`, `APPS_SCRIPT_EXEC_URL`, `APP_PIN`. No defaults, no fallbacks. Secrets live only in
+Railway env vars / Apps Script Script Properties. `.env.example` + README env docs updated.
+
+**New `Users` sheet** (`name | role | house | active`), roles
+`coordinator / maintenance / field_ops / ops_manager / ceo`, seeded active: רועי (field_ops), אולגה
+(ops_manager), סנדרה (ceo), רמי (maintenance, sharon), צחי (maintenance, caesarea+north), and the
+four house coordinators שירה / יעקב / אורן / אביב. `setupSheet()` **creates and seeds it
+idempotently, matching on `name`** — a re-run never duplicates a row and never overwrites an edited
+one.
+
+**New Config key `ceo_ceiling`** = `""` (blank = disabled), added via `setupSheet()` alongside
+`approval_threshold` (= 3000). Neither value is hardcoded anywhere.
+
+**Approval chain B** (replaces the Inc-10/Inc-14 "Roy alone" routing; returns a role) — evaluated in
+order: 1) חירום → auto-approved (emergency bypass); 2) pre-opening (טרום-פתיחה) house **or**
+`ceo_ceiling` set and cost exceeds it → `ceo`; 3) cost > `approval_threshold` → `ops_manager`;
+4) otherwise (incl. blank cost) → `field_ops`. Deferral stays `field_ops` at any amount; on wake-up
+the amount is re-checked through 1–4. `approval_required` derivation follows chain B. The dead "Roy
+alone" logic and the obsolete `APPROVERS` name constants are deleted.
+
+**New `src/roles.js`** (role constants + `canApprove` / `canDefer` / `canDispatch` predicates).
+`src/roles.js` and `src/approval.js` are pure, dependency-free, and **mirrored verbatim** in
+`apps-script/Code.gs` (fenced `MIRROR:*` blocks); `test/mirror-drift.test.js` fails if they drift.
+
+**Enforcement (server-side AND in Code.gs, never UI-only):** approve/reject → only the role chain B
+resolves to for that request (CEO may always approve); defer / assignment / dispatch →
+`field_ops` / `ops_manager` / `ceo`. The actor is resolved from the session token, never from a
+client `by` field. Unauthorised actor → 403, no state change. The client login overlay replaces the
+old shared-code gate; hidden buttons are never the control.
+
+> **⚠ After this merge:** re-run `setupSheet()` (new `Users` sheet + new `ceo_ceiling` Config key),
+> and set the new Railway env vars **and** the Apps Script `SESSION_SECRET` Script Property **before**
+> the deploy — the server refuses to start without them (intended).
+
 ## [Unreleased] — topbar brand: emblem + Hebrew name (drop the "E-ZONE" wordmark)
 
 **What:** The topbar header drops the `E-ZONE` text wordmark. Every page now shows the app's

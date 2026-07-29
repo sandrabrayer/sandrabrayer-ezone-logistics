@@ -1,88 +1,87 @@
-// approval.js — the heart of the app: approval routing + status-transition rules.
+// approval.js — the heart of the app: approval routing (chain B) + status-transition rules.
 //
-// PURE module (no Apps Script APIs) so node:test verifies every rule directly. Code.gs mirrors
-// whoApproves / canApprove and calls these rules, then writes AuditLog + the row.
+// PURE, dependency-free module (no imports, no Apps Script APIs) so node:test verifies every rule
+// directly. The chain-B routing block is mirrored VERBATIM (logic-for-logic) inside
+// apps-script/Code.gs; a guard test (test/mirror-drift.test.js) asserts the two copies stay in sync.
 //
-// §6 (as of Inc 14): Roy approves alone at any amount — Sandra was removed from approval in
-// Inc 10. Emergency bypasses approval entirely (auto). Defer is Roy at any amount. The threshold
-// param is retained on whoApproves/canApprove for signature compatibility but no longer routes.
+// Chain B (increment 30) — replaces the Inc-10/Inc-14 "Roy approves alone" routing. Evaluate in
+// order and return the ROLE (not a person's name):
+//   1. urgency = חירום            → 'auto' (auto-approved, emergency bypass, no human approver)
+//   2. house is טרום-פתיחה, OR ceo_ceiling set and cost exceeds it → 'ceo'
+//   3. cost > approval_threshold  → 'ops_manager'
+//   4. otherwise (incl. blank/unknown cost) → 'field_ops'
+// Deferral stays field_ops at any amount; on wake-up the amount is re-checked through rules 1–4.
 
-import { STATUSES, URGENCY } from './schema.js';
+// === MIRROR:approval START ===
+var URGENCY_EMERGENCY = 'חירום';
+// A house in pre-opening. The Houses sheet historically stored the English 'pre-opening'; the
+// increment-30 vocabulary is the Hebrew 'טרום-פתיחה'. Accept BOTH so routing is correct against
+// either representation.
+var HOUSE_PRE_OPENING_HE = 'טרום-פתיחה';
+var HOUSE_PRE_OPENING_EN = 'pre-opening';
 
-export const APPROVERS = { ROY: 'רועי', SANDRA: 'sandra' };
+var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager', CEO: 'ceo' };
 
-/**
- * Is the cost effectively blank/unknown? Blank routes under the threshold (Roy).
- */
 function costIsBlank(cost) {
   return cost === '' || cost === null || cost === undefined;
 }
 
-/**
- * Who is authorized to approve this request for execution, by amount + urgency.
- * @returns {'auto'|'roy'|'sandra'} 'auto' = emergency bypass (no human approval needed)
- */
-export function whoApproves(cost, urgency, threshold) {
-  // Roy approves alone (Sandra removed in Inc 10). Emergencies bypass approval entirely.
-  // threshold param kept for signature compatibility.
-  if (urgency === URGENCY.EMERGENCY) return 'auto';
-  return 'roy';
+function isPreOpening(houseStatus) {
+  return houseStatus === HOUSE_PRE_OPENING_HE || houseStatus === HOUSE_PRE_OPENING_EN;
 }
 
-/**
- * Derived approval_required flag (§6): TRUE when cost > threshold AND not emergency.
- */
-export function approvalRequired(cost, urgency, threshold) {
-  if (urgency === URGENCY.EMERGENCY) return false;
-  if (costIsBlank(cost)) return false;
-  return Number(cost) > Number(threshold);
+// ceo_ceiling is disabled when blank/unset. Any non-blank value enables the ceiling rule.
+function ceilingIsSet(ceoCeiling) {
+  return !(ceoCeiling === '' || ceoCeiling === null || ceoCeiling === undefined);
 }
 
-/**
- * Can THIS approver approve THIS request? Any amount is Roy's call now (Sandra removed in Inc 10);
- * emergency auto-approves regardless of approver. threshold param kept for signature compatibility.
- */
-export function canApprove(approver, cost, urgency, threshold) {
-  return true;
+// Which ROLE must approve this request. Returns 'auto' for the emergency bypass.
+function whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
+  if (urgency === URGENCY_EMERGENCY) return APPROVER.AUTO;
+  var overCeiling = ceilingIsSet(ceoCeiling) && !costIsBlank(cost)
+    && Number(cost) > Number(ceoCeiling);
+  if (isPreOpening(houseStatus) || overCeiling) return APPROVER.CEO;
+  if (!costIsBlank(cost) && Number(cost) > Number(approvalThreshold)) return APPROVER.OPS_MANAGER;
+  return APPROVER.FIELD_OPS;
 }
 
-// ---- Status transition validation ----
-const S = STATUSES;
+// Derived approval_required flag — TRUE when the request escalates above the default field_ops
+// approver (i.e. routes to ops_manager or ceo). Emergency (auto) and field_ops are FALSE.
+function approvalRequired(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
+  var role = whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling);
+  return role === APPROVER.OPS_MANAGER || role === APPROVER.CEO;
+}
+// === MIRROR:approval END ===
 
-// Allowed status transitions. Each key = from-status, value = set of legal to-statuses.
-const TRANSITIONS = {
-  [S.REQUEST]:          new Set([S.PENDING_APPROVAL, S.APPROVED, S.NOT_APPROVED, S.DEFERRED]),
-  [S.PENDING_APPROVAL]: new Set([S.APPROVED, S.NOT_APPROVED, S.DEFERRED]),
-  [S.DEFERRED]:         new Set([S.APPROVED, S.NOT_APPROVED, S.DEFERRED]), // wake-up: re-decide
-  [S.APPROVED]:         new Set([S.IN_PROGRESS]),                          // no separate "assigned"
-  [S.IN_PROGRESS]:      new Set([S.COMPLETED]),
-  [S.COMPLETED]:        new Set([S.CLOSED]),
-  [S.NOT_APPROVED]:     new Set([]),  // terminal
-  [S.CLOSED]:           new Set([]),  // terminal
+// ---- Status transition validation (inline Hebrew statuses so this module stays dependency-free) ----
+var S = {
+  REQUEST: 'דרישה',
+  PENDING_APPROVAL: 'ממתין לאישור',
+  APPROVED: 'מאושר',
+  NOT_APPROVED: 'לא מאושר',
+  DEFERRED: 'נדחה לתאריך',
+  IN_PROGRESS: 'בביצוע',
+  COMPLETED: 'הושלם',
+  CLOSED: 'סגור',
 };
 
-/**
- * Is moving from -> to a legal transition?
- */
-export function canTransition(fromStatus, toStatus) {
-  const allowed = TRANSITIONS[fromStatus];
+// Allowed status transitions. Each key = from-status, value = set of legal to-statuses.
+var TRANSITIONS = {};
+TRANSITIONS[S.REQUEST] = new Set([S.PENDING_APPROVAL, S.APPROVED, S.NOT_APPROVED, S.DEFERRED]);
+TRANSITIONS[S.PENDING_APPROVAL] = new Set([S.APPROVED, S.NOT_APPROVED, S.DEFERRED]);
+TRANSITIONS[S.DEFERRED] = new Set([S.APPROVED, S.NOT_APPROVED, S.DEFERRED]); // wake-up: re-decide
+TRANSITIONS[S.APPROVED] = new Set([S.IN_PROGRESS]);                          // no separate "assigned"
+TRANSITIONS[S.IN_PROGRESS] = new Set([S.COMPLETED]);
+TRANSITIONS[S.COMPLETED] = new Set([S.CLOSED]);
+TRANSITIONS[S.NOT_APPROVED] = new Set([]); // terminal
+TRANSITIONS[S.CLOSED] = new Set([]);       // terminal
+
+function canTransition(fromStatus, toStatus) {
+  var allowed = TRANSITIONS[fromStatus];
   return !!allowed && allowed.has(toStatus);
 }
 
-/**
- * Validate an approval action and return the resulting status, or throw with a clear reason.
- * Used by Code.gs before it writes the row + audit entry.
- *
- * @param {object} req      the current request row (needs status, estimated_cost, urgency)
- * @param {string} approver who is acting (APPROVERS value)
- * @param {number} threshold
- */
-export function validateApproval(req, approver, threshold) {
-  if (!canTransition(req.status, S.APPROVED)) {
-    throw new Error(`Cannot approve a request in status "${req.status}"`);
-  }
-  if (!canApprove(approver, req.estimated_cost, req.urgency, threshold)) {
-    throw new Error('Approver not authorized for this status');
-  }
-  return S.APPROVED;
-}
+export {
+  APPROVER, URGENCY_EMERGENCY, HOUSE_PRE_OPENING_HE, HOUSE_PRE_OPENING_EN,
+  costIsBlank, isPreOpening, ceilingIsSet, whoApproves, approvalRequired, canTransition,
+};

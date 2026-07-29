@@ -1,42 +1,92 @@
-// src/auth.js — write-authorization predicate for the staff /exec actions.
+// src/auth.js — HMAC-signed session tokens for the identity-based auth (increment 30).
 //
-// Pure, dependency-free, and mirrored verbatim in apps-script/Code.gs so the exact same
-// rule is enforced server-side on the public /exec endpoint (never trust the Node layer).
-// The browser never holds the secret: the staff member TYPES the shared code, the server
-// verifies it against the STAFF_WRITE_TOKEN Script Property, and it rides along as `token`
-// on every staff write.
+// Same standard as ezone-managers / ezone-staffing (lib/auth.js there), EXTENDED to carry identity:
+// the logistics token embeds the user's name + role + issued-at so role enforcement has an identity
+// to resolve the actor from. Replaces the old shared STAFF_WRITE_TOKEN scheme (deleted), which
+// carried no identity.
 //
-// Fail-closed by design: an unset server secret, or a missing / mismatched client token,
-// denies the write.
+// SERVER-ONLY module: it holds the signing/verification logic and must never be served to the
+// browser. The browser only ever holds the opaque token string it receives from POST /api/login.
+//
+// Token format (JWT-like, but minimal and dependency-free):
+//   "<payloadB64url>.<hmacSha256Hex>"
+//   payloadB64url = base64url(JSON.stringify({ n:<name>, r:<role>, iat:<ms>, exp:<ms> }))  (no '=')
+//   hmac          = HMAC-SHA256(payloadB64url) keyed by SESSION_SECRET, lowercase hex
+//
+// apps-script/Code.gs verifies this SAME token independently (Utilities.computeHmacSha256Signature
+// + Utilities.base64DecodeWebSafe) using the SESSION_SECRET Script Property — the Node layer is
+// never trusted.
 
-// Write actions that require the staff token. `createRequest` is deliberately ABSENT: it is
-// the public intake form (coordinators submit a request without a staff code). Every other
-// mutating action is staff-only.
-export const STAFF_WRITE_ACTIONS = [
-  'approve', 'reject', 'defer', 'assign', 'markExternal', 'assignBatch',
-  'setStatus', 'createInspection', 'addFinding', 'confirmFinding',
-  'deleteRequest', 'editRequest', 'setExecution', 'submitInventory',
-];
-// NOTE: setExecution was always token-gated server-side (Code.gs); it was missing from THIS
-// mirror until increment 25 — drift fixed here so the two lists match exactly again.
+import crypto from 'node:crypto';
 
-/** True when the given POST action must carry a valid staff token. */
-export function writeRequiresToken(action) {
-  return STAFF_WRITE_ACTIONS.indexOf(action) !== -1;
+const DEFAULT_DAYS = 7;
+
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function hmacHex(secret, data) {
+  return crypto.createHmac('sha256', secret).update(data).digest('hex');
 }
 
 /**
- * Constant-time equality of the provided token against the expected server secret.
- * Fail-closed: returns false if the server secret is unset/empty, if the provided token is
- * empty, or if the lengths differ — only an exact match returns true.
+ * Sign a session token carrying identity. Fail-closed: throws if the secret is unset (a missing
+ * secret must never silently mint an unverifiable token).
+ * @param {string} secret  SESSION_SECRET
+ * @param {number} days    SESSION_DAYS (token lifetime)
+ * @param {{name:string, role:string}} claims
  */
-export function tokenOk(provided, expected) {
-  if (typeof expected !== 'string' || expected.length === 0) return false;
-  if (typeof provided !== 'string' || provided.length === 0) return false;
-  if (provided.length !== expected.length) return false;
-  var diff = 0;
-  for (var i = 0; i < expected.length; i++) {
-    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-  return diff === 0;
+export function signToken(secret, days, claims) {
+  if (!secret) throw new Error('SESSION_SECRET is not set');
+  const name = (claims && claims.name) || '';
+  const role = (claims && claims.role) || '';
+  const ttlMs = (Number(days) || DEFAULT_DAYS) * 24 * 60 * 60 * 1000;
+  const iat = Date.now();
+  const exp = iat + ttlMs;
+  const payload = b64url(JSON.stringify({ n: name, r: role, iat, exp }));
+  const sig = hmacHex(secret, payload);
+  return `${payload}.${sig}`;
 }
+
+/**
+ * Verify a token and return its decoded claims, or null on any failure (missing/empty secret,
+ * malformed token, bad signature, expired). Uses a constant-time signature comparison.
+ * @returns {{name:string, role:string, iat:number, exp:number}|null}
+ */
+export function verifyToken(secret, token) {
+  if (!secret || typeof token !== 'string') return null;
+  const dot = token.indexOf('.');
+  if (dot < 0) return null;
+  const payload = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (!/^[0-9a-f]{64}$/.test(sig)) return null;
+  const expected = hmacHex(secret, payload);
+  // Constant-time compare; both are fixed 64-char hex so lengths already match.
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  let claims;
+  try {
+    const json = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    claims = JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+  if (!claims || typeof claims !== 'object') return null;
+  if (!Number.isFinite(claims.exp) || claims.exp < Date.now()) return null;
+  return { name: claims.n || '', role: claims.r || '', iat: claims.iat, exp: claims.exp };
+}
+
+/**
+ * Constant-time PIN equality. Fail-closed: false on a non-string, an empty expected PIN, or a
+ * length mismatch — only an exact match returns true. Never echoes the PIN.
+ */
+export function checkPin(input, expected) {
+  if (typeof input !== 'string' || typeof expected !== 'string') return false;
+  if (!expected) return false;
+  const a = Buffer.from(input);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+export { DEFAULT_DAYS };
