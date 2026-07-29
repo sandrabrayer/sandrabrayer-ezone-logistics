@@ -4,52 +4,36 @@
 // directly. The chain-B routing block is mirrored VERBATIM (logic-for-logic) inside
 // apps-script/Code.gs; a guard test (test/mirror-drift.test.js) asserts the two copies stay in sync.
 //
-// Chain B (increment 30) — replaces the Inc-10/Inc-14 "Roy approves alone" routing. Evaluate in
-// order and return the ROLE (not a person's name):
+// Chain B v2 (increment 31) — routing by AMOUNT only. Evaluate in order and return the ROLE:
 //   1. urgency = חירום            → 'auto' (auto-approved, emergency bypass, no human approver)
-//   2. house is טרום-פתיחה, OR ceo_ceiling set and cost exceeds it → 'ceo'
-//   3. cost > approval_threshold  → 'ops_manager'
-//   4. otherwise (incl. blank/unknown cost) → 'field_ops'
-// Deferral stays field_ops at any amount; on wake-up the amount is re-checked through rules 1–4.
+//   2. cost > approval_threshold  → 'ops_manager'
+//   3. otherwise (incl. blank/unknown cost) → 'field_ops'
+// The increment-30 pre-opening→ceo and ceo_ceiling branches are REMOVED: pre-opening houses route
+// by amount exactly like open houses. The ceo role constant and the ceo_ceiling Config key are kept
+// but are DORMANT — nothing in routing reads them. Deferral stays field_ops at any amount; on
+// wake-up the amount is re-checked through rules 1–3.
 
 // === MIRROR:approval START ===
 var URGENCY_EMERGENCY = 'חירום';
-// A house in pre-opening. The Houses sheet historically stored the English 'pre-opening'; the
-// increment-30 vocabulary is the Hebrew 'טרום-פתיחה'. Accept BOTH so routing is correct against
-// either representation.
-var HOUSE_PRE_OPENING_HE = 'טרום-פתיחה';
-var HOUSE_PRE_OPENING_EN = 'pre-opening';
 
-var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager', CEO: 'ceo' };
+var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager' };
 
 function costIsBlank(cost) {
   return cost === '' || cost === null || cost === undefined;
 }
 
-function isPreOpening(houseStatus) {
-  return houseStatus === HOUSE_PRE_OPENING_HE || houseStatus === HOUSE_PRE_OPENING_EN;
-}
-
-// ceo_ceiling is disabled when blank/unset. Any non-blank value enables the ceiling rule.
-function ceilingIsSet(ceoCeiling) {
-  return !(ceoCeiling === '' || ceoCeiling === null || ceoCeiling === undefined);
-}
-
-// Which ROLE must approve this request. Returns 'auto' for the emergency bypass.
-function whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
+// Which ROLE must approve this request. Returns 'auto' for the emergency bypass. Routes by amount
+// only — house status is NOT consulted (chain B v2).
+function whoApproves(cost, urgency, approvalThreshold) {
   if (urgency === URGENCY_EMERGENCY) return APPROVER.AUTO;
-  var overCeiling = ceilingIsSet(ceoCeiling) && !costIsBlank(cost)
-    && Number(cost) > Number(ceoCeiling);
-  if (isPreOpening(houseStatus) || overCeiling) return APPROVER.CEO;
   if (!costIsBlank(cost) && Number(cost) > Number(approvalThreshold)) return APPROVER.OPS_MANAGER;
   return APPROVER.FIELD_OPS;
 }
 
 // Derived approval_required flag — TRUE when the request escalates above the default field_ops
-// approver (i.e. routes to ops_manager or ceo). Emergency (auto) and field_ops are FALSE.
-function approvalRequired(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
-  var role = whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling);
-  return role === APPROVER.OPS_MANAGER || role === APPROVER.CEO;
+// approver (i.e. routes to ops_manager). Emergency (auto) and field_ops are FALSE.
+function approvalRequired(cost, urgency, approvalThreshold) {
+  return whoApproves(cost, urgency, approvalThreshold) === APPROVER.OPS_MANAGER;
 }
 // === MIRROR:approval END ===
 
@@ -82,6 +66,5 @@ function canTransition(fromStatus, toStatus) {
 }
 
 export {
-  APPROVER, URGENCY_EMERGENCY, HOUSE_PRE_OPENING_HE, HOUSE_PRE_OPENING_EN,
-  costIsBlank, isPreOpening, ceilingIsSet, whoApproves, approvalRequired, canTransition,
+  APPROVER, URGENCY_EMERGENCY, costIsBlank, whoApproves, approvalRequired, canTransition,
 };

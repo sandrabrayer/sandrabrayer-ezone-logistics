@@ -78,7 +78,9 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
 });
 
 test('Users sheet: headers + the seeded roster (roles from the controlled set)', () => {
-  assert.deepEqual(HEADERS.Users, ['name', 'role', 'house', 'active']);
+  // pin_hash (increment 31) is APPENDED at the end — never reorder the earlier columns.
+  assert.deepEqual(HEADERS.Users, ['name', 'role', 'house', 'active', 'pin_hash']);
+  assert.equal(HEADERS.Users[HEADERS.Users.length - 1], 'pin_hash');
   const byName = Object.fromEntries(SEED_USERS.map((u) => [u.name, u]));
   assert.equal(byName['רועי'].role, 'field_ops');
   assert.equal(byName['אולגה'].role, 'ops_manager');
@@ -93,5 +95,7 @@ test('Users sheet: headers + the seeded roster (roles from the controlled set)',
   for (const u of SEED_USERS) {
     assert.equal(u.active, 'TRUE');
     assert.ok(USER_ROLES.includes(u.role), `unknown role: ${u.role}`);
+    // No password is ever seeded — hashes are written later via setUserPin(), never in the repo.
+    assert.equal(u.pin_hash, '');
   }
 });

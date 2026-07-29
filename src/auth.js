@@ -21,6 +21,49 @@ import crypto from 'node:crypto';
 
 const DEFAULT_DAYS = 7;
 
+// ---- Per-user password hashing (increment 31, tier A: רועי / אולגה) ----
+// PBKDF2-HMAC-SHA256, salted. Stored string format (in the Users.pin_hash column):
+//   pbkdf2$sha256$<iterations>$<saltHex>$<hashHex>
+// The iteration count is stored IN the string so verification always matches whatever produced it
+// (Node here, or the setUserPin() Apps Script helper). A single 32-byte block, so the PBKDF2 output
+// equals F(salt,iters,1) = U1 xor … xor Uc — the exact algorithm setUserPin() mirrors.
+const PBKDF2_ITERS = 100000;
+const PBKDF2_KEYLEN = 32;
+const PBKDF2_DIGEST = 'sha256';
+
+/** Hash a plaintext password. NEVER stores or returns the plaintext. */
+export function hashPin(plaintext, iterations) {
+  if (typeof plaintext !== 'string' || plaintext.length === 0) {
+    throw new Error('hashPin: plaintext password required');
+  }
+  const iters = Number(iterations) > 0 ? Math.floor(Number(iterations)) : PBKDF2_ITERS;
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.pbkdf2Sync(plaintext, salt, iters, PBKDF2_KEYLEN, PBKDF2_DIGEST);
+  return `pbkdf2$sha256$${iters}$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+/**
+ * Constant-time verify of a plaintext against a stored pbkdf2 string. Fail-closed: false on an
+ * empty/malformed stored value (so a user with no password set can never authenticate).
+ */
+export function verifyPin(plaintext, stored) {
+  if (typeof plaintext !== 'string' || plaintext.length === 0) return false;
+  if (typeof stored !== 'string' || stored.length === 0) return false;
+  const parts = stored.split('$');
+  if (parts.length !== 5 || parts[0] !== 'pbkdf2' || parts[1] !== 'sha256') return false;
+  const iters = Number(parts[2]);
+  if (!Number.isFinite(iters) || iters <= 0) return false;
+  let salt, expected;
+  try {
+    salt = Buffer.from(parts[3], 'hex');
+    expected = Buffer.from(parts[4], 'hex');
+  } catch (e) { return false; }
+  if (salt.length === 0 || expected.length === 0) return false;
+  const actual = crypto.pbkdf2Sync(plaintext, salt, iters, expected.length, PBKDF2_DIGEST);
+  if (actual.length !== expected.length) return false;
+  return crypto.timingSafeEqual(actual, expected);
+}
+
 function b64url(buf) {
   return Buffer.from(buf).toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -35,16 +78,17 @@ function hmacHex(secret, data) {
  * secret must never silently mint an unverifiable token).
  * @param {string} secret  SESSION_SECRET
  * @param {number} days    SESSION_DAYS (token lifetime)
- * @param {{name:string, role:string}} claims
+ * @param {{name:string, role:string, scope?:string}} claims  scope = house/cluster scope (tier B)
  */
 export function signToken(secret, days, claims) {
   if (!secret) throw new Error('SESSION_SECRET is not set');
   const name = (claims && claims.name) || '';
   const role = (claims && claims.role) || '';
+  const scope = (claims && claims.scope != null) ? String(claims.scope) : '';
   const ttlMs = (Number(days) || DEFAULT_DAYS) * 24 * 60 * 60 * 1000;
   const iat = Date.now();
   const exp = iat + ttlMs;
-  const payload = b64url(JSON.stringify({ n: name, r: role, iat, exp }));
+  const payload = b64url(JSON.stringify({ n: name, r: role, sc: scope, iat, exp }));
   const sig = hmacHex(secret, payload);
   return `${payload}.${sig}`;
 }
@@ -73,7 +117,7 @@ export function verifyToken(secret, token) {
   }
   if (!claims || typeof claims !== 'object') return null;
   if (!Number.isFinite(claims.exp) || claims.exp < Date.now()) return null;
-  return { name: claims.n || '', role: claims.r || '', iat: claims.iat, exp: claims.exp };
+  return { name: claims.n || '', role: claims.r || '', scope: claims.sc || '', iat: claims.iat, exp: claims.exp };
 }
 
 /**
@@ -87,6 +131,18 @@ export function checkPin(input, expected) {
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Server-to-server proof for the login roster read. The Users sheet holds pin_hash, and the Apps
+ * Script /exec endpoint is world-callable, so the hash-bearing roster is returned ONLY to a caller
+ * that presents this HMAC(SESSION_SECRET, 'roster:users') proof. Node (which shares SESSION_SECRET
+ * with Apps Script) computes it here; Code.gs recomputes and compares it. The raw secret never
+ * appears in a URL. Public `users` reads omit the proof and get pin_hash stripped.
+ */
+export function rosterProof(secret) {
+  if (!secret) return '';
+  return hmacHex(secret, 'roster:users');
 }
 
 export { DEFAULT_DAYS };

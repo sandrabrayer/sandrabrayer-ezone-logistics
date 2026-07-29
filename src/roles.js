@@ -39,6 +39,29 @@ function canDefer(actorRole) {
 function canDispatch(actorRole) {
   return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
 }
+
+// Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
+// ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
+function isManagerRole(role) {
+  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+}
+
+// House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their
+// own house (scope = that house name). A maintenance lead sees the houses in their cluster(s)
+// (scope = a comma-separated cluster list; houseCluster is the candidate house's cluster). The
+// scope value comes from the signed session token, never from a client-supplied field.
+function houseInScope(role, scope, houseName, houseCluster) {
+  if (isManagerRole(role)) return true;
+  if (role === ROLE.COORDINATOR) return String(houseName) === String(scope);
+  if (role === ROLE.MAINTENANCE) {
+    var clusters = String(scope == null ? '' : scope).split(',');
+    for (var i = 0; i < clusters.length; i++) {
+      if (clusters[i].replace(/^\s+|\s+$/g, '') === String(houseCluster)) return true;
+    }
+    return false;
+  }
+  return false;
+}
 // === MIRROR:roles END ===
 
-export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch };
+export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, isManagerRole, houseInScope };

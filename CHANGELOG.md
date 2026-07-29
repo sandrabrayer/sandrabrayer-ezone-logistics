@@ -3,6 +3,57 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 31 — per-user passwords for רועי/אולגה, restricted staff view, routing chain B v2 (ceo removed from routing)
+
+**Why:** increment 30 shipped HMAC auth + roles + chain B but with a single shared `APP_PIN`, so
+identity was self-asserted (anyone with the PIN could log in as anyone). This adds per-manager
+passwords, scopes tier-B users to their own house/cluster, and simplifies routing.
+
+**Two access tiers (login `{ name, pin }`):**
+- **Tier A — managers (רועי, אולגה):** a **personal password each**, hashed (salted PBKDF2-HMAC-
+  SHA256) in the new `Users.pin_hash` column and set via the `setUserPin()` Apps Script helper.
+- **Tier B — everyone else** (שירה, יעקב, אורן, אביב, רמי, צחי): the existing **shared `APP_PIN`**.
+- **סנדרה (ceo):** no password, **cannot log in**; row stays in `Users`.
+- Login picks the tier from the sheet: a name with a `pin_hash` verifies against it; a
+  coordinator/maintenance name verifies against `APP_PIN`; anything else is denied. Wrong
+  tier/credential → the **same generic 401** (never reveals which tier a name belongs to).
+- **`Users` gains an append-only `pin_hash` column** (never reorders existing columns). Passwords
+  are hashed with PBKDF2 via `node:crypto`; a plaintext is NEVER stored in the sheet, repo, or a
+  test fixture. `setUserPin(name, plaintext)` (in `setup.gs`) hashes + writes and never logs the
+  plaintext; a Node parity test proves its PBKDF2 equals `crypto.pbkdf2Sync`.
+- **Password verification lives only in Node** at login; **Code.gs trusts only the signed token**
+  (documented choice). The token now also carries the user's **house/cluster scope**. The
+  hash-bearing roster read is gated by a server-to-server HMAC proof, so the world-callable `/exec`
+  never leaks `pin_hash`.
+
+**Routing chain B v2** (replaces the shipped chain B): 1) חירום → auto; 2) cost > `approval_threshold`
+→ `ops_manager`; 3) otherwise (incl. blank) → `field_ops`. The **pre-opening→ceo and ceo_ceiling
+branches are removed** — pre-opening houses route by amount like open houses. The `ceo` role
+constant and the `ceo_ceiling` Config key are **kept but dormant** (nothing in routing reads them).
+Deferral stays `field_ops`; wake-up re-checks through rules 1–3. `src/approval.js` + `src/roles.js`
+and their **verbatim `Code.gs` mirrors** are updated together; the mirror-drift guard still passes.
+
+**Restricted staff view (tier B), enforced server-side AND in Code.gs (never UI-only):**
+- `requests` reads are **filtered to the user's in-scope houses** — coordinator = own house,
+  maintenance = their cluster(s)' houses (scope resolved from the token, houses' clusters from the
+  `Houses` sheet). Out-of-scope rows are dropped server-side, not merely hidden.
+- Manager-only reads (dashboard/reports/inventory/inspections/technicians) → **403** for tier B;
+  the `users` roster is manager-only and always `pin_hash`-stripped.
+- `createRequest` must target a house in the actor's scope or it is **403**'d; approve / reject /
+  defer / assign / dispatch / batching are refused for tier B (403, no state change, no success
+  AuditLog row).
+
+**Docs/env:** `.env.example` + README clarify `APP_PIN` is now the **tier-B shared PIN only**.
+
+**Tests** (`node --test`): chain-B v2 routing (emergency→auto, >3000→ops_manager, ≤3000/blank→
+field_ops, pre-opening routes by amount, deferral wake-up), רועי vs אולגה approve 403/success, all
+login-tier cases + סנדרה-cannot-log-in, cross-house read filtering (coordinator + רמי cluster),
+tier-B write 403s, PBKDF2 GAS-parity, and the mirror-drift guard.
+
+> **⚠ After this merge:** **re-run `setupSheet()`** (appends the `Users.pin_hash` column), then set
+> the managers' passwords via `setUserPin('רועי', …)` / `setUserPin('אולגה', …)` — **without this
+> neither manager can log in.** `APP_PIN` remains the tier-B shared PIN.
+
 ## [Unreleased] — increment 30: auth to the staffing standard + roles + approval chain B
 
 **Why:** the old shared-PIN + `STAFF_WRITE_TOKEN` scheme carried no identity, and role enforcement

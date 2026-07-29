@@ -80,6 +80,29 @@ function getTechnicians() { return readObjects_('Technicians'); }
 function getRequests() { return readObjects_('Requests'); }
 function getUsers() { return readObjects_('Users'); }
 
+// Proof the Node login layer presents to read the roster WITH pin_hash (server-to-server). Mirrors
+// src/auth.js rosterProof: HMAC(SESSION_SECRET, 'roster:users'). '' when the secret is unset.
+function rosterProof_() {
+  var secret = getSessionSecret_();
+  return secret ? hmacHex_(secret, 'roster:users') : '';
+}
+
+// The Users roster for a doGet('users') read. pin_hash is returned ONLY to a caller presenting the
+// server-to-server proof (Node login). Every other caller — including anyone who has the world-
+// callable /exec URL — gets pin_hash STRIPPED, so password hashes never leak off the sheet.
+function usersForRead_(e) {
+  var proof = (e && e.parameter && e.parameter.auth) || '';
+  var expected = rosterProof_();
+  var withHash = expected !== '' && constantTimeEq_(proof, expected);
+  var users = getUsers();
+  if (withHash) return users;
+  return users.map(function (u) {
+    var c = {};
+    for (var k in u) { if (k !== 'pin_hash') c[k] = u[k]; }
+    return c;
+  });
+}
+
 function getRequestById(id) {
   var all = getRequests();
   for (var i = 0; i < all.length; i++) {
@@ -88,11 +111,12 @@ function getRequestById(id) {
   return null;
 }
 
-// The pre-opening / status of a house, looked up by name. '' when unknown.
-function getHouseStatus_(house) {
+// The cluster of a house, looked up by name. '' when unknown. Used for tier-B (maintenance)
+// house-scope enforcement.
+function getHouseCluster_(house) {
   var houses = getHouses();
   for (var i = 0; i < houses.length; i++) {
-    if (String(houses[i].name) === String(house)) return houses[i].status;
+    if (String(houses[i].name) === String(house)) return houses[i].cluster;
   }
   return '';
 }
@@ -155,7 +179,7 @@ function constantTimeEq_(a, b) {
 }
 
 /**
- * Verify a Bearer session token. Returns { name, role } on success, or null on any failure
+ * Verify a Bearer session token. Returns { name, role, scope } on success, or null on any failure
  * (unset secret, malformed token, bad signature, expired). Never trusts the payload without a
  * valid signature.
  */
@@ -172,7 +196,7 @@ function verifyToken_(secret, token) {
   try { claims = JSON.parse(b64urlDecode_(payload)); } catch (e) { return null; }
   if (!claims || typeof claims !== 'object') return null;
   if (typeof claims.exp !== 'number' || claims.exp < Date.now()) return null;
-  return { name: claims.n || '', role: claims.r || '' };
+  return { name: claims.n || '', role: claims.r || '', scope: claims.sc || '' };
 }
 
 // === MIRROR:roles START ===
@@ -207,62 +231,67 @@ function canDefer(actorRole) {
 function canDispatch(actorRole) {
   return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
 }
+
+// Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
+// ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
+function isManagerRole(role) {
+  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+}
+
+// House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their
+// own house (scope = that house name). A maintenance lead sees the houses in their cluster(s)
+// (scope = a comma-separated cluster list; houseCluster is the candidate house's cluster). The
+// scope value comes from the signed session token, never from a client-supplied field.
+function houseInScope(role, scope, houseName, houseCluster) {
+  if (isManagerRole(role)) return true;
+  if (role === ROLE.COORDINATOR) return String(houseName) === String(scope);
+  if (role === ROLE.MAINTENANCE) {
+    var clusters = String(scope == null ? '' : scope).split(',');
+    for (var i = 0; i < clusters.length; i++) {
+      if (clusters[i].replace(/^\s+|\s+$/g, '') === String(houseCluster)) return true;
+    }
+    return false;
+  }
+  return false;
+}
 // === MIRROR:roles END ===
 
 // === MIRROR:approval START ===
 var URGENCY_EMERGENCY = 'חירום';
-// A house in pre-opening. The Houses sheet historically stored the English 'pre-opening'; the
-// increment-30 vocabulary is the Hebrew 'טרום-פתיחה'. Accept BOTH so routing is correct against
-// either representation.
-var HOUSE_PRE_OPENING_HE = 'טרום-פתיחה';
-var HOUSE_PRE_OPENING_EN = 'pre-opening';
 
-var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager', CEO: 'ceo' };
+var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager' };
 
 function costIsBlank(cost) {
   return cost === '' || cost === null || cost === undefined;
 }
 
-function isPreOpening(houseStatus) {
-  return houseStatus === HOUSE_PRE_OPENING_HE || houseStatus === HOUSE_PRE_OPENING_EN;
-}
-
-// ceo_ceiling is disabled when blank/unset. Any non-blank value enables the ceiling rule.
-function ceilingIsSet(ceoCeiling) {
-  return !(ceoCeiling === '' || ceoCeiling === null || ceoCeiling === undefined);
-}
-
-// Which ROLE must approve this request. Returns 'auto' for the emergency bypass.
-function whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
+// Which ROLE must approve this request. Returns 'auto' for the emergency bypass. Routes by amount
+// only — house status is NOT consulted (chain B v2).
+function whoApproves(cost, urgency, approvalThreshold) {
   if (urgency === URGENCY_EMERGENCY) return APPROVER.AUTO;
-  var overCeiling = ceilingIsSet(ceoCeiling) && !costIsBlank(cost)
-    && Number(cost) > Number(ceoCeiling);
-  if (isPreOpening(houseStatus) || overCeiling) return APPROVER.CEO;
   if (!costIsBlank(cost) && Number(cost) > Number(approvalThreshold)) return APPROVER.OPS_MANAGER;
   return APPROVER.FIELD_OPS;
 }
 
 // Derived approval_required flag — TRUE when the request escalates above the default field_ops
-// approver (i.e. routes to ops_manager or ceo). Emergency (auto) and field_ops are FALSE.
-function approvalRequired(cost, urgency, houseStatus, approvalThreshold, ceoCeiling) {
-  var role = whoApproves(cost, urgency, houseStatus, approvalThreshold, ceoCeiling);
-  return role === APPROVER.OPS_MANAGER || role === APPROVER.CEO;
+// approver (i.e. routes to ops_manager). Emergency (auto) and field_ops are FALSE.
+function approvalRequired(cost, urgency, approvalThreshold) {
+  return whoApproves(cost, urgency, approvalThreshold) === APPROVER.OPS_MANAGER;
 }
 // === MIRROR:approval END ===
 
-// Config accessors for the routing rules (never hardcode the values).
+// Config accessor for the routing rule (never hardcode the value). ceo_ceiling stays in Config but
+// is DORMANT (chain B v2 does not read it).
 function approvalThreshold_() { return Number(getConfig('approval_threshold')); }
-function ceoCeiling_() { return getConfig('ceo_ceiling'); } // '' / null (disabled) or a number string
 
-// The derived approval_required for a request, resolving house status + config.
-function approvalRequiredFor_(cost, urgency, house) {
-  return approvalRequired(cost, urgency, getHouseStatus_(house), approvalThreshold_(), ceoCeiling_());
+// The derived approval_required for a request (chain B v2 — amount only).
+function approvalRequiredFor_(cost, urgency) {
+  return approvalRequired(cost, urgency, approvalThreshold_());
 }
 
 // The role that must approve a given request row.
 function requiredApproverFor_(req) {
-  return whoApproves(req.estimated_cost, req.urgency, getHouseStatus_(req.house),
-    approvalThreshold_(), ceoCeiling_());
+  return whoApproves(req.estimated_cost, req.urgency, approvalThreshold_());
 }
 
 // ---- HTTP router ----
@@ -274,7 +303,7 @@ function doGet(e) {
     case 'houses':      result = getHouses(); break;
     case 'technicians': result = getTechnicians(); break;
     case 'requests':    result = getRequests(); break;
-    case 'users':       result = getUsers(); break;
+    case 'users':       result = usersForRead_(e); break;
     case 'config':      result = getAllConfig(); break;
     case 'checklist':   result = readObjects_('ChecklistItems'); break;
     case 'inspections': result = readObjects_('Inspections'); break;
@@ -332,10 +361,18 @@ function doPost(e) {
 function forbidden_() { return jsonOut_({ ok: false, error: 'Forbidden: role not authorized for this action' }); }
 
 function handleCreateRequest_(input, actor) {
+  // The submitter is the verified token identity, never a client-supplied field.
+  input.created_by = actor.name;
   var validationError = validateNewRequest_(input);
   if (validationError) return jsonOut_({ ok: false, error: validationError });
+  // Tier B (coordinator / maintenance) may only file a request for a house in THEIR scope; the
+  // scope comes from the token. Managers may file for any house.
+  if (!isManagerRole(actor.role) &&
+      !houseInScope(actor.role, actor.scope, input.house, getHouseCluster_(input.house))) {
+    return forbidden_();
+  }
   var row = buildNewRequest_(input);
-  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency, row.house);
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
   appendRequest(row);
   rebuildDigest();
   return jsonOut_({ ok: true, id: row.id });
@@ -346,7 +383,9 @@ function validateNewRequest_(p) {
   if (!p.house) return 'Missing house';
   if (VALID_CATEGORIES.indexOf(p.category) === -1) return 'Invalid or missing category';
   if (VALID_URGENCIES.indexOf(p.urgency) === -1) return 'Invalid or missing urgency';
-  if (SUBMITTERS.indexOf(p.created_by) === -1) return 'Invalid or missing created_by';
+  // created_by is the verified token identity (set by the caller), so it is trusted here — no
+  // SUBMITTERS allow-list check (that list predates identity auth).
+  if (!p.created_by) return 'Missing created_by';
   var blank = (p.estimated_cost === '' || p.estimated_cost == null);
   if (!blank && isNaN(Number(p.estimated_cost))) return 'estimated_cost must be a number or blank';
   return null;
@@ -671,7 +710,7 @@ function handleConfirmFinding_(p, actor) {
     description: finding.finding_text, location_in_house: finding.location_in_house || '',
     urgency: 'רגיל', estimated_cost: '',
   });
-  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency, row.house);
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
   appendRequest(row);
   writeAuditEntry(row.id, '', row.status, actor.name, 'נוצר מבקרה (finding ' + finding.id + ')');
 
@@ -743,7 +782,7 @@ function handleEditRequest_(p, actor) {
   };
   var err = validateNewRequest_(merged);
   if (err) return jsonOut_({ ok: false, error: err });
-  fields.approval_required = approvalRequiredFor_(merged.estimated_cost, merged.urgency, merged.house);
+  fields.approval_required = approvalRequiredFor_(merged.estimated_cost, merged.urgency);
   updateRequest_(p.id, fields, req.status, req.status, actor.name, 'נערך ע"י ' + actor.name);
   rebuildDigest();
   return jsonOut_({ ok: true });

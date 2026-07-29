@@ -42,7 +42,12 @@ export const HEADERS = {
   // People + their role/scope (increment 30). Identity + role drive approval chain B and the
   // server-side role enforcement. `house` = own house (coordinator), cluster(s) (maintenance), or
   // blank = all houses (field_ops / ops_manager / ceo). `active` gates login.
-  Users: ['name', 'role', 'house', 'active'],
+  //
+  // Increment 31: `pin_hash` APPENDED at the end (never reorder existing columns). A salted PBKDF2
+  // hash for tier-A managers (רועי, אולגה) — set via the setUserPin() Apps Script helper, NEVER a
+  // plaintext. Blank for tier-B users (they log in with the shared APP_PIN) and for סנדרה (ceo, no
+  // login).
+  Users: ['name', 'role', 'house', 'active', 'pin_hash'],
 
   // Internal maintenance leads + reusable external suppliers. §8.
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
@@ -179,8 +184,8 @@ export const SEED_TECHNICIANS = [
 export const SEED_CONFIG = [
   { key: 'approval_threshold', value: '3000' },
   { key: 'emergency_bypasses_approval', value: 'TRUE' },
-  // Increment 30: ceo_ceiling — blank = disabled. When set to a number, any cost that exceeds it
-  // routes to the ceo (chain B rule 2). Never hardcode this value anywhere; read it from Config.
+  // ceo_ceiling — kept but DORMANT since increment 31 (chain B v2 routes by amount only and does
+  // not read it). Seeded blank; retained so the key/plumbing survive if ceo routing returns.
   { key: 'ceo_ceiling', value: '' },
 ];
 
@@ -190,18 +195,20 @@ export const SEED_CONFIG = [
 export const USER_ROLES = ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo'];
 
 // Seed roster (active = TRUE). `house`: blank = all houses; a cluster name (or comma-separated
-// clusters) for maintenance leads; a specific house for coordinators. setupSheet() upserts these
-// by `name` — re-running never duplicates a row and never overwrites an edited one.
+// clusters) for maintenance leads; a specific house for coordinators. `pin_hash` seeds BLANK for
+// everyone — tier-A managers' hashes are set later via setUserPin() (never seeded as plaintext).
+// setupSheet() upserts by `name` — re-running never duplicates a row and never overwrites an
+// edited one (so a manager's set pin_hash survives a re-run).
 export const SEED_USERS = [
-  { name: 'רועי',  role: 'field_ops',   house: '',                 active: 'TRUE' }, // all houses, no own house
-  { name: 'אולגה', role: 'ops_manager', house: '',                 active: 'TRUE' }, // all houses
-  { name: 'סנדרה', role: 'ceo',         house: '',                 active: 'TRUE' }, // all houses
-  { name: 'רמי',   role: 'maintenance', house: 'sharon',           active: 'TRUE' }, // cluster: sharon
-  { name: 'צחי',   role: 'maintenance', house: 'caesarea,north',   active: 'TRUE' }, // clusters: caesarea + north
-  { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני',     active: 'TRUE' },
-  { name: 'יעקב',  role: 'coordinator', house: 'ריהאב',             active: 'TRUE' },
-  { name: 'אורן',  role: 'coordinator', house: 'רעננה',             active: 'TRUE' },
-  { name: 'אביב',  role: 'coordinator', house: 'רמות השבים',        active: 'TRUE' },
+  { name: 'רועי',  role: 'field_ops',   house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)
+  { name: 'אולגה', role: 'ops_manager', house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)
+  { name: 'סנדרה', role: 'ceo',         house: '',                 active: 'TRUE', pin_hash: '' }, // no password → cannot log in
+  { name: 'רמי',   role: 'maintenance', house: 'sharon',           active: 'TRUE', pin_hash: '' }, // tier B, cluster: sharon
+  { name: 'צחי',   role: 'maintenance', house: 'caesarea,north',   active: 'TRUE', pin_hash: '' }, // tier B, clusters: caesarea + north
+  { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני',     active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'יעקב',  role: 'coordinator', house: 'ריהאב',             active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'אורן',  role: 'coordinator', house: 'רעננה',             active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'אביב',  role: 'coordinator', house: 'רמות השבים',        active: 'TRUE', pin_hash: '' }, // tier B
 ];
 
 // ---- Inspection vocabularies + seed (§13) ----
