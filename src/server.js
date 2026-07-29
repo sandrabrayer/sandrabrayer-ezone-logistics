@@ -15,7 +15,8 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
-import { signToken, verifyToken, checkPin } from './auth.js';
+import { signToken, verifyToken, checkPin, verifyPin, rosterProof } from './auth.js';
+import { ROLE, isManagerRole, houseInScope } from './roles.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -70,7 +71,7 @@ const CLIENT_SHIM = `<script>(function(){
       var sel=el('select','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
       NAMES.forEach(function(n){var o=el('option',null,n);o.value=n;sel.appendChild(o);});
       var pin=el('input','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
-      pin.type='password';pin.setAttribute('inputmode','numeric');pin.setAttribute('autocomplete','off');pin.placeholder='קוד גישה';
+      pin.type='password';pin.setAttribute('autocomplete','off');pin.placeholder='סיסמה או קוד גישה';
       var btn=el('button','width:100%;min-height:44px;font-size:16px;font-weight:700;border:0;border-radius:8px;background:#00bfa5;color:#04150f;cursor:pointer','כניסה');
       var err=el('div','color:#ff8a80;font-size:.9rem;margin-top:10px;min-height:1.1em','');
       card.appendChild(h);card.appendChild(sel);card.appendChild(pin);card.appendChild(btn);card.appendChild(err);ov.appendChild(card);
@@ -81,7 +82,7 @@ const CLIENT_SHIM = `<script>(function(){
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){TOKEN=res.j.token;window.__STAFF_TOKEN__='1';if(ov.parentNode)ov.parentNode.removeChild(ov);resolve();}
+          if(res.s===200&&res.j&&res.j.token){TOKEN=res.j.token;window.__STAFF_TOKEN__='1';window.__ROLE__=res.j.role||'';window.__SCOPE__=res.j.scope||'';if(ov.parentNode)ov.parentNode.removeChild(ov);resolve();}
           else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
         }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
@@ -195,29 +196,29 @@ function readJsonBody(req, limitBytes) {
   });
 }
 
-// Resolve a user's role from the Users sheet (source of truth), read via Apps Script. Fail-closed:
-// returns null if the user is absent, inactive, or the roster can't be read. Never trusts a
-// client-supplied role.
-async function resolveUserRole(name) {
-  if (!EXEC_URL || !name) return null;
-  let rows;
+function isActive(u) {
+  return u.active === true || u.active === 'TRUE' || u.active === 'true' || u.active === 1 || u.active === '1';
+}
+
+// Read a data action from Apps Script (server-to-server). Returns the `data` array, or null on any
+// failure. `extra` adds query params (e.g. the roster proof). Used for the login roster + read scoping.
+async function fetchAppsScriptData(action, extra) {
+  if (!EXEC_URL) return null;
+  const qs = new URLSearchParams({ action });
+  if (extra) for (const [k, v] of Object.entries(extra)) qs.set(k, v);
   try {
-    const r = await fetch(`${EXEC_URL}?action=users`, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
+    const r = await fetch(`${EXEC_URL}?${qs.toString()}`, {
+      method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' },
+    });
     const j = await r.json();
-    rows = (j && j.data) || [];
+    return (j && j.data) || null;
   } catch (e) {
     return null;
   }
-  for (const u of rows) {
-    if (String(u.name) !== String(name)) continue;
-    const active = u.active === true || u.active === 'TRUE' || u.active === 'true' || u.active === 1 || u.active === '1';
-    if (!active) return null;
-    return String(u.role || '') || null;
-  }
-  return null;
 }
 
-// Verify the Bearer token; returns the decoded actor { name, role, ... } and the raw token, or null.
+// Verify the Bearer token; returns the decoded actor { name, role, scope, ... } and the raw token,
+// or null.
 function authFromRequest(req) {
   const h = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/i.exec(h);
@@ -226,47 +227,100 @@ function authFromRequest(req) {
   return actor ? { actor, token } : null;
 }
 
+// Two access tiers (increment 31). tier A (רועי, אולגה) each have a personal password in the
+// Users.pin_hash column; tier B (coordinators + maintenance) share APP_PIN; סנדרה (ceo, no pin_hash)
+// and any manager without a pin_hash have NO login path. All failures return the SAME generic 401 —
+// never revealing which tier a name belongs to. The PIN/password is never logged.
 async function handleLogin(req, res) {
   const ip = clientIp(req);
+  const generic401 = () => sendJson(res, 401, { ok: false, error: 'שם או סיסמה שגויים' });
   if (!rateLimitLogin(ip)) {
     return sendJson(res, 429, { ok: false, error: 'יותר מדי ניסיונות. נסו שוב מאוחר יותר.' });
   }
   const body = await readJsonBody(req, 4096);
   const name = (body && typeof body.name === 'string') ? body.name : '';
-  const pin = (body && body.pin != null) ? String(body.pin) : '';
-  if (!checkPin(pin, APP_PIN)) {
-    // Log the failure WITHOUT echoing the PIN.
+  const pw = (body && body.pin != null) ? String(body.pin) : '';
+
+  // Read the roster WITH pin_hash via the server-to-server proof (Apps Script returns hashes only to
+  // this proof; public reads get them stripped).
+  const users = await fetchAppsScriptData('users', { auth: rosterProof(SESSION_SECRET) });
+  if (!users) { console.warn(`[login] roster unavailable for ${ip}`); return generic401(); }
+  const user = users.find((u) => String(u.name) === String(name) && isActive(u));
+
+  let ok = false;
+  if (user) {
+    const pinHash = String(user.pin_hash || '');
+    if (pinHash) {
+      // tier A — verify against THIS user's personal password hash.
+      ok = verifyPin(pw, pinHash);
+    } else if (user.role === ROLE.COORDINATOR || user.role === ROLE.MAINTENANCE) {
+      // tier B — the shared PIN (only these roles; ceo/managers without a hash have no path).
+      ok = checkPin(pw, APP_PIN);
+    }
+  }
+  if (!ok) {
     console.warn(`[login] failed attempt from ${ip} for name=${JSON.stringify(name)}`);
-    return sendJson(res, 401, { ok: false, error: 'קוד שגוי' });
+    return generic401();
   }
-  const role = await resolveUserRole(name);
-  if (!role) {
-    console.warn(`[login] no active user/role for name=${JSON.stringify(name)} from ${ip}`);
-    return sendJson(res, 401, { ok: false, error: 'משתמש לא מזוהה או לא פעיל' });
-  }
-  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name, role });
-  return sendJson(res, 200, { ok: true, token, name, role, expiresInDays: SESSION_DAYS });
+
+  const scope = String(user.house || ''); // '' for managers (all houses); house/cluster for tier B
+  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name, role: user.role, scope });
+  // role + scope are the user's OWN, non-secret facts — returned so the UI can adapt (e.g. lock the
+  // request form to their house). They are never the security control: the server filters reads and
+  // 403s out-of-scope writes regardless of what the browser does.
+  return sendJson(res, 200, { ok: true, token, name, role: user.role, scope, expiresInDays: SESSION_DAYS });
 }
 
-// Read proxy — Bearer-gated. Forwards an allowlisted set of query keys to Apps Script.
+// Read proxy — Bearer-gated + role/scope-enforced. Forwards an allowlisted set of query keys.
 const ALLOWED_QUERY_KEYS = new Set(['action', 'house', 'month', 'week_start', 'id']);
+// Reads only tier-A managers may perform. Tier B (coordinator/maintenance) get 403 on these.
+const MANAGER_ONLY_READS = new Set([
+  'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts',
+]);
+// Reads open to everyone (needed by the request form). 'requests' is scope-filtered below.
+// 'houses'/'config' are non-sensitive; 'users' is manager-only + pin_hash-stripped.
 
 async function handleData(req, res, url) {
   const auth = authFromRequest(req);
   if (!auth) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+  const { actor } = auth;
+  const action = url.searchParams.get('action') || '';
+  const manager = isManagerRole(actor.role);
+
+  // Tier B is refused the manager-only reads outright (dashboard/reports/inventory/inspections data).
+  if (!manager && MANAGER_ONLY_READS.has(action)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+
   const qs = new URLSearchParams();
   for (const [k, v] of url.searchParams.entries()) {
     if (ALLOWED_QUERY_KEYS.has(k)) qs.set(k, v);
   }
   const target = `${EXEC_URL}${qs.toString() ? `?${qs.toString()}` : ''}`;
+  let payload;
   try {
     const upstream = await fetch(target, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
-    const text = await upstream.text();
-    res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json', 'Cache-Control': 'no-store' });
-    res.end(text);
+    payload = await upstream.json();
   } catch (err) {
     return sendJson(res, 502, { ok: false, error: 'upstream_error' });
   }
+
+  // Post-process per action for scope/secret hygiene.
+  if (payload && payload.ok && Array.isArray(payload.data)) {
+    if (action === 'users') {
+      // The roster is manager-only, and pin_hash is NEVER exposed to the browser.
+      if (!manager) return sendJson(res, 403, { ok: false, error: 'forbidden' });
+      payload.data = payload.data.map((u) => { const c = Object.assign({}, u); delete c.pin_hash; return c; });
+    } else if (action === 'requests' && !manager) {
+      // Tier B sees ONLY their in-scope houses' requests (all submitters). Filtered SERVER-SIDE.
+      const houses = (await fetchAppsScriptData('houses')) || [];
+      const clusterOf = {};
+      for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
+      payload.data = payload.data.filter((r) =>
+        houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
+    }
+  }
+  return sendJson(res, 200, payload);
 }
 
 // Write proxy — Bearer-gated. The actor is taken from the verified token (never the client body);
