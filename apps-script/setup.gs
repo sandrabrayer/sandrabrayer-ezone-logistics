@@ -21,6 +21,8 @@ var HEADERS = {
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
+  // People + their role/scope (increment 30). Mirror of src/schema.js HEADERS.Users.
+  Users: ['name', 'role', 'house', 'active'],
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
   Inspections: [
@@ -62,6 +64,23 @@ var SEED_TECHNICIANS = [
 var SEED_CONFIG = [
   ['approval_threshold', '3000'],
   ['emergency_bypasses_approval', 'TRUE'],
+  // Increment 30: ceo_ceiling — blank = disabled (chain B rule 2 ignored). Upserted by key so a
+  // re-run of setupSheet() ADDS it to existing sheets without overwriting approval_threshold.
+  ['ceo_ceiling', ''],
+];
+
+// Increment 30 roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and
+// never overwrites an edited one. Mirror of src/schema.js SEED_USERS.
+var SEED_USERS = [
+  ['רועי',  'field_ops',   '',               'TRUE'],
+  ['אולגה', 'ops_manager', '',               'TRUE'],
+  ['סנדרה', 'ceo',         '',               'TRUE'],
+  ['רמי',   'maintenance', 'sharon',         'TRUE'],
+  ['צחי',   'maintenance', 'caesarea,north', 'TRUE'],
+  ['שירה',  'coordinator', 'קיסריה עפרוני',   'TRUE'],
+  ['יעקב',  'coordinator', 'ריהאב',           'TRUE'],
+  ['אורן',  'coordinator', 'רעננה',           'TRUE'],
+  ['אביב',  'coordinator', 'רמות השבים',      'TRUE'],
 ];
 
 var SEED_CHECKLIST = [
@@ -147,9 +166,14 @@ function setupSheet() {
 
   seedIfEmpty_(ss.getSheetByName('Houses'), SEED_HOUSES);
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
-  seedIfEmpty_(ss.getSheetByName('Config'), SEED_CONFIG);
   seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
   seedIfEmpty_(ss.getSheetByName('InventoryItems'), SEED_INVENTORY_ITEMS);
+
+  // Config + Users are upserted by key/name (NOT seed-if-empty) so re-running setupSheet() after
+  // this increment ADDS the new ceo_ceiling key and the Users roster to already-populated sheets,
+  // without duplicating or overwriting anything an operator has edited.
+  upsertByKeyColumn_(ss.getSheetByName('Config'), SEED_CONFIG, 0);   // match on column 0 = key
+  upsertByKeyColumn_(ss.getSheetByName('Users'), SEED_USERS, 0);     // match on column 0 = name
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');
@@ -163,4 +187,22 @@ function seedIfEmpty_(sheet, rows) {
   if (!sheet || rows.length === 0) return;
   if (sheet.getLastRow() > 1) return; // already has data
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+/**
+ * Idempotent upsert by a key column: append only the seed rows whose key (column `keyCol`) is not
+ * already present. Existing rows are NEVER overwritten — an operator's edits survive a re-run, and
+ * re-running never duplicates a seeded row. Used for Config (key) and Users (name).
+ */
+function upsertByKeyColumn_(sheet, rows, keyCol) {
+  if (!sheet || !rows || rows.length === 0) return;
+  var existing = {};
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    var vals = sheet.getRange(2, keyCol + 1, last - 1, 1).getValues();
+    for (var i = 0; i < vals.length; i++) existing[String(vals[i][0])] = true;
+  }
+  var toAppend = rows.filter(function (row) { return !existing[String(row[keyCol])]; });
+  if (toAppend.length === 0) return;
+  sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length, toAppend[0].length).setValues(toAppend);
 }

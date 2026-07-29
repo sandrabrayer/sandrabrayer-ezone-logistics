@@ -104,32 +104,13 @@
 </head>
 <body>
   <script>
-    // Staff access gate (Roy & Olga). The shared code is NEVER in this page's source: the staff
-    // member types it and the server verifies it (verifyToken) against the STAFF_WRITE_TOKEN Script
-    // Property. Verified token kept in sessionStorage for the session. Fail-closed: wrong/blank
-    // code, cancel, or no server token → back to the request form. Invoked via staffGate().then(load).
+    // Auth is handled by the injected login overlay (increment 30): identity login (name + PIN)
+    // yields an HMAC session token sent as Authorization: Bearer on every /api call. staffGate()
+    // below is a retained no-op so the existing load flow is untouched.
     async function staffGate() {
-      var EXEC = window.__EXEC_URL__ || '';
-      try {
-        var saved = sessionStorage.getItem('ezone_staff_token') || '';
-        if (saved) { window.__STAFF_TOKEN__ = saved; return; }
-      } catch (e) {}
-      for (var tries = 0; tries < 3; tries++) {
-        var entered = window.prompt('קוד גישה לצוות (רועי / אולגה):');
-        if (entered == null) break;
-        try {
-          var res = await fetch(EXEC + '?action=verifyToken&token=' + encodeURIComponent(entered));
-          var json = await res.json();
-          if (json && json.valid) {
-            window.__STAFF_TOKEN__ = entered;
-            try { sessionStorage.setItem('ezone_staff_token', entered); } catch (e) {}
-            return;
-          }
-        } catch (e) {}
-      }
-      document.documentElement.innerHTML = '';
-      window.location.replace('/');
-      return new Promise(function () {});
+      // Auth is handled by the injected login overlay (increment 30): identity login
+      // (name + PIN) → HMAC session token, sent as Authorization: Bearer on every /api call.
+      return;
     }
   </script>
 
@@ -334,7 +315,7 @@
     }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-    staffGate().then(load);
+    load();
   </script>
 </body>
 </html>
