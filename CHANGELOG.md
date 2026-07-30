@@ -3,6 +3,33 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 35 — הפרדס digest id corrected to `pardes` (ecosystem alignment); DIGEST-CONTRACT.md names fixed
+
+**Why:** this repo assigned `raanana-hapardes` (increment 33) to רעננה הפרדס, but HOUSE-IDS.md and
+ezone-kitchen both use **`pardes`**. Since both apps publish digests that ezone-coordinators reads on
+one shared house-id namespace, the same building resolved to two different houses across the ecosystem.
+
+**Not a migration — verified before changing.** The id is a **digest-boundary** value: it is produced
+only by `houseId()` / `digestHouseId_()` while a digest is rebuilt, and written into the separate,
+idempotently-regenerated digest export. Every Logistics write path persists the Hebrew house **name**,
+never the id — `Requests.house` (`input.house`), `InventoryCounts.house`, `Inspections.house`. A search
+of every write path found **no** persisted row keyed on `raanana-hapardes` (הפרדס is pre-opening; no
+InventoryCounts / Requests / Inspections row has ever carried it). So the change touches no stored data;
+the next digest rebuild simply emits `pardes`.
+
+**Changed:** `raanana-hapardes` → `pardes` in the digest house map and order — `src/digest.js` and its
+`apps-script/digest.gs` mirror (kept in sync) — and the digest tests. No other id changed
+(`caesarea-ofroni` / `caesarea-rehab` are untouched). `DIGEST-CONTRACT.md`: the id is corrected to
+`pardes`, and the two Caesarea display names are corrected to the canonical city-first forms
+(קיסריה עפרוני / קיסריה ריהאב) — **doc text only**.
+
+**Tests:** the house-ids guard now asserts `houseId('רעננה הפרדס') === 'pardes'` and that
+`raanana-hapardes` appears nowhere in the production digest sources. Full `node --test` suite green (284).
+
+> **After this merge:** no `setupSheet()` re-run and no sheet-cell edits — the id is never stored in a
+> sheet. The digest rebuild (on the next write, or the 15-minute backstop trigger) will emit `pardes` for
+> רעננה הפרדס; force a `rebuildDigest()` run if you want it reflected immediately.
+
 ## [Unreleased] — increment 34 — Caesarea house display names corrected to city-first order (no id changed)
 
 **Why:** HOUSE-IDS.md was corrected so both Caesarea houses read **city first**, matching רעננה אשר /

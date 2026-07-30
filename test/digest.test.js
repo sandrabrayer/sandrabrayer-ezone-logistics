@@ -15,14 +15,14 @@ import {
 test('all six houses map to their (v2, shared ezone-kitchen) ids', () => {
   assert.equal(houseId('רמות השבים'), 'ramot-hashavim');
   assert.equal(houseId('רעננה אשר'), 'raanana-asher');
-  assert.equal(houseId('רעננה הפרדס'), 'raanana-hapardes');
+  assert.equal(houseId('רעננה הפרדס'), 'pardes');   // increment 35: aligned with HOUSE-IDS.md + ezone-kitchen
   assert.equal(houseId('קיסריה עפרוני'), 'caesarea-ofroni');
   assert.equal(houseId('קיסריה ריהאב'), 'caesarea-rehab');
   assert.equal(houseId('שדה אליעזר'), 'sde-eliezer');
 });
 
 test('the pre-opening houses now DO map (they already have activity) — no longer invisible', () => {
-  assert.equal(houseId('רעננה הפרדס'), 'raanana-hapardes');
+  assert.equal(houseId('רעננה הפרדס'), 'pardes');
   assert.equal(houseId('שדה אליעזר'), 'sde-eliezer');
 });
 
@@ -39,7 +39,7 @@ test('house name is matched after trimming surrounding whitespace', () => {
 
 test('DIGEST_HOUSE_IDS is exactly the six mapped ids, in canonical (HOUSE-IDS.md) order', () => {
   assert.deepEqual(DIGEST_HOUSE_IDS, [
-    'ramot-hashavim', 'raanana-asher', 'raanana-hapardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
+    'ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
   ]);
   assert.deepEqual([...new Set(Object.values(HOUSE_IDS))].sort(), [...DIGEST_HOUSE_IDS].sort());
 });

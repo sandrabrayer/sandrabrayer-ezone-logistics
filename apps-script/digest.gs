@@ -35,7 +35,7 @@ var DIGEST_NOT_DONE_ = 'לא בוצעה';
 
 // ---- Pure helpers (mirror of src/digest.js) ----
 
-// House id map — ALL SIX houses (increment 33). הפרדס (raanana-hapardes) / שדה אליעזר (sde-eliezer)
+// House id map — ALL SIX houses (increment 33). הפרדס (pardes) / שדה אליעזר (sde-eliezer)
 // are pre-opening but already have activity, so a gap now shows as 'לא בוצעה' instead of the house
 // being invisible. Any house that does not map is OMITTED, never guessed. Keys are the CANONICAL
 // Hebrew display names (HOUSE-IDS.md); values are the FROZEN ids, shared with ezone-kitchen. The
@@ -43,13 +43,13 @@ var DIGEST_NOT_DONE_ = 'לא בוצעה';
 var DIGEST_HOUSE_IDS_ = {
   'רמות השבים': 'ramot-hashavim',
   'רעננה אשר': 'raanana-asher',
-  'רעננה הפרדס': 'raanana-hapardes',
+  'רעננה הפרדס': 'pardes',
   'קיסריה עפרוני': 'caesarea-ofroni',
   'קיסריה ריהאב': 'caesarea-rehab',
   'שדה אליעזר': 'sde-eliezer',
 };
 var DIGEST_HOUSE_ID_ORDER_ = [
-  'ramot-hashavim', 'raanana-asher', 'raanana-hapardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
+  'ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
 ];
 
 function digestHouseId_(name) {
