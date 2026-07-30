@@ -13,10 +13,12 @@ import { HOUSE_IDS, DIGEST_HOUSE_IDS, houseId } from '../src/digest.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
-// The only correct display names, from HOUSE-IDS.md.
-const CANONICAL = ['רמות השבים', 'רעננה אשר', 'רעננה הפרדס', 'עפרוני קיסריה', 'ריהאב קיסריה', 'שדה אליעזר'];
-// Forms that must never appear as a house value again (the exact bugs this guard prevents).
-const OLD_FORMS = ['רעננה', 'קיסריה עפרוני', 'הפרדס', 'קיסריה ריהאב'];
+// The only correct display names, from HOUSE-IDS.md. Both Caesarea houses are CITY FIRST.
+const CANONICAL = ['רמות השבים', 'רעננה אשר', 'רעננה הפרדס', 'קיסריה עפרוני', 'קיסריה ריהאב', 'שדה אליעזר'];
+// Forms that must never appear as a house value again (the exact bugs this guard prevents). The
+// city-last Caesarea orderings ("עפרוני קיסריה" / "ריהאב קיסריה") are the ones now being corrected;
+// "קיסריה עפרוני" / "קיסריה ריהאב" are CANONICAL and must NOT be banned.
+const OLD_FORMS = ['רעננה', 'עפרוני קיסריה', 'הפרדס', 'ריהאב קיסריה'];
 
 test('HOUSE-IDS.md exists at the repo root and lists all six canonical display names', () => {
   const md = readFileSync(join(root, 'HOUSE-IDS.md'), 'utf8');

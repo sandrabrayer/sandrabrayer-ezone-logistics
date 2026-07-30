@@ -3,6 +3,35 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 34 — Caesarea house display names corrected to city-first order (no id changed)
+
+**Why:** HOUSE-IDS.md was corrected so both Caesarea houses read **city first**, matching רעננה אשר /
+רעננה הפרדס. Increment 33 had shipped them the other way round. This aligns the two display names with
+the authoritative source.
+
+    Wrong (shipped inc. 33)   →   Correct (HOUSE-IDS.md)
+    עפרוני קיסריה             →   קיסריה עפרוני
+    ריהאב קיסריה              →   קיסריה ריהאב
+
+The other four (רמות השבים · רעננה אשר · רעננה הפרדס · שדה אליעזר) were already correct and are unchanged.
+
+**Display names only — no id changed.** `caesarea-ofroni` and `caesarea-rehab` stay exactly as they are;
+ids are internal keys and never shown to a user, and renaming one is a cross-repo migration. Updated
+every production occurrence of the two display names: the Houses seed and the coordinators' house-scope
+strings (`src/schema.js`, `apps-script/setup.gs`), the request + inventory UI (`src/index.html`,
+`src/inventory.html`), and the digest house map (`src/digest.js`, `apps-script/digest.gs`). Display names
+still come from one place (the seed / HOUSE-IDS.md) and are never rebuilt by concatenation or used as a
+data key.
+
+**Tests:** the house-name guard now rejects the city-last forms `עפרוני קיסריה` / `ריהאב קיסריה` and no
+longer bans `קיסריה עפרוני` / `קיסריה ריהאב` (which are now canonical); the seeded-name assertions check
+all six against HOUSE-IDS.md. Full `node --test` suite green (282).
+
+> **⚠ After this merge:** `setupSheet()` does **not** overwrite existing rows (it only appends columns and
+> seeds a fresh sheet), so the two Caesarea house names must be **renamed by hand in the sheet cells** —
+> in `Houses` (the `name` cell) and in `Users` (the two coordinators' `house` cells) — to
+> `קיסריה עפרוני` / `קיסריה ריהאב`. Until then, stored rows still carry the old display strings.
+
 ## [Unreleased] — increment 33 — units, unit menus and par for Logistics inventory; shortage = below-par; digest covers all six houses; canonical display names
 
 **Why:** `InventoryItems` had only `category | item_text | active`, so a count of "3" for שקיות אשפה

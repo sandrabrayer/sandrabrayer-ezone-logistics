@@ -59,7 +59,7 @@ test('counters are the coordinators + backstop', () => {
 
 test('each open/pre-opening house maps to its coordinator (canonical names, HOUSE-IDS.md)', () => {
   assert.deepEqual(INVENTORY_HOUSE_COORDINATORS, {
-    'עפרוני קיסריה': 'שירה', 'ריהאב קיסריה': 'יעקב', 'רעננה אשר': 'אורן',
+    'קיסריה עפרוני': 'שירה', 'קיסריה ריהאב': 'יעקב', 'רעננה אשר': 'אורן',
     'רמות השבים': 'אביב', 'שדה אליעזר': 'צחי',
   });
   for (const who of Object.values(INVENTORY_HOUSE_COORDINATORS)) {
@@ -341,7 +341,7 @@ const countRows = [
   // corrected re-submission SAME house+week — must win
   { count_id: 'INV-2', house: 'רעננה אשר', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-22T09:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 24 },
   // another house, same week
-  { count_id: 'INV-3', house: 'ריהאב קיסריה', week_start: wk, counted_by: 'יעקב', counted_at: '2026-07-21T07:00:00Z', category: 'טואלטיקה', item: 'טישו', quantity: 6 },
+  { count_id: 'INV-3', house: 'קיסריה ריהאב', week_start: wk, counted_by: 'יעקב', counted_at: '2026-07-21T07:00:00Z', category: 'טואלטיקה', item: 'טישו', quantity: 6 },
   // same house, DIFFERENT week — must not leak in
   { count_id: 'INV-0', house: 'רעננה אשר', week_start: '2026-07-12', counted_by: 'אורן', counted_at: '2026-07-13T08:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 9 },
 ];
@@ -356,9 +356,9 @@ test('latestCountFor returns the newest count_id only, scoped to house+week', ()
 });
 
 test('latestByHouse maps every house to its latest count or null', () => {
-  const houses = [{ name: 'רעננה אשר' }, { name: 'ריהאב קיסריה' }, { name: 'רעננה הפרדס' }];
+  const houses = [{ name: 'רעננה אשר' }, { name: 'קיסריה ריהאב' }, { name: 'רעננה הפרדס' }];
   const m = latestByHouse(countRows, houses, wk);
   assert.equal(m['רעננה אשר'].count_id, 'INV-2');
-  assert.equal(m['ריהאב קיסריה'].count_id, 'INV-3');
+  assert.equal(m['קיסריה ריהאב'].count_id, 'INV-3');
   assert.equal(m['רעננה הפרדס'], null);
 });

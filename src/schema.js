@@ -178,13 +178,13 @@ export const TRADES = [
 // but they are separate clusters so a far-north visit is never auto-batched with the
 // coastal two. A test asserts exactly this.
 // Display names are the CANONICAL forms from HOUSE-IDS.md (increment 33) — the single source for how
-// a house is shown. They must match that file exactly (e.g. "עפרוני קיסריה", not "קיסריה עפרוני").
+// a house is shown. They must match that file exactly (city first: "קיסריה עפרוני", not "עפרוני קיסריה").
 export const SEED_HOUSES = [
   { name: 'רעננה אשר',      technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
   { name: 'רמות השבים',     technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
   { name: 'רעננה הפרדס',    technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.PRE_OPENING },
-  { name: 'עפרוני קיסריה',  technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
-  { name: 'ריהאב קיסריה',   technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
+  { name: 'קיסריה עפרוני',  technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
+  { name: 'קיסריה ריהאב',   technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
   { name: 'שדה אליעזר',     technician: 'צחי', cluster: CLUSTERS.NORTH,    status: HOUSE_STATUS.PRE_OPENING },
 ];
 
@@ -221,8 +221,8 @@ export const SEED_USERS = [
   { name: 'סנדרה', role: 'ceo',         house: '',                 active: 'TRUE', pin_hash: '' }, // no password → cannot log in
   { name: 'רמי',   role: 'maintenance', house: 'sharon',           active: 'TRUE', pin_hash: '' }, // tier B, cluster: sharon
   { name: 'צחי',   role: 'maintenance', house: 'caesarea,north',   active: 'TRUE', pin_hash: '' }, // tier B, clusters: caesarea + north
-  { name: 'שירה',  role: 'coordinator', house: 'עפרוני קיסריה',     active: 'TRUE', pin_hash: '' }, // tier B
-  { name: 'יעקב',  role: 'coordinator', house: 'ריהאב קיסריה',      active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני',     active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'יעקב',  role: 'coordinator', house: 'קיסריה ריהאב',      active: 'TRUE', pin_hash: '' }, // tier B
   { name: 'אורן',  role: 'coordinator', house: 'רעננה אשר',         active: 'TRUE', pin_hash: '' }, // tier B
   { name: 'אביב',  role: 'coordinator', house: 'רמות השבים',        active: 'TRUE', pin_hash: '' }, // tier B
 ];
@@ -287,12 +287,12 @@ export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'
 export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
 
 // House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
-// people who actually walk each house: שירה (עפרוני קיסריה) · יעקב (ריהאב קיסריה) · אורן (רעננה אשר) ·
+// people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (קיסריה ריהאב) · אורן (רעננה אשר) ·
 // אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop, incl. רעננה הפרדס).
 // Keys are the CANONICAL house display names (HOUSE-IDS.md) — kept in sync with SEED_HOUSES.
 export const INVENTORY_HOUSE_COORDINATORS = {
-  'עפרוני קיסריה': 'שירה',
-  'ריהאב קיסריה': 'יעקב',
+  'קיסריה עפרוני': 'שירה',
+  'קיסריה ריהאב': 'יעקב',
   'רעננה אשר': 'אורן',
   'רמות השבים': 'אביב',
   'שדה אליעזר': 'צחי',

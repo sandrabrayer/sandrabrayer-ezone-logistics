@@ -44,16 +44,16 @@ test('cluster ≠ maintenance lead: Tzachi covers caesarea AND north as separate
   const byName = Object.fromEntries(SEED_HOUSES.map((h) => [h.name, h]));
 
   // Tzachi (צחי) is the internal lead for all three of his houses...
-  assert.equal(byName['עפרוני קיסריה'].technician, 'צחי');
-  assert.equal(byName['ריהאב קיסריה'].technician, 'צחי');
+  assert.equal(byName['קיסריה עפרוני'].technician, 'צחי');
+  assert.equal(byName['קיסריה ריהאב'].technician, 'צחי');
   assert.equal(byName['שדה אליעזר'].technician, 'צחי');
 
   // ...but Sde Eliezer sits in a DIFFERENT cluster from the coastal two, so an external
   // visit there is never auto-batched with Ofroni + Rehab just because they share Tzachi.
-  assert.equal(byName['עפרוני קיסריה'].cluster, CLUSTERS.CAESAREA);
-  assert.equal(byName['ריהאב קיסריה'].cluster, CLUSTERS.CAESAREA);
+  assert.equal(byName['קיסריה עפרוני'].cluster, CLUSTERS.CAESAREA);
+  assert.equal(byName['קיסריה ריהאב'].cluster, CLUSTERS.CAESAREA);
   assert.equal(byName['שדה אליעזר'].cluster, CLUSTERS.NORTH);
-  assert.notEqual(byName['שדה אליעזר'].cluster, byName['ריהאב קיסריה'].cluster);
+  assert.notEqual(byName['שדה אליעזר'].cluster, byName['קיסריה ריהאב'].cluster);
 });
 
 test('Sharon cluster = Rami’s three houses', () => {
