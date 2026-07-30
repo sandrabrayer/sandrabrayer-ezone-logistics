@@ -58,8 +58,8 @@ var SEED_HOUSES = [
   ['רעננה אשר',     'רמי', 'sharon',   'open'],
   ['רמות השבים',    'רמי', 'sharon',   'open'],
   ['רעננה הפרדס',   'רמי', 'sharon',   'pre-opening'],
-  ['עפרוני קיסריה', 'צחי', 'caesarea', 'open'],
-  ['ריהאב קיסריה',  'צחי', 'caesarea', 'open'],
+  ['קיסריה עפרוני', 'צחי', 'caesarea', 'open'],
+  ['קיסריה ריהאב',  'צחי', 'caesarea', 'open'],
   ['שדה אליעזר',    'צחי', 'north',    'pre-opening'],
 ];
 
@@ -86,8 +86,8 @@ var SEED_USERS = [
   ['סנדרה', 'ceo',         '',               'TRUE', ''],
   ['רמי',   'maintenance', 'sharon',         'TRUE', ''],
   ['צחי',   'maintenance', 'caesarea,north', 'TRUE', ''],
-  ['שירה',  'coordinator', 'עפרוני קיסריה',   'TRUE', ''],
-  ['יעקב',  'coordinator', 'ריהאב קיסריה',    'TRUE', ''],
+  ['שירה',  'coordinator', 'קיסריה עפרוני',   'TRUE', ''],
+  ['יעקב',  'coordinator', 'קיסריה ריהאב',    'TRUE', ''],
   ['אורן',  'coordinator', 'רעננה אשר',       'TRUE', ''],
   ['אביב',  'coordinator', 'רמות השבים',      'TRUE', ''],
 ];

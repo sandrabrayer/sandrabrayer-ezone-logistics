@@ -44,8 +44,8 @@ var DIGEST_HOUSE_IDS_ = {
   'רמות השבים': 'ramot-hashavim',
   'רעננה אשר': 'raanana-asher',
   'רעננה הפרדס': 'raanana-hapardes',
-  'עפרוני קיסריה': 'caesarea-ofroni',
-  'ריהאב קיסריה': 'caesarea-rehab',
+  'קיסריה עפרוני': 'caesarea-ofroni',
+  'קיסריה ריהאב': 'caesarea-rehab',
   'שדה אליעזר': 'sde-eliezer',
 };
 var DIGEST_HOUSE_ID_ORDER_ = [

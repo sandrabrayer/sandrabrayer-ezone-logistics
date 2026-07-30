@@ -16,8 +16,8 @@ test('all six houses map to their (v2, shared ezone-kitchen) ids', () => {
   assert.equal(houseId('רמות השבים'), 'ramot-hashavim');
   assert.equal(houseId('רעננה אשר'), 'raanana-asher');
   assert.equal(houseId('רעננה הפרדס'), 'raanana-hapardes');
-  assert.equal(houseId('עפרוני קיסריה'), 'caesarea-ofroni');
-  assert.equal(houseId('ריהאב קיסריה'), 'caesarea-rehab');
+  assert.equal(houseId('קיסריה עפרוני'), 'caesarea-ofroni');
+  assert.equal(houseId('קיסריה ריהאב'), 'caesarea-rehab');
   assert.equal(houseId('שדה אליעזר'), 'sde-eliezer');
 });
 
