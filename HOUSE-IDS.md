@@ -15,7 +15,7 @@ Two things live in this file and they are **not** the same thing:
 |---|---|---|---|---|
 | רמות השבים | `ramot-hashavim` | Ramot HaShavim | `sharon` | פתוח |
 | רעננה אשר | `raanana-asher` | Ra'anana Asher | `sharon` | פתוח |
-| רעננה הפרדס | `raanana-hapardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
+| רעננה הפרדס | `pardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
 | עפרוני קיסריה | `caesarea-ofroni` | Efroni Caesarea | `caesarea` | פתוח |
 | ריהאב קיסריה | `caesarea-rehab` | Rehab Caesarea | `caesarea` | פתוח |
 | שדה אליעזר | `sde-eliezer` | Sde Eliezer | `north` | טרום-פתיחה |
@@ -23,10 +23,17 @@ Two things live in this file and they are **not** the same thing:
 **The Hebrew display names above are the only correct forms.** Every app must show exactly
 these strings — no local variants, no reordering (it is "עפרוני קיסריה", not "קיסריה עפרוני").
 
-`raanana-hapardes` and `sde-eliezer` are **reserved now** so no app invents an id for them
-later under pressure. Both are pre-opening but already have activity.
+`sde-eliezer` is **reserved now** so no app invents an id for it
+later under pressure. Both `pardes` and `sde-eliezer` are pre-opening but already have activity.
 
-### Note on `caesarea-ofroni`
+### Note on short ids `pardes` and `caesarea-ofroni`
+
+`pardes` is short and unqualified, and `caesarea-ofroni` uses a spelling the display name does
+not. Both are **already shipped in `ezone-kitchen`**, so both stay. Ids are internal keys, not
+labels — an ugly id costs nothing, a renamed id costs a cross-repo migration. Do not "improve"
+either one in a single repo; that silently breaks every consumer of the digest.
+
+### Note on `caesarea-ofroni` spelling
 
 The display name and English form use **עפרוני / Efroni**. The id keeps the `ofroni` spelling
 because it is already frozen in `ezone-kitchen` and in `DIGEST-CONTRACT.md`. This mismatch is
@@ -52,7 +59,7 @@ same thing as the internal maintenance lead.
 
 | Cluster | Houses | Maintenance lead |
 |---|---|---|
-| `sharon` | `raanana-asher`, `ramot-hashavim`, `raanana-hapardes` | רמי |
+| `sharon` | `raanana-asher`, `ramot-hashavim`, `pardes` | רמי |
 | `caesarea` | `caesarea-ofroni`, `caesarea-rehab` | צחי |
 | `north` | `sde-eliezer` | צחי |
 
