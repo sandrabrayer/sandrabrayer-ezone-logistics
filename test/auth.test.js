@@ -121,32 +121,31 @@ test('verifyPin fails closed on empty / malformed stored value (no password set 
   assert.equal(verifyPin('x', null), false);
 });
 
-// ---- PBKDF2 GAS-parity: the setUserPin() Apps Script algorithm equals crypto.pbkdf2Sync ----
-// Re-implements the setup.gs pbkdf2Sha256_ using node HMAC in place of Utilities, then asserts it
-// matches crypto.pbkdf2Sync byte-for-byte. This is the guard that a hash written by the Apps Script
-// helper verifies in Node. (A small iteration count keeps the test fast; the loop is identical at
-// any count, so correctness carries to the deployed 100000.)
-test('setup.gs PBKDF2 (single 32-byte block) matches crypto.pbkdf2Sync', () => {
-  function gasPbkdf2(password, saltBytes, iterations) {
-    const hmac = (msgBytes, keyStr) => Array.from(
-      crypto.createHmac('sha256', keyStr).update(Buffer.from(msgBytes.map((b) => b & 0xff))).digest()
-    );
-    const block = saltBytes.concat([0, 0, 0, 1]);
-    let u = hmac(block, password);
-    const t = u.map((b) => b & 0xff);
-    for (let i = 1; i < iterations; i++) {
-      u = hmac(u, password);
-      for (let j = 0; j < t.length; j++) t[j] = (t[j] ^ u[j]) & 0xff;
-    }
-    return Buffer.from(t);
-  }
-  const password = 'a-manager-password';
-  const salt = Array.from(crypto.randomBytes(16));
-  const iters = 2000;
-  const mine = gasPbkdf2(password, salt, iters);
-  const ref = crypto.pbkdf2Sync(password, Buffer.from(salt), iters, 32, 'sha256');
-  assert.equal(mine.toString('hex'), ref.toString('hex'));
-  // And a hash produced this way verifies with verifyPin:
-  const stored = `pbkdf2$sha256$${iters}$${Buffer.from(salt).toString('hex')}$${mine.toString('hex')}`;
-  assert.equal(verifyPin(password, stored), true);
+// ---- PBKDF2 parity: pinned to a COMMITTED test vector ----
+//
+// IMPORTANT — what this test does and does NOT prove:
+//   - It proves the NODE side of parity: crypto.pbkdf2Sync (which src/auth.js verifyPin uses)
+//     reproduces the committed EXPECTED_PARITY_HASH for a fixed password + salt + iterations, and
+//     that verifyPin accepts that vector.
+//   - It does NOT run the Apps Script runtime, so by itself it does NOT prove the setUserPin()
+//     PBKDF2 in apps-script/setup.gs is correct. (An earlier version of this test re-implemented the
+//     algorithm in Node and *claimed* to prove Apps Script parity — it passed while the real
+//     Utilities.computeHmacSha256Signature call was throwing on every invocation. That was false
+//     assurance; it has been removed.)
+//
+// Parity with the LIVE Apps Script PBKDF2 is confirmed OUT OF BAND: run verifyPinParity_() in the
+// Apps Script editor (same fixed password, salt and iterations) and check its logged hash equals
+// EXPECTED_PARITY_HASH below, exactly.
+test('PBKDF2 fixed vector: crypto.pbkdf2Sync reproduces the committed hash, and verifyPin accepts it', () => {
+  const password = 'סיסמה-Test-1!';                       // fixed vector, Hebrew + ASCII (UTF-8)
+  const saltHex = '0102030405060708090a0b0c0d0e0f10';     // fixed 16-byte salt
+  const iters = 100000;                                   // must equal setup.gs PBKDF2_ITERS_
+  // The vector verifyPinParity_() in apps-script/setup.gs must reproduce when run in the editor:
+  const EXPECTED_PARITY_HASH =
+    'pbkdf2$sha256$100000$0102030405060708090a0b0c0d0e0f10$0464760692cf4028e8246e00b6cfaca8034e9d292766c4a29cc0dc02efb39dc9';
+
+  const dk = crypto.pbkdf2Sync(password, Buffer.from(saltHex, 'hex'), iters, 32, 'sha256');
+  const stored = `pbkdf2$sha256$${iters}$${saltHex}$${dk.toString('hex')}`;
+  assert.equal(stored, EXPECTED_PARITY_HASH);             // Node reproduces the committed vector
+  assert.equal(verifyPin(password, EXPECTED_PARITY_HASH), true); // and the login path accepts it
 });

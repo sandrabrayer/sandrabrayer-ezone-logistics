@@ -218,8 +218,10 @@ function upsertByKeyColumn_(sheet, rows, keyCol) {
 //   setUserPin('רועי', 'their-password');   setUserPin('אולגה', 'her-password');
 // It NEVER logs or stores the plaintext. The stored format is identical to src/auth.js hashPin, so
 // the Node login layer (which owns password verification — Code.gs trusts only the signed token)
-// verifies it directly. A Node parity test (test/auth.test.js) proves this PBKDF2 matches
-// crypto.pbkdf2Sync byte-for-byte.
+// verifies it directly. Parity between THIS Apps Script PBKDF2 and Node's crypto.pbkdf2Sync (used by
+// src/auth.js verifyPin) is confirmed by running verifyPinParity_() in the Apps Script editor and
+// checking its logged hash equals the committed vector in test/auth.test.js — the node:test suite
+// cannot run the Apps Script runtime, so it only pins the Node side to that same vector.
 var PBKDF2_ITERS_ = 100000;   // stored in the hash string, so verification always uses this count
 
 function setUserPin(name, plaintext) {
@@ -251,16 +253,44 @@ function hashPin_(plaintext) {
 
 // PBKDF2-HMAC-SHA256 for a single 32-byte block (dkLen = hLen), so DK = U1 xor U2 xor ... xor Uc.
 // U1 = HMAC(password, salt || 0x00000001); Ui = HMAC(password, U_{i-1}). Matches crypto.pbkdf2Sync.
+//
+// Apps Script's Utilities.computeHmacSha256Signature accepts ONLY (String, String) or (Byte[],
+// Byte[]) — NOT (Byte[], String). Increment 31 passed a byte-array message with a String key, so it
+// threw on every call (increment 32 hotfix). We use the (Byte[], Byte[]) overload throughout:
+//   - the password is converted to its UTF-8 bytes, so Hebrew / non-ASCII passwords hash correctly
+//     (never char codes);
+//   - every message byte we build from a salt, hex, or XOR is converted to Apps Script's SIGNED
+//     byte range (-128..127) before being passed in (values > 127 → b - 256). HMAC output is already
+//     signed, so it is fed straight back as the next message; we mask to unsigned (& 0xff) only when
+//     accumulating and when hex-encoding the result.
 function pbkdf2Sha256_(password, saltBytes, iterations) {
-  var block = saltBytes.concat([0, 0, 0, 1]);        // INT_32_BE(1)
-  var u = Utilities.computeHmacSha256Signature(block, password);  // U1 (signed bytes)
+  var pwBytes = Utilities.newBlob(String(password)).getBytes();      // UTF-8, signed Byte[]
+  var block = toSignedBytes_(saltBytes.concat([0, 0, 0, 1]));        // salt || INT_32_BE(1), signed
+  var u = Utilities.computeHmacSha256Signature(block, pwBytes);      // U1 (signed Byte[])
   var t = [];
-  for (var k = 0; k < u.length; k++) t[k] = u[k] & 0xff;          // accumulator, unsigned
+  for (var k = 0; k < u.length; k++) t[k] = u[k] & 0xff;            // accumulator, unsigned 0..255
   for (var i = 1; i < iterations; i++) {
-    u = Utilities.computeHmacSha256Signature(u, password);        // Ui = HMAC(password, U_{i-1})
+    u = Utilities.computeHmacSha256Signature(u, pwBytes);           // Ui = HMAC(pw, U_{i-1}); u signed
     for (var j = 0; j < t.length; j++) t[j] = (t[j] ^ u[j]) & 0xff;
   }
-  return t;                                            // 32 unsigned bytes
+  return t;                                            // 32 unsigned bytes (0..255)
+}
+
+// Convert byte values (possibly unsigned 0..255) to Apps Script's signed byte range (-128..127),
+// so a Byte[] built from a salt or hex is accepted by computeHmacSha256Signature.
+function toSignedBytes_(bytes) {
+  var out = [];
+  for (var i = 0; i < bytes.length; i++) {
+    var b = bytes[i] & 0xff;
+    out.push(b > 127 ? b - 256 : b);
+  }
+  return out;
+}
+
+function hexToBytes_(hex) {
+  var out = [];
+  for (var i = 0; i + 1 < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16)); // 0..255
+  return out;
 }
 
 function bytesToHex_(bytes) {
@@ -272,4 +302,19 @@ function bytesToHex_(bytes) {
     hex += h;
   }
   return hex;
+}
+
+// Diagnostic (increment 32): hash a FIXED test password with a FIXED salt — a TEST VECTOR, not a
+// real credential — and log the resulting hash string. Writes NOTHING to any sheet and is safe to
+// run repeatedly. Run it from the Apps Script editor and confirm the logged value is EXACTLY the
+// EXPECTED_PARITY_HASH committed in test/auth.test.js. THAT is what proves the LIVE Apps Script
+// PBKDF2 matches Node's crypto.pbkdf2Sync — the node:test suite cannot exercise the Apps Script
+// runtime, so it can only pin the Node side to the same committed vector.
+function verifyPinParity_() {
+  var password = 'סיסמה-Test-1!';                     // fixed test vector (Hebrew + ASCII) — NOT a real password
+  var saltHex = '0102030405060708090a0b0c0d0e0f10';   // fixed 16-byte salt
+  var dk = pbkdf2Sha256_(password, hexToBytes_(saltHex), PBKDF2_ITERS_);
+  var hash = 'pbkdf2$sha256$' + PBKDF2_ITERS_ + '$' + saltHex + '$' + bytesToHex_(dk);
+  Logger.log(hash);   // only the fixed test vector is involved; safe to share
+  return hash;
 }

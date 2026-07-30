@@ -3,6 +3,37 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 32 (hotfix) — setUserPin() PBKDF2 crashed on Apps Script; parity test corrected
+
+**Bug:** the increment-31 `setUserPin()` threw on **every** call in the live Apps Script runtime —
+`Utilities.computeHmacSha256Signature` accepts only `(String, String)` or `(Byte[], Byte[])`, but
+`pbkdf2Sha256_` passed a **byte-array message with a String key**. Neither manager (רועי, אולגה)
+could set a password, so neither could log in. The app was blocked on this.
+
+**Fix (`apps-script/setup.gs`):** `pbkdf2Sha256_` now uses the `(Byte[], Byte[])` overload
+throughout — the password is hashed as its **UTF-8 bytes** (`Utilities.newBlob(pw).getBytes()`, so
+Hebrew / non-ASCII passwords are correct, not char codes), and every message byte built from the
+salt / hex / counter is converted to Apps Script's **signed** range (`b > 127 ? b - 256 : b`) before
+being passed in; HMAC output (already signed) is fed straight back, and bytes are masked to unsigned
+only when accumulating / hex-encoding. The algorithm, the iteration count (100000), and the stored
+format `pbkdf2$sha256$<iters>$<saltHex>$<hashHex>` are **unchanged**, so existing `src/auth.js`
+`verifyPin` still verifies the hashes. `setUserPin()` still never logs or returns the plaintext.
+
+**Verification (the point of this PR):**
+- New `verifyPinParity_()` in `setup.gs` hashes a **fixed** test password with a **fixed** hard-coded
+  salt (a test vector, not a real credential), `Logger.log`s the full hash string, and writes
+  nothing — safe to run repeatedly.
+- `test/auth.test.js` now pins that vector: it asserts `crypto.pbkdf2Sync` reproduces the committed
+  `EXPECTED_PARITY_HASH` and that `verifyPin` accepts it. The **old** "GAS-parity" test — which
+  re-implemented the algorithm in Node and *claimed* to prove Apps Script parity while the real
+  function was throwing — is **removed**; the comments now state plainly that node:test only pins the
+  Node side, and that live Apps Script parity is confirmed by running `verifyPinParity_()` in the
+  editor and checking its logged hash equals the committed vector.
+
+> **⚠ After this merge:** re-run `setUserPin('רועי', …)` / `setUserPin('אולגה', …)` (they now
+> succeed). Optionally run `verifyPinParity_()` once and confirm the logged hash matches the vector
+> in `test/auth.test.js`. No sheet/schema change; no `setupSheet()` re-run required by this hotfix.
+
 ## [Unreleased] — increment 31 — per-user passwords for רועי/אולגה, restricted staff view, routing chain B v2 (ceo removed from routing)
 
 **Why:** increment 30 shipped HMAC auth + roles + chain B but with a single shared `APP_PIN`, so
