@@ -51,16 +51,23 @@ test('approval.js MIRROR:approval matches apps-script/Code.gs', () => {
   assert.equal(a, b);
 });
 
+test('sla.js MIRROR:sla matches apps-script/Code.gs (increment 36)', () => {
+  const a = normalize(readBlock('src/sla.js', 'sla'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'sla'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
 // globals) are only PARSED here, never run, so no Apps Script stubs are needed.
-import { HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS } from '../src/schema.js';
+import { HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS, SEED_CONFIG } from '../src/schema.js';
 
 function loadSetupGs() {
   const src = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
   // eslint-disable-next-line no-new-func
-  const fn = new Function(src + '\n;return { HEADERS: HEADERS, SEED_HOUSES: SEED_HOUSES, SEED_USERS: SEED_USERS, SEED_INVENTORY_ITEMS: SEED_INVENTORY_ITEMS };');
+  const fn = new Function(src + '\n;return { HEADERS: HEADERS, SEED_HOUSES: SEED_HOUSES, SEED_USERS: SEED_USERS, SEED_INVENTORY_ITEMS: SEED_INVENTORY_ITEMS, SEED_CONFIG: SEED_CONFIG };');
   return fn();
 }
 
@@ -92,4 +99,16 @@ test('SEED_HOUSES and SEED_USERS house names mirror between schema.js and setup.
   assert.deepEqual(
     gs.SEED_USERS.map((a) => [a[0], a[1], a[2]]),
     SEED_USERS.map((o) => [o.name, o.role, o.house]));
+});
+
+test('Requests headers and Config seed mirror between schema.js and setup.gs (increment 36)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.Requests, SCHEMA_HEADERS.Requests);
+  for (const c of ['due_at', 'blocked', 'blocked_reason', 'blocked_at']) {
+    assert.ok(gs.HEADERS.Requests.includes(c), `Requests missing ${c}`);
+  }
+  assert.deepEqual(
+    gs.SEED_CONFIG.map((a) => [a[0], a[1]]),
+    SEED_CONFIG.map((o) => [o.key, o.value]));
+  assert.ok(SEED_CONFIG.some((o) => o.key === 'sla_days'));
 });

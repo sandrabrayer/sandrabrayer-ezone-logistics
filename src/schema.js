@@ -31,6 +31,11 @@ export const HEADERS = {
     'actual_cost',
     'completion_notes',
     'execution_status',    // סטטוס ביצוע: '' / בוצע / לא בוצע / אחר. בוצע also completes the request.
+    // ---- SLA + aging (increment 36) — APPENDED at the end (never reorder the earlier columns) ----
+    'due_at',              // ISO; derived from urgency at creation via Config sla_days. Blank = no SLA.
+    'blocked',             // 'TRUE'/'FALSE'; a manual flag (field_ops/ops_manager/ceo). Still ages.
+    'blocked_reason',      // required free text when blocked
+    'blocked_at',          // ISO when the block was set
   ],
 
   // Self-owned house list (NOT fed from Dashboard). §4.
@@ -203,6 +208,10 @@ export const SEED_CONFIG = [
   // ceo_ceiling — kept but DORMANT since increment 31 (chain B v2 routes by amount only and does
   // not read it). Seeded blank; retained so the key/plumbing survive if ceo routing returns.
   { key: 'ceo_ceiling', value: '' },
+  // sla_days (increment 36) — a parseable "urgency:days" spec (like allowed_units), tunable in the
+  // Sheet with NO deploy. due_at = created_at + days-for-urgency. A malformed spec → no due date
+  // (logged), never a silently wrong default.
+  { key: 'sla_days', value: 'חירום:1|דחוף:3|רגיל:14' },
 ];
 
 // ---- Roles + user seed (increment 30) ----

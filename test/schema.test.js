@@ -14,14 +14,16 @@ test('all sheets are defined (core + inspection + inventory modules)', () => {
   ].sort());
 });
 
-test('Requests sheet has all 24 columns in order (execution_status appended last)', () => {
-  assert.equal(HEADERS.Requests.length, 24);
+test('Requests sheet has all 28 columns; SLA columns appended last (increment 36)', () => {
+  assert.equal(HEADERS.Requests.length, 28);
   assert.equal(HEADERS.Requests[0], 'id');
-  // execution_status is APPEND-ONLY at the end (never reorder mid-array — position-mapped sheet).
-  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'execution_status');
+  // blocked_at is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
+  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'blocked_at');
+  assert.equal(HEADERS.Requests[23], 'execution_status');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
-    'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status']) {
+    'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status',
+    'due_at', 'blocked', 'blocked_reason', 'blocked_at']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
 });
@@ -73,6 +75,9 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
   assert.ok(keys.includes('approval_threshold'));
   assert.ok(keys.includes('emergency_bypasses_approval'));
   assert.ok(keys.includes('ceo_ceiling'));
+  // sla_days (increment 36) — the tunable SLA spec.
+  assert.ok(keys.includes('sla_days'));
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'sla_days').value, 'חירום:1|דחוף:3|רגיל:14');
   // ceo_ceiling ships blank (disabled) — never hardcoded to a value.
   assert.equal(SEED_CONFIG.find((c) => c.key === 'ceo_ceiling').value, '');
 });

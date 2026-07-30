@@ -30,6 +30,12 @@ export const DIGEST_HOUSE_IDS = [
   'ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
 ];
 
+// The OpenTickets tab columns, in order (append-only). Mirror of DIGEST_OPEN_HEADERS_ in
+// apps-script/digest.gs. daysOpen / overdue / blocked appended in increment 36. No financial fields.
+export const DIGEST_OPEN_HEADERS = [
+  'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
+];
+
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */
 export function houseId(name) {
   if (name == null) return null;

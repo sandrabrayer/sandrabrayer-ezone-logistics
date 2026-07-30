@@ -26,7 +26,9 @@ var DIGEST_TAB_WEEKLY_ = 'WeeklyCounts';
 var DIGEST_WEEKS_ = 8;
 
 // Header rows — EXACT order, append-only (see contract). Consumers read by header name.
-var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt'];
+// daysOpen / overdue / blocked APPENDED (increment 36) — never reorder/remove (consumers read by
+// header name). No financial fields. Mirror of DIGEST_OPEN_HEADERS in src/digest.js.
+var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked'];
 var DIGEST_WEEKLY_HEADERS_ = ['house', 'weekStart', 'status', 'shortagesSummary', 'updatedAt'];
 
 // Weekly-count status vocabulary (Hebrew display values are the stored values).
@@ -292,6 +294,7 @@ function buildOpenTicketRows_() {
     if (!latestAudit[rid] || ts > latestAudit[rid]) latestAudit[rid] = ts;
   });
 
+  var now = new Date();
   var rows = [];
   requests.forEach(function (req) {
     var house = digestHouseId_(req.house);
@@ -299,6 +302,9 @@ function buildOpenTicketRows_() {
     if (!digestIsActiveTicket_(req.status)) return;
     var id = String(req.id);
     var updatedAt = latestAudit[id] || digestIso_(req.created_at);
+    // Aging facts for the coordinators app (increment 36) — non-financial. ticketAging is the shared
+    // SLA logic (defined in Code.gs, same Apps Script project).
+    var aging = ticketAging(req, now);
     rows.push([
       house,
       id,
@@ -306,6 +312,9 @@ function buildOpenTicketRows_() {
       String(req.status == null ? '' : req.status),
       digestDateOnly_(req.created_at),
       updatedAt,
+      aging.days_open == null ? '' : aging.days_open,
+      aging.overdue,
+      aging.blocked,
     ]);
   });
   return rows;

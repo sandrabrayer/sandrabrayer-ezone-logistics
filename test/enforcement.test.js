@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { whoApproves, APPROVER } from '../src/approval.js';
-import { ROLE, canApprove, canDefer, canDispatch, isManagerRole } from '../src/roles.js';
+import { ROLE, canApprove, canDefer, canDispatch, canBlock, isManagerRole } from '../src/roles.js';
 
 const T = 3000;
 
@@ -35,14 +35,25 @@ test('a pre-opening house low-cost request routes to field_ops by amount (NOT ce
   assert.equal(whoApproves(800, 'רגיל', T), APPROVER.FIELD_OPS);
 });
 
-test('coordinator + maintenance (tier B) have no approve / defer / dispatch powers → 403 each', () => {
+test('coordinator + maintenance (tier B) have no approve / defer / dispatch / block powers → 403 each', () => {
   for (const r of [ROLE.COORDINATOR, ROLE.MAINTENANCE]) {
     assert.equal(mayApprove(r, 500, 'רגיל'), false);   // approve/reject
     assert.equal(mayApprove(r, 4000, 'רגיל'), false);
     assert.equal(canDefer(r), false);                  // defer
     assert.equal(canDispatch(r), false);               // assign / dispatch / batch
+    assert.equal(canBlock(r), false);                  // block/unblock (increment 36)
     assert.equal(isManagerRole(r), false);
   }
+});
+
+test('block/unblock is a manager-tier power: field_ops / ops_manager / ceo pass, tier B is 403', () => {
+  // This is the exact predicate handleSetBlocked_ runs before any write — a 403 means NO state
+  // change and NO success audit row (the handler returns before updateRequest_/writeAuditEntry).
+  assert.equal(canBlock(ROLE.FIELD_OPS), true);
+  assert.equal(canBlock(ROLE.OPS_MANAGER), true);
+  assert.equal(canBlock(ROLE.CEO), true);
+  assert.equal(canBlock(ROLE.COORDINATOR), false);
+  assert.equal(canBlock(ROLE.MAINTENANCE), false);
 });
 
 test('emergency (auto) needs no human approver: dispatch-capable may record, coordinator cannot', () => {

@@ -232,6 +232,12 @@ function canDispatch(actorRole) {
   return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
 }
 
+// block / unblock a request (increment 36): field_ops, ops_manager, ceo. A coordinator/maintenance
+// gets 403 — same tier boundary as defer/dispatch.
+function canBlock(actorRole) {
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+}
+
 // Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
 // ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
 function isManagerRole(role) {
@@ -279,6 +285,118 @@ function approvalRequired(cost, urgency, approvalThreshold) {
   return whoApproves(cost, urgency, approvalThreshold) === APPROVER.OPS_MANAGER;
 }
 // === MIRROR:approval END ===
+
+// === MIRROR:sla START ===
+// Parse a "label:days|label:days" spec (e.g. "חירום:1|דחוף:3|רגיל:14") into { label: days }, or null
+// when empty or ANY pair is malformed — empty label, missing colon, or days not a whole number > 0.
+// null means "do not trust this spec"; the caller derives no due date rather than guessing one.
+function parseSlaSpec(spec) {
+  if (typeof spec !== 'string' || spec.replace(/^\s+|\s+$/g, '') === '') return null;
+  var parts = spec.split('|');
+  var out = {};
+  var n = 0;
+  for (var i = 0; i < parts.length; i++) {
+    var seg = parts[i].replace(/^\s+|\s+$/g, '');
+    if (seg === '') return null;
+    var idx = seg.lastIndexOf(':');
+    if (idx <= 0 || idx === seg.length - 1) return null;
+    var label = seg.slice(0, idx).replace(/^\s+|\s+$/g, '');
+    var days = Number(seg.slice(idx + 1).replace(/^\s+|\s+$/g, ''));
+    if (!label || !isFinite(days) || days <= 0 || Math.floor(days) !== days) return null;
+    out[label] = days;
+    n++;
+  }
+  return n ? out : null;
+}
+
+// The SLA days for an urgency, or null (malformed spec OR unknown urgency → null; caller logs and
+// derives no due date — never a silently wrong default).
+function slaDaysFor(spec, urgency) {
+  var map = parseSlaSpec(spec);
+  if (!map) return null;
+  return Object.prototype.hasOwnProperty.call(map, urgency) ? map[urgency] : null;
+}
+
+// due_at = fromIso + (days for urgency), in ISO. '' when no due date can be derived (malformed spec,
+// unknown urgency, or unparseable fromIso). `log`, if given, is called with the reason it was blank.
+function deriveDueAt(fromIso, urgency, spec, log) {
+  var days = slaDaysFor(spec, urgency);
+  if (days == null) {
+    if (log) log('sla: no due date for urgency "' + urgency + '" (spec "' + spec + '") — left blank');
+    return '';
+  }
+  var base = new Date(fromIso);
+  if (isNaN(base.getTime())) {
+    if (log) log('sla: unparseable base date "' + fromIso + '" — due date left blank');
+    return '';
+  }
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString();
+}
+
+// Whole days a request has been open: created_at → completed_at once completed, else created_at → now.
+// FREEZES at completion. null on unparseable input; never negative.
+function daysOpen(createdAt, completedAt, now) {
+  var start = new Date(createdAt);
+  var endRaw = (completedAt != null && String(completedAt) !== '') ? completedAt : now;
+  var end = endRaw instanceof Date ? endRaw : new Date(endRaw);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+  var ms = end.getTime() - start.getTime();
+  if (ms < 0) ms = 0;
+  return Math.floor(ms / 86400000);
+}
+
+// Overdue = due_at set AND now strictly past it AND the request is still ageing: NOT completed/closed,
+// and NOT deferred (a deferral parks the SLA — while נדחה לתאריך a request is never overdue). `blocked`
+// is deliberately NOT consulted: a blocked request still ages and can still be overdue.
+function isOverdue(dueAt, status, now) {
+  if (dueAt == null || String(dueAt) === '') return false;
+  if (status === 'הושלם' || status === 'סגור') return false;
+  if (status === 'נדחה לתאריך') return false;
+  var due = new Date(dueAt);
+  var n = now instanceof Date ? now : new Date(now);
+  if (isNaN(due.getTime()) || isNaN(n.getTime())) return false;
+  return n.getTime() > due.getTime();
+}
+
+// Whole days past due_at, or 0 when not overdue.
+function daysOverdue(dueAt, status, now) {
+  if (!isOverdue(dueAt, status, now)) return 0;
+  var due = new Date(dueAt);
+  var n = now instanceof Date ? now : new Date(now);
+  return Math.floor((n.getTime() - due.getTime()) / 86400000);
+}
+
+// A request's `blocked` cell (stored 'TRUE'/'FALSE') as a boolean.
+function isBlocked(v) {
+  return String(v == null ? '' : v).toUpperCase() === 'TRUE';
+}
+
+// Validate a block/unblock request. Returns an error string, or null when OK. Blocking REQUIRES a
+// non-empty reason; unblocking needs none. (Role gating is separate — see canBlock in roles.)
+function blockValidation(blocked, reason) {
+  var block = (blocked === true || String(blocked).toUpperCase() === 'TRUE');
+  if (block && String(reason == null ? '' : reason).replace(/^\s+|\s+$/g, '') === '') {
+    return 'חסימה מחייבת סיבה';
+  }
+  return null;
+}
+
+// All read-time aging facts for a request row, in one call (used by the UI list + the digest).
+function ticketAging(req, now) {
+  var status = req && req.status != null ? String(req.status) : '';
+  var dueAt = req && req.due_at != null ? req.due_at : '';
+  return {
+    days_open: daysOpen(req ? req.created_at : '', req ? req.completed_at : '', now),
+    overdue: isOverdue(dueAt, status, now),
+    days_overdue: daysOverdue(dueAt, status, now),
+    blocked: isBlocked(req ? req.blocked : ''),
+  };
+}
+// === MIRROR:sla END ===
+
+// Config accessor for the SLA spec (never hardcoded). Returns the raw "urgency:days" string, or ''.
+function slaSpec_() { var v = getConfig('sla_days'); return v == null ? '' : String(v); }
 
 // Config accessor for the routing rule (never hardcode the value). ceo_ceiling stays in Config but
 // is DORMANT (chain B v2 does not read it).
@@ -347,6 +465,7 @@ function doPost(e) {
     case 'assignBatch':   return handleAssignBatch_(body.payload || {}, actor);
     case 'setStatus':     return handleSetStatus_(body.payload || {}, actor);
     case 'setExecution':  return handleSetExecution_(body.payload || {}, actor);
+    case 'setBlocked':    return handleSetBlocked_(body.payload || {}, actor);
     case 'createInspection': return handleCreateInspection_(body.payload || {}, actor);
     case 'addFinding':       return handleAddFinding_(body.payload || {}, actor);
     case 'confirmFinding':   return handleConfirmFinding_(body.payload || {}, actor);
@@ -373,6 +492,9 @@ function handleCreateRequest_(input, actor) {
   }
   var row = buildNewRequest_(input);
   row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
+  // due_at derived from urgency at creation (Config sla_days). Malformed spec / unknown urgency → ''
+  // (logged), never a silently wrong date.
+  row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
   appendRequest(row);
   rebuildDigest();
   return jsonOut_({ ok: true, id: row.id });
@@ -409,6 +531,9 @@ function buildNewRequest_(input) {
     approved_by: '', approved_at: '', rejection_reason: '',
     deferred_until: '', assigned_to: '', assignment_type: '', batch_id: '',
     completed_at: '', actual_cost: '', completion_notes: '',
+    // SLA + aging (increment 36). due_at is derived in handleCreateRequest_ (needs Config); a request
+    // starts unblocked.
+    due_at: '', blocked: 'FALSE', blocked_reason: '', blocked_at: '',
   };
 }
 
@@ -482,8 +607,13 @@ function handleApprove_(p, actor) {
   }
   if (!actorMayApprove_(actor, req)) return forbidden_();
   var emergency = (requiredApproverFor_(req) === APPROVER.AUTO);
-  updateRequest_(p.id,
-    { status: ST.APPROVED, approved_by: actor.name, approved_at: new Date().toISOString() },
+  var fields = { status: ST.APPROVED, approved_by: actor.name, approved_at: new Date().toISOString() };
+  // SLA wake-up (increment 36): a request approved OUT OF deferral re-derives its due date from the
+  // deferral date FORWARD (not from original creation) — the clock restarts when it wakes up.
+  if (req.status === ST.DEFERRED) {
+    fields.due_at = deriveDueAt(req.deferred_until, req.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  }
+  updateRequest_(p.id, fields,
     req.status, ST.APPROVED, actor.name, emergency ? 'אושר אוטומטית (חירום)' : (p.note || ''));
   rebuildDigest();
   return jsonOut_({ ok: true });
@@ -623,6 +753,32 @@ function handleSetExecution_(p, actor) {
     req.status, req.status, actor.name, 'סטטוס ביצוע: ' + p.value);
   rebuildDigest();
   return jsonOut_({ ok: true, completed: false });
+}
+
+// Block / unblock a request (increment 36). A manual flag set by field_ops / ops_manager / ceo —
+// enforced HERE (403 for coordinator/maintenance), never UI-only. Blocking REQUIRES a reason. A block
+// is NOT a status transition (the status is untouched) and does NOT pause aging — a blocked request
+// still ages and can still be overdue. Every block/unblock is logged to AuditLog with actor + time.
+function handleSetBlocked_(p, actor) {
+  if (!p.id || p.blocked == null) return jsonOut_({ ok: false, error: 'Missing id or blocked' });
+  if (!canBlock(actor.role)) return forbidden_();
+  var req = getRequestById(p.id);
+  if (!req) return jsonOut_({ ok: false, error: 'Request not found' });
+  var block = (p.blocked === true || String(p.blocked).toUpperCase() === 'TRUE');
+  var invalid = blockValidation(p.blocked, p.reason);
+  if (invalid) return jsonOut_({ ok: false, error: invalid });
+  if (block) {
+    var reason = String(p.reason == null ? '' : p.reason).trim();
+    updateRequest_(p.id,
+      { blocked: 'TRUE', blocked_reason: reason.slice(0, 500), blocked_at: new Date().toISOString() },
+      req.status, req.status, actor.name, 'חסום: ' + reason);
+  } else {
+    updateRequest_(p.id,
+      { blocked: 'FALSE', blocked_reason: '', blocked_at: '' },
+      req.status, req.status, actor.name, 'שוחרר מחסימה');
+  }
+  rebuildDigest();
+  return jsonOut_({ ok: true, blocked: block });
 }
 
 // ===== Inspections module =====
@@ -783,6 +939,11 @@ function handleEditRequest_(p, actor) {
   var err = validateNewRequest_(merged);
   if (err) return jsonOut_({ ok: false, error: err });
   fields.approval_required = approvalRequiredFor_(merged.estimated_cost, merged.urgency);
+  // Re-derive due_at when urgency changes (increment 36) — from the original created_at (an edit
+  // happens pre-approval, before any deferral, so creation is the correct base).
+  if (fields.urgency != null) {
+    fields.due_at = deriveDueAt(req.created_at, merged.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  }
   updateRequest_(p.id, fields, req.status, req.status, actor.name, 'נערך ע"י ' + actor.name);
   rebuildDigest();
   return jsonOut_({ ok: true });

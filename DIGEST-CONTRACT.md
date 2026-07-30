@@ -28,7 +28,11 @@ Tab OpenTickets — columns in this exact order:
   4 status           Hebrew status, as stored
   5 openedDate       YYYY-MM-DD, from Requests.created_at
   6 updatedAt        ISO 8601 UTC, latest AuditLog row, fallback created_at
-Included when status is NOT 'סגור' and NOT 'לא מאושר'.
+  7 daysOpen         integer; created_at → now, or → completed_at once completed (increment 36)
+  8 overdue          boolean; due_at passed and not completed/closed/deferred (increment 36)
+  9 blocked          boolean; the manual block flag (increment 36)
+Included when status is NOT 'סגור' and NOT 'לא מאושר'. Columns 7-9 are aging facts (non-financial);
+due_at itself and blocked_reason are NOT published.
 
 Tab WeeklyCounts — columns in this exact order:
   1 house              house id
