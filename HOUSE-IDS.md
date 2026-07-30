@@ -16,12 +16,12 @@ Two things live in this file and they are **not** the same thing:
 | רמות השבים | `ramot-hashavim` | Ramot HaShavim | `sharon` | פתוח |
 | רעננה אשר | `raanana-asher` | Ra'anana Asher | `sharon` | פתוח |
 | רעננה הפרדס | `pardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
-| עפרוני קיסריה | `caesarea-ofroni` | Efroni Caesarea | `caesarea` | פתוח |
-| ריהאב קיסריה | `caesarea-rehab` | Rehab Caesarea | `caesarea` | פתוח |
+| קיסריה עפרוני | `caesarea-ofroni` | Caesarea Efroni | `caesarea` | פתוח |
+| קיסריה ריהאב | `caesarea-rehab` | Caesarea Rehab | `caesarea` | פתוח |
 | שדה אליעזר | `sde-eliezer` | Sde Eliezer | `north` | טרום-פתיחה |
 
 **The Hebrew display names above are the only correct forms.** Every app must show exactly
-these strings — no local variants, no reordering (it is "עפרוני קיסריה", not "קיסריה עפרוני").
+these strings — no local variants, no reordering (city first: it is "קיסריה עפרוני", not "עפרוני קיסריה").
 
 `sde-eliezer` is **reserved now** so no app invents an id for it
 later under pressure. Both `pardes` and `sde-eliezer` are pre-opening but already have activity.
@@ -64,7 +64,7 @@ same thing as the internal maintenance lead.
 | `north` | `sde-eliezer` | צחי |
 
 צחי covers both `caesarea` and `north`, but they are **separate clusters** — שדה אליעזר is far
-north and must not be auto-batched with עפרוני + ריהאב just because they share a lead.
+north and must not be auto-batched with קיסריה עפרוני + קיסריה ריהאב just because they share a lead.
 
 ## Rules
 
