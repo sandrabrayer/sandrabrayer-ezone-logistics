@@ -55,3 +55,19 @@ test('digest maps all six canonical names to distinct ids; old forms map to null
   assert.equal(new Set(ids).size, 6, 'six distinct ids');
   for (const old of OLD_FORMS) assert.equal(houseId(old), null, `old form ${old} must not map`);
 });
+
+// ---- increment 35: רעננה הפרדס uses the shared `pardes` id (matches HOUSE-IDS.md + ezone-kitchen) ----
+
+test('רעננה הפרדס maps to exactly `pardes` (not the old raanana-hapardes)', () => {
+  assert.equal(houseId('רעננה הפרדס'), 'pardes');
+  assert.ok(DIGEST_HOUSE_IDS.includes('pardes'));
+  assert.ok(!DIGEST_HOUSE_IDS.includes('raanana-hapardes'));
+});
+
+test('the old id `raanana-hapardes` appears NOWHERE in production digest sources', () => {
+  for (const f of ['src/digest.js', 'apps-script/digest.gs']) {
+    const src = readFileSync(join(root, f), 'utf8');
+    assert.ok(!src.includes('raanana-hapardes'), `${f} still references raanana-hapardes`);
+    assert.ok(src.includes('pardes'), `${f} must use the pardes id`);
+  }
+});

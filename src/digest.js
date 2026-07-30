@@ -7,7 +7,7 @@
 // and NO financial fields, ever. See DIGEST-CONTRACT.md for the frozen schema.
 
 // ---- House id map ----
-// ALL SIX houses (increment 33). הפרדס (raanana-hapardes) and שדה אליעזר (sde-eliezer) are
+// ALL SIX houses (increment 33). הפרדס (pardes) and שדה אליעזר (sde-eliezer) are
 // pre-opening but already have activity, so they now appear in the digest — a gap shows as
 // 'לא בוצעה', which is the honest state, rather than the house being invisible. Any house name
 // that does not map is still OMITTED, never guessed.
@@ -19,7 +19,7 @@
 export const HOUSE_IDS = {
   'רמות השבים': 'ramot-hashavim',
   'רעננה אשר': 'raanana-asher',
-  'רעננה הפרדס': 'raanana-hapardes',
+  'רעננה הפרדס': 'pardes',
   'קיסריה עפרוני': 'caesarea-ofroni',
   'קיסריה ריהאב': 'caesarea-rehab',
   'שדה אליעזר': 'sde-eliezer',
@@ -27,7 +27,7 @@ export const HOUSE_IDS = {
 
 // The digest's six house ids, in their canonical (WeeklyCounts) order — the HOUSE-IDS.md table order.
 export const DIGEST_HOUSE_IDS = [
-  'ramot-hashavim', 'raanana-asher', 'raanana-hapardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
+  'ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
 ];
 
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */

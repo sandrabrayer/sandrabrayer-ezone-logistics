@@ -13,8 +13,8 @@ coordinators repo.
 --- FROZEN CONTRACT ---
 
 House ids (v2, increment 33 — all six houses): ramot-hashavim (רמות השבים) ·
-raanana-asher (רעננה אשר) · raanana-hapardes (רעננה הפרדס) · caesarea-ofroni (עפרוני קיסריה) ·
-caesarea-rehab (ריהאב קיסריה) · sde-eliezer (שדה אליעזר). רעננה הפרדס and שדה אליעזר are
+raanana-asher (רעננה אשר) · pardes (רעננה הפרדס) · caesarea-ofroni (קיסריה עפרוני) ·
+caesarea-rehab (קיסריה ריהאב) · sde-eliezer (שדה אליעזר). רעננה הפרדס and שדה אליעזר are
 pre-opening but already have activity, so they are included — a gap surfaces as 'לא בוצעה'
 rather than the house being invisible. Houses that do not map are omitted, never guessed. Display
 names are the canonical forms from HOUSE-IDS.md (the single source). The house-id vocabulary is
