@@ -10,24 +10,40 @@ import {
   currentMonth, isValidMonth, isValidQuantity, formatMonthDisplay,
   weekStart, currentWeekStart, isValidWeekStart, monthFromWeekStart, formatWeekDisplay,
   recentWeekStarts, validateInventorySubmission, groupCatalog, latestCountFor, latestByHouse,
+  parseAllowedUnits, resolveItemUnit, unitForCount, computeQuantityBase, itemUnitMap, QUANTITY_CHOICES,
 } from '../src/inventory.js';
 import {
   HEADERS, INVENTORY_CATEGORIES, INVENTORY_COUNTERS, INVENTORY_HOUSE_COORDINATORS,
-  SEED_INVENTORY_ITEMS,
+  SEED_INVENTORY_ITEMS, BASE_UNITS,
 } from '../src/schema.js';
 
 // ---- schema ----
 
-test('inventory sheets exist; week_start is APPENDED at the end (order preserved, no source col)', () => {
-  assert.deepEqual(HEADERS.InventoryItems, ['category', 'item_text', 'active']);
+test('inventory sheets exist; increment-33 columns are APPENDED at the end (order preserved)', () => {
+  // base_unit / allowed_units / par_base appended to InventoryItems (first three keep positions).
+  assert.deepEqual(HEADERS.InventoryItems, ['category', 'item_text', 'active', 'base_unit', 'allowed_units', 'par_base']);
+  assert.deepEqual(HEADERS.InventoryItems.slice(0, 3), ['category', 'item_text', 'active']);
+  // unit_label / unit_factor / quantity_base appended AFTER week_start (originals keep positions).
   assert.deepEqual(HEADERS.InventoryCounts, [
     'count_id', 'house', 'month', 'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
     'week_start',
+    'unit_label', 'unit_factor', 'quantity_base',
   ]);
-  // The original nine columns keep their exact positions; week_start is last.
-  assert.equal(HEADERS.InventoryCounts[HEADERS.InventoryCounts.length - 1], 'week_start');
+  assert.equal(HEADERS.InventoryCounts[HEADERS.InventoryCounts.length - 1], 'quantity_base');
+  // quantity keeps its meaning (what the counter typed) and its original position (index 7).
+  assert.equal(HEADERS.InventoryCounts[7], 'quantity');
   assert.ok(!HEADERS.InventoryCounts.includes('source'));
+});
+
+test('an InventoryItems row lacking the three new columns still reads (unitless, no par)', () => {
+  const legacy = { category: 'טואלטיקה', item_text: 'ישן', active: 'TRUE' };
+  const d = resolveItemUnit(legacy);
+  assert.equal(d.unitless, true);
+  assert.deepEqual(d.units, []);
+  assert.equal(d.par_base, null);
+  // groupCatalog (which reads only item_text/active/category) is unaffected by the new columns.
+  assert.deepEqual(groupCatalog([legacy]), { 'טואלטיקה': ['ישן'], 'חומרי ניקוי': [] });
 });
 
 test('categories are ONLY טואלטיקה / חומרי ניקוי (food is owned by ezone-kitchen)', () => {
@@ -41,9 +57,9 @@ test('counters are the coordinators + backstop', () => {
   assert.ok(INVENTORY_COUNTERS.includes('צחי'));  // backstop + שדה אליעזר coordinator
 });
 
-test('each open/pre-opening house maps to its coordinator', () => {
+test('each open/pre-opening house maps to its coordinator (canonical names, HOUSE-IDS.md)', () => {
   assert.deepEqual(INVENTORY_HOUSE_COORDINATORS, {
-    'קיסריה עפרוני': 'שירה', 'ריהאב': 'יעקב', 'רעננה': 'אורן',
+    'עפרוני קיסריה': 'שירה', 'ריהאב קיסריה': 'יעקב', 'רעננה אשר': 'אורן',
     'רמות השבים': 'אביב', 'שדה אליעזר': 'צחי',
   });
   for (const who of Object.values(INVENTORY_HOUSE_COORDINATORS)) {
@@ -64,6 +80,116 @@ test('seed catalog: active items are Logistics-only; מזון rows kept but reti
   assert.ok(foods.every((i) => i.active === 'FALSE'), 'all מזון seed rows must be active=FALSE');
   // נייר טואלט stays an active Logistics item.
   assert.ok(active.some((i) => i.item_text === 'נייר טואלט'));
+});
+
+test('increment-33 split: אבקת/ג׳ל כביסה retired; אבקת כביסה (kg) + ג׳ל כביסה (l) active', () => {
+  const byName = Object.fromEntries(SEED_INVENTORY_ITEMS.map((i) => [i.item_text, i]));
+  // The combined item is retired (same pattern as the food rows) — one item can't carry two units.
+  assert.ok(byName['אבקת/ג׳ל כביסה']);
+  assert.equal(byName['אבקת/ג׳ל כביסה'].active, 'FALSE');
+  // Two separate active replacements, each with its own base unit.
+  assert.equal(byName['אבקת כביסה'].active, 'TRUE');
+  assert.equal(byName['אבקת כביסה'].base_unit, 'kg');
+  assert.equal(byName['ג׳ל כביסה'].active, 'TRUE');
+  assert.equal(byName['ג׳ל כביסה'].base_unit, 'l');
+});
+
+test('every ACTIVE seed item has a valid base_unit, a parseable unit menu, and a numeric par', () => {
+  for (const it of SEED_INVENTORY_ITEMS.filter((i) => i.active === 'TRUE')) {
+    assert.ok(BASE_UNITS.includes(it.base_unit), `bad base_unit for ${it.item_text}: ${it.base_unit}`);
+    const units = parseAllowedUnits(it.allowed_units);
+    assert.ok(units && units.length, `unparseable allowed_units for ${it.item_text}`);
+    assert.equal(typeof it.par_base, 'number');
+    assert.ok(it.par_base > 0);
+  }
+});
+
+// ---- unit parsing + resolution (increment 33) ----
+
+test('parseAllowedUnits parses pairs; first entry is the default', () => {
+  const u = parseAllowedUnits('בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4');
+  assert.deepEqual(u, [
+    { label: 'בקבוק 1ל', factor: 1 }, { label: 'בקבוק 2ל', factor: 2 }, { label: 'בקבוק 4ל', factor: 4 },
+  ]);
+  assert.equal(u[0].label, 'בקבוק 1ל');       // first = default selection
+  assert.equal(parseAllowedUnits('בקבוק 750מל:0.75')[0].factor, 0.75); // fractional factor OK
+});
+
+test('parseAllowedUnits rejects malformed specs (→ null, never a wrong guess)', () => {
+  assert.equal(parseAllowedUnits(''), null);
+  assert.equal(parseAllowedUnits('בקבוק'), null);          // no colon
+  assert.equal(parseAllowedUnits('בקבוק:'), null);         // no factor
+  assert.equal(parseAllowedUnits(':5'), null);             // no label
+  assert.equal(parseAllowedUnits('בקבוק:0'), null);        // factor not > 0
+  assert.equal(parseAllowedUnits('בקבוק:-2'), null);       // negative factor
+  assert.equal(parseAllowedUnits('בקבוק:x'), null);        // factor NaN
+  assert.equal(parseAllowedUnits('ok:1|bad'), null);       // one bad pair fails the whole spec
+});
+
+test('resolveItemUnit: a valid unit item resolves with default = first option', () => {
+  const d = resolveItemUnit({ item_text: 'אקונומיקה', base_unit: 'l', allowed_units: 'בקבוק 1ל:1|גלון 4ל:4', par_base: '10' });
+  assert.equal(d.unitless, false);
+  assert.equal(d.base_unit, 'l');
+  assert.equal(d.defaultUnit.label, 'בקבוק 1ל');
+  assert.equal(d.par_base, 10);
+});
+
+test('resolveItemUnit: unknown base_unit / malformed units → unitless AND logged', () => {
+  const logs = [];
+  const log = (m) => logs.push(m);
+  const bad = resolveItemUnit({ item_text: 'X', base_unit: 'gallon', allowed_units: 'בקבוק:1', par_base: '3' }, log);
+  assert.equal(bad.unitless, true);
+  assert.deepEqual(bad.units, []);
+  const bad2 = resolveItemUnit({ item_text: 'Y', base_unit: 'l', allowed_units: 'בקבוק:0', par_base: '3' }, log);
+  assert.equal(bad2.unitless, true);
+  assert.equal(logs.length, 2, 'both bad rows must be logged, never silently defaulted');
+  assert.ok(logs[0].includes('base_unit') && logs[1].includes('allowed_units'));
+  // par is still read even when units are rejected — a shortage can still be evaluated on base qty.
+  assert.equal(bad.par_base, 3);
+});
+
+test('resolveItemUnit: a legacy/blank row is unitless but NOT logged (expected, not an error)', () => {
+  const logs = [];
+  const d = resolveItemUnit({ item_text: 'ישן', active: 'TRUE' }, (m) => logs.push(m));
+  assert.equal(d.unitless, true);
+  assert.equal(d.par_base, null);
+  assert.equal(logs.length, 0);
+});
+
+test('unitForCount picks the matching label; falls back to the DEFAULT, never a random factor', () => {
+  const d = resolveItemUnit({ item_text: 'אקונומיקה', base_unit: 'l', allowed_units: 'בקבוק 1ל:1|גלון 4ל:4', par_base: 10 });
+  assert.deepEqual(unitForCount(d, 'גלון 4ל'), { unit_label: 'גלון 4ל', unit_factor: 4 });
+  assert.deepEqual(unitForCount(d, 'לא קיים'), { unit_label: 'בקבוק 1ל', unit_factor: 1 }); // default
+  // A unitless item always counts in base units (factor 1, no label).
+  assert.deepEqual(unitForCount(resolveItemUnit({ item_text: 'ישן' }), 'whatever'), { unit_label: '', unit_factor: 1 });
+});
+
+test('computeQuantityBase = quantity × unit_factor (factors 1, 4, 0.75)', () => {
+  assert.equal(computeQuantityBase(5, 1), 5);
+  assert.equal(computeQuantityBase(3, 4), 12);
+  assert.equal(computeQuantityBase(2, 0.75), 1.5);
+  assert.equal(computeQuantityBase('x', 4), null);   // non-numeric → null
+});
+
+test('counting 4 of the 4-litre unit for אקונומיקה stores 16 l', () => {
+  const acetone = SEED_INVENTORY_ITEMS.find((i) => i.item_text === 'אקונומיקה');
+  const desc = resolveItemUnit(acetone);
+  assert.equal(desc.base_unit, 'l');
+  // אקונומיקה's 4-litre option (per the seed) is "בקבוק 4ל", factor 4.
+  const chosen = unitForCount(desc, 'בקבוק 4ל');
+  assert.equal(chosen.unit_factor, 4);
+  assert.equal(computeQuantityBase(4, chosen.unit_factor), 16);   // 4 × 4 l = 16 l
+});
+
+test('QUANTITY_CHOICES is the shared derived option list (same for every item)', () => {
+  assert.deepEqual(QUANTITY_CHOICES, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 24, 30, 50]);
+});
+
+test('itemUnitMap resolves the whole catalog by item_text', () => {
+  const m = itemUnitMap(SEED_INVENTORY_ITEMS);
+  assert.equal(m['אקונומיקה'].base_unit, 'l');
+  assert.equal(m['אבקת כביסה'].base_unit, 'kg');
+  assert.equal(m['אורז'].unitless, true);   // retired food row → unitless
 });
 
 // ---- month primitives (historical rows + derived month column) ----
@@ -155,7 +281,7 @@ test('isValidQuantity: finite number ≥ 0, string numerics OK, blanks rejected'
 // ---- submission validation (mirrored server-side) ----
 
 const goodItem = { category: 'טואלטיקה', item: 'נייר טואלט', quantity: 12 };
-const base = { house: 'רעננה', week_start: '2026-07-19', counted_by: 'אורן', items: [goodItem] };
+const base = { house: 'רעננה אשר', week_start: '2026-07-19', counted_by: 'אורן', items: [goodItem] };
 
 test('a valid submission passes', () => {
   assert.equal(validateInventorySubmission(base), null);
@@ -209,30 +335,30 @@ test('groupCatalog: keeps category order, drops inactive, unknown- and retired-c
 
 const wk = '2026-07-19';
 const countRows = [
-  // first submission for רעננה this week
-  { count_id: 'INV-1', house: 'רעננה', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-20T08:00:00Z', category: 'חומרי ניקוי', item: 'אקונומיקה', quantity: 4 },
-  { count_id: 'INV-1', house: 'רעננה', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-20T08:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 20 },
+  // first submission for רעננה אשר this week
+  { count_id: 'INV-1', house: 'רעננה אשר', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-20T08:00:00Z', category: 'חומרי ניקוי', item: 'אקונומיקה', quantity: 4 },
+  { count_id: 'INV-1', house: 'רעננה אשר', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-20T08:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 20 },
   // corrected re-submission SAME house+week — must win
-  { count_id: 'INV-2', house: 'רעננה', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-22T09:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 24 },
+  { count_id: 'INV-2', house: 'רעננה אשר', week_start: wk, counted_by: 'אורן', counted_at: '2026-07-22T09:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 24 },
   // another house, same week
-  { count_id: 'INV-3', house: 'ריהאב', week_start: wk, counted_by: 'יעקב', counted_at: '2026-07-21T07:00:00Z', category: 'טואלטיקה', item: 'טישו', quantity: 6 },
+  { count_id: 'INV-3', house: 'ריהאב קיסריה', week_start: wk, counted_by: 'יעקב', counted_at: '2026-07-21T07:00:00Z', category: 'טואלטיקה', item: 'טישו', quantity: 6 },
   // same house, DIFFERENT week — must not leak in
-  { count_id: 'INV-0', house: 'רעננה', week_start: '2026-07-12', counted_by: 'אורן', counted_at: '2026-07-13T08:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 9 },
+  { count_id: 'INV-0', house: 'רעננה אשר', week_start: '2026-07-12', counted_by: 'אורן', counted_at: '2026-07-13T08:00:00Z', category: 'טואלטיקה', item: 'נייר טואלט', quantity: 9 },
 ];
 
 test('latestCountFor returns the newest count_id only, scoped to house+week', () => {
-  const c = latestCountFor(countRows, 'רעננה', wk);
+  const c = latestCountFor(countRows, 'רעננה אשר', wk);
   assert.equal(c.count_id, 'INV-2');
   assert.equal(c.counted_by, 'אורן');
   assert.equal(c.items.length, 1);
   assert.equal(c.items[0].quantity, 24);
-  assert.equal(latestCountFor(countRows, 'הפרדס', wk), null);
+  assert.equal(latestCountFor(countRows, 'רעננה הפרדס', wk), null);
 });
 
 test('latestByHouse maps every house to its latest count or null', () => {
-  const houses = [{ name: 'רעננה' }, { name: 'ריהאב' }, { name: 'הפרדס' }];
+  const houses = [{ name: 'רעננה אשר' }, { name: 'ריהאב קיסריה' }, { name: 'רעננה הפרדס' }];
   const m = latestByHouse(countRows, houses, wk);
-  assert.equal(m['רעננה'].count_id, 'INV-2');
-  assert.equal(m['ריהאב'].count_id, 'INV-3');
-  assert.equal(m['הפרדס'], null);
+  assert.equal(m['רעננה אשר'].count_id, 'INV-2');
+  assert.equal(m['ריהאב קיסריה'].count_id, 'INV-3');
+  assert.equal(m['רעננה הפרדס'], null);
 });

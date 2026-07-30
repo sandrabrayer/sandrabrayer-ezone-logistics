@@ -3,6 +3,62 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 33 — units, unit menus and par for Logistics inventory; shortage = below-par; digest covers all six houses; canonical display names
+
+**Why:** `InventoryItems` had only `category | item_text | active`, so a count of "3" for שקיות אשפה
+was unreadable, and a "shortage" was defined as *counted at zero* — detected only once a house was
+already out. ezone-kitchen, which Olga reads side by side, defines a shortage as *below par* and warns
+early. Same word, two meanings, two apps. This increment gives Logistics units and par with a
+user-selectable unit menu, and redefines a shortage as below-par so the word means one thing.
+
+**Item schema — units + par, all sheet-editable (`src/schema.js`, `apps-script/setup.gs`):**
+`InventoryItems` gains three APPEND-ONLY columns (existing rows keep positional read; a row lacking
+them reads as unitless with no par):
+- `base_unit` — one of `kg | g | l | ml | unit` (the closed set ezone-kitchen uses).
+- `allowed_units` — pipe-separated `label:factor` pairs (`factor` = base units per one of that label);
+  the **first** entry is the default selection. e.g. `בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4`.
+- `par_base` — flat **weekly par per house** in `base_unit`; blank = no par → never a shortage.
+
+Labels, options and par are edited in the **Sheet** — no deploy. Validation on read (`resolveItemUnit`,
+mirrored in `Code.gs`): an unknown `base_unit`, a malformed `allowed_units`, or a factor ≤ 0 makes the
+item **unitless and is logged** — never coerced to a wrong default. **No occupancy scaling** — Logistics
+has no occupancy source until the Dashboard publishes one (a separate build-order item); noted in code.
+**Split:** the former `אבקת/ג׳ל כביסה` is retired (`active=FALSE`, like the food rows) and replaced by
+`אבקת כביסה` (kg) + `ג׳ל כביסה` (l) — one item can't carry two base units. The 10 retired מזון rows are
+left exactly as they were. No count rows existed for any of this, so nothing was migrated.
+
+**Count form (`src/inventory.html`):** each item shows a unit dropdown (from `allowed_units`, default =
+first) and a quantity picker with the same derived options for every item — `1–12, 15, 20, 24, 30, 50`,
+plus **אחר** which reveals a free numeric input. `InventoryCounts` gains three APPEND-ONLY columns —
+`unit_label`, `unit_factor`, `quantity_base` (= `quantity × unit_factor`, in `base_unit`). `quantity`
+still means exactly what the counter typed; the **factor is derived from the live catalog at submit time
+and frozen** onto the row (never re-derived later from a label, because labels change in the sheet).
+`quantity_base` is what par comparison and all aggregation read. Blank quantity still writes **no row**
+(not counted); a quantity of **0** still writes a row (counted, genuinely empty) — distinction preserved.
+
+**Shortage = below par (`src/digest.js`, `apps-script/digest.gs`):** a shortage is `par_base` set AND the
+**latest** counted `quantity_base < par_base`. Counted 0 with a par → shortage; counted 0 with no par →
+not; never counted → no row, never a shortage. `shortagesSummary` now reads e.g. `שקיות אשפה: 40/200 unit`.
+
+**Digest — all six houses, canonical names:** `buildWeeklyCountRows_` now emits **6 houses × 8 weeks (48
+rows)** — רעננה הפרדס and שדה אליעזר are no longer invisible. Display names are corrected throughout
+(Houses seed, Users house scope, request + inventory UI, digest map) to the canonical HOUSE-IDS.md forms:
+`רמות השבים | רעננה אשר | רעננה הפרדס | עפרוני קיסריה | ריהאב קיסריה | שדה אליעזר`. **No id changed.**
+`HOUSE-IDS.md` is added at the repo root as the single source; the stale `DIGEST-CONTRACT.md` text
+(claiming weekly counts don't exist and to emit every row as לא בוצעה) is corrected — weekly shipped in
+increment 26.
+
+**Tests:** unit parsing/defaults, malformed/bad-unit → unitless-and-logged, `quantity_base` for factors
+1 / 4 / 0.75 (4 × the 4-litre unit of אקונומיקה = 16 l), below-par shortage semantics, the blank-vs-0 row
+distinction, digest 6 × 8, canonical names incl. שדה אליעזר, a guard that no seed/map emits the old
+forms, the split, legacy rows still read, and the schema.js ⇄ setup.gs seed mirror extended to the new
+columns. Full `node --test` suite green (282).
+
+> **⚠ After this merge:** re-run **`setupSheet()`** once — it APPENDS the new `InventoryItems` columns
+> (`base_unit`, `allowed_units`, `par_base`) and the new `InventoryCounts` columns (`unit_label`,
+> `unit_factor`, `quantity_base`) to the existing sheets (no reorder, no data loss), and seeds the new
+> `אבקת כביסה` / `ג׳ל כביסה` items only on a fresh sheet — edit the catalog in the Sheet otherwise.
+
 ## [Unreleased] — increment 32 (hotfix) — setUserPin() PBKDF2 crashed on Apps Script; parity test corrected
 
 **Bug:** the increment-31 `setUserPin()` threw on **every** call in the live Apps Script runtime —

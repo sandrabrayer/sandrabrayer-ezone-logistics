@@ -79,7 +79,14 @@ export const HEADERS = {
 
   // ---- Inventory module (increment 25) ----
   // Catalog of countable items, editable in the Sheet (set active=FALSE to hide, add rows to extend).
-  InventoryItems: ['category', 'item_text', 'active'],
+  //
+  // Increment 33: units + par are APPENDED (never reorder/remove the first three — positional read
+  // of existing rows must keep working; rows that predate these columns read as unitless, no par).
+  //   base_unit     one of kg | g | l | ml | unit — the closed set ezone-kitchen uses.
+  //   allowed_units pipe-separated "label:factor" pairs; factor = base units per ONE of that label.
+  //                 First entry is the default selection. Edited in the SHEET — no deploy to change.
+  //   par_base      weekly par in base_unit (a flat per-house par). Blank = no par → never a shortage.
+  InventoryItems: ['category', 'item_text', 'active', 'base_unit', 'allowed_units', 'par_base'],
 
   // One row PER ITEM per submitted count. count_id groups one submission (house × week × counter);
   // re-submitting the same house+week appends a new count_id — the LATEST counted_at wins on display.
@@ -88,11 +95,18 @@ export const HEADERS = {
   // begins the Israeli week) is APPENDED AT THE END — never reorder or remove the original columns.
   // `month` stays populated (derived from week_start on new rows; kept as-is on historical rows) so
   // nothing downstream that still reads it breaks.
+  //
+  // Increment 33: unit_label / unit_factor / quantity_base are APPENDED after week_start (never
+  // reorder the earlier columns). `quantity` keeps its exact meaning — what the counter typed.
+  // `quantity_base` = quantity × unit_factor, expressed in the item's base_unit; it is what par
+  // comparison and all aggregation read. The factor is FROZEN at count time — never re-derive it
+  // later from unit_label, because labels/factors are edited in the InventoryItems sheet.
   InventoryCounts: [
     'count_id', 'house', 'month',            // month = YYYY-MM (historical + derived from week_start)
     'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
     'week_start',                            // YYYY-MM-DD, Sunday (Israeli week) — appended inc. 26
+    'unit_label', 'unit_factor', 'quantity_base', // appended inc. 33 (unit chosen + frozen factor + base qty)
   ],
 };
 
@@ -163,12 +177,14 @@ export const TRADES = [
 // same axis as `cluster` (external batching). Tzachi (צחי) covers BOTH caesarea and north,
 // but they are separate clusters so a far-north visit is never auto-batched with the
 // coastal two. A test asserts exactly this.
+// Display names are the CANONICAL forms from HOUSE-IDS.md (increment 33) — the single source for how
+// a house is shown. They must match that file exactly (e.g. "עפרוני קיסריה", not "קיסריה עפרוני").
 export const SEED_HOUSES = [
-  { name: 'רעננה',          technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
+  { name: 'רעננה אשר',      technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
   { name: 'רמות השבים',     technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
-  { name: 'הפרדס',          technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.PRE_OPENING },
-  { name: 'קיסריה עפרוני',  technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
-  { name: 'ריהאב',          technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
+  { name: 'רעננה הפרדס',    technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.PRE_OPENING },
+  { name: 'עפרוני קיסריה',  technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
+  { name: 'ריהאב קיסריה',   technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
   { name: 'שדה אליעזר',     technician: 'צחי', cluster: CLUSTERS.NORTH,    status: HOUSE_STATUS.PRE_OPENING },
 ];
 
@@ -205,9 +221,9 @@ export const SEED_USERS = [
   { name: 'סנדרה', role: 'ceo',         house: '',                 active: 'TRUE', pin_hash: '' }, // no password → cannot log in
   { name: 'רמי',   role: 'maintenance', house: 'sharon',           active: 'TRUE', pin_hash: '' }, // tier B, cluster: sharon
   { name: 'צחי',   role: 'maintenance', house: 'caesarea,north',   active: 'TRUE', pin_hash: '' }, // tier B, clusters: caesarea + north
-  { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני',     active: 'TRUE', pin_hash: '' }, // tier B
-  { name: 'יעקב',  role: 'coordinator', house: 'ריהאב',             active: 'TRUE', pin_hash: '' }, // tier B
-  { name: 'אורן',  role: 'coordinator', house: 'רעננה',             active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'שירה',  role: 'coordinator', house: 'עפרוני קיסריה',     active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'יעקב',  role: 'coordinator', house: 'ריהאב קיסריה',      active: 'TRUE', pin_hash: '' }, // tier B
+  { name: 'אורן',  role: 'coordinator', house: 'רעננה אשר',         active: 'TRUE', pin_hash: '' }, // tier B
   { name: 'אביב',  role: 'coordinator', house: 'רמות השבים',        active: 'TRUE', pin_hash: '' }, // tier B
 ];
 
@@ -271,40 +287,56 @@ export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'
 export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
 
 // House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
-// people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (ריהאב) · אורן (רעננה) ·
-// אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop).
+// people who actually walk each house: שירה (עפרוני קיסריה) · יעקב (ריהאב קיסריה) · אורן (רעננה אשר) ·
+// אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop, incl. רעננה הפרדס).
+// Keys are the CANONICAL house display names (HOUSE-IDS.md) — kept in sync with SEED_HOUSES.
 export const INVENTORY_HOUSE_COORDINATORS = {
-  'קיסריה עפרוני': 'שירה',
-  'ריהאב': 'יעקב',
-  'רעננה': 'אורן',
+  'עפרוני קיסריה': 'שירה',
+  'ריהאב קיסריה': 'יעקב',
+  'רעננה אשר': 'אורן',
   'רמות השבים': 'אביב',
   'שדה אליעזר': 'צחי',
 };
 
+// The closed set of base units (increment 33) — SHARED with ezone-kitchen. An item whose base_unit
+// is outside this set is treated as unitless (and logged), never coerced to a guessed default.
+export const BASE_UNITS = ['kg', 'g', 'l', 'ml', 'unit'];
+
 // Seed catalog — editable in the Sheet (active=FALSE hides, new rows extend; no code change needed).
+// base_unit / allowed_units / par_base are STARTING POINTS: labels, options and par are all edited in
+// the InventoryItems sheet afterward with NO deploy. par_base is a flat weekly par per house.
+//
 // The מזון rows are seeded active=FALSE (increment 26): food moved to ezone-kitchen, but the rows
 // stay so increment-25 historical counts that reference these item names still resolve. They are
 // hidden from the count form (groupCatalog skips inactive rows AND non-INVENTORY_CATEGORIES rows).
+// Retired rows carry no units — they are never counted, so par/units are left blank.
+//
+// Increment 33 SPLIT: the former 'אבקת/ג׳ל כביסה' is retired (active=FALSE) and replaced by two
+// separate items — powder (kg) and gel (l) — because one item cannot carry two base units. No count
+// rows existed for it, so there is nothing to migrate.
 export const SEED_INVENTORY_ITEMS = [
   // טואלטיקה
-  { category: 'טואלטיקה', item_text: 'נייר טואלט', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'מגבות נייר', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'טישו', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'סבון ידיים', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'שמפו', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'סבון רחצה', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'משחת שיניים', active: 'TRUE' },
-  { category: 'טואלטיקה', item_text: 'מברשות שיניים', active: 'TRUE' },
+  { category: 'טואלטיקה', item_text: 'נייר טואלט', active: 'TRUE', base_unit: 'unit', allowed_units: 'גליל:1|חבילה 8:8|חבילה 24:24', par_base: 48 },
+  { category: 'טואלטיקה', item_text: 'מגבות נייר', active: 'TRUE', base_unit: 'unit', allowed_units: 'גליל:1|חבילה 4:4', par_base: 24 },
+  { category: 'טואלטיקה', item_text: 'טישו', active: 'TRUE', base_unit: 'unit', allowed_units: 'קופסה:1|חבילה 6:6', par_base: 12 },
+  { category: 'טואלטיקה', item_text: 'סבון ידיים', active: 'TRUE', base_unit: 'ml', allowed_units: 'בקבוק 500מל:500|ליטר:1000|גלון 4ל:4000', par_base: 5000 },
+  { category: 'טואלטיקה', item_text: 'שמפו', active: 'TRUE', base_unit: 'ml', allowed_units: 'בקבוק 750מל:750|ליטר:1000|גלון 4ל:4000', par_base: 5000 },
+  { category: 'טואלטיקה', item_text: 'סבון רחצה', active: 'TRUE', base_unit: 'unit', allowed_units: "יח':1|חבילה 6:6", par_base: 20 },
+  { category: 'טואלטיקה', item_text: 'משחת שיניים', active: 'TRUE', base_unit: 'unit', allowed_units: "יח':1", par_base: 10 },
+  { category: 'טואלטיקה', item_text: 'מברשות שיניים', active: 'TRUE', base_unit: 'unit', allowed_units: "יח':1|חבילה 4:4", par_base: 10 },
   // חומרי ניקוי
-  { category: 'חומרי ניקוי', item_text: 'אקונומיקה', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'נוזל רצפות', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'נוזל כלים', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'ספוגים', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'מטליות', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'שקיות אשפה', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'תרסיס חיטוי', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'אבקת/ג׳ל כביסה', active: 'TRUE' },
-  { category: 'חומרי ניקוי', item_text: 'מרכך כביסה', active: 'TRUE' },
+  { category: 'חומרי ניקוי', item_text: 'אקונומיקה', active: 'TRUE', base_unit: 'l', allowed_units: 'בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4', par_base: 10 },
+  { category: 'חומרי ניקוי', item_text: 'נוזל רצפות', active: 'TRUE', base_unit: 'l', allowed_units: 'בקבוק 1ל:1|בקבוק 2ל:2|גלון 4ל:4', par_base: 10 },
+  { category: 'חומרי ניקוי', item_text: 'נוזל כלים', active: 'TRUE', base_unit: 'l', allowed_units: 'בקבוק 750מל:0.75|בקבוק 1ל:1|גלון 4ל:4', par_base: 6 },
+  { category: 'חומרי ניקוי', item_text: 'ספוגים', active: 'TRUE', base_unit: 'unit', allowed_units: "יח':1|חבילה 10:10", par_base: 20 },
+  { category: 'חומרי ניקוי', item_text: 'מטליות', active: 'TRUE', base_unit: 'unit', allowed_units: "יח':1|חבילה 10:10", par_base: 20 },
+  { category: 'חומרי ניקוי', item_text: 'שקיות אשפה', active: 'TRUE', base_unit: 'unit', allowed_units: "גליל 20:20|גליל 50:50|יח':1", par_base: 200 },
+  { category: 'חומרי ניקוי', item_text: 'תרסיס חיטוי', active: 'TRUE', base_unit: 'unit', allowed_units: 'בקבוק:1|חבילה 3:3', par_base: 6 },
+  // increment 33 SPLIT: 'אבקת/ג׳ל כביסה' retired → אבקת כביסה (kg) + ג׳ל כביסה (l).
+  { category: 'חומרי ניקוי', item_text: 'אבקת/ג׳ל כביסה', active: 'FALSE' },
+  { category: 'חומרי ניקוי', item_text: 'אבקת כביסה', active: 'TRUE', base_unit: 'kg', allowed_units: 'שקית 5 ק"ג:5|שקית 10 ק"ג:10', par_base: 10 },
+  { category: 'חומרי ניקוי', item_text: 'ג׳ל כביסה', active: 'TRUE', base_unit: 'l', allowed_units: 'בקבוק 3ל:3|בקבוק 5ל:5', par_base: 5 },
+  { category: 'חומרי ניקוי', item_text: 'מרכך כביסה', active: 'TRUE', base_unit: 'l', allowed_units: 'בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4', par_base: 5 },
   // מזון — RETIRED in increment 26 (food is owned by ezone-kitchen). Kept as active=FALSE so
   // historical increment-25 counts referencing these names still resolve; hidden from the form.
   { category: 'מזון', item_text: 'אורז', active: 'FALSE' },

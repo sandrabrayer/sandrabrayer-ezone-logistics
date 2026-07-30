@@ -50,3 +50,46 @@ test('approval.js MIRROR:approval matches apps-script/Code.gs', () => {
   assert.ok(a.length > 0);
   assert.equal(a, b);
 });
+
+// ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
+// setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
+// evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
+// globals) are only PARSED here, never run, so no Apps Script stubs are needed.
+import { HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS } from '../src/schema.js';
+
+function loadSetupGs() {
+  const src = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
+  // eslint-disable-next-line no-new-func
+  const fn = new Function(src + '\n;return { HEADERS: HEADERS, SEED_HOUSES: SEED_HOUSES, SEED_USERS: SEED_USERS, SEED_INVENTORY_ITEMS: SEED_INVENTORY_ITEMS };');
+  return fn();
+}
+
+const norm = (v) => (v === undefined || v === null || v === '') ? '' : String(v);
+
+test('InventoryItems / InventoryCounts headers match between schema.js and setup.gs', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.InventoryItems, SCHEMA_HEADERS.InventoryItems);
+  assert.deepEqual(gs.HEADERS.InventoryCounts, SCHEMA_HEADERS.InventoryCounts);
+  // The increment-33 columns are present on both sides.
+  for (const c of ['base_unit', 'allowed_units', 'par_base']) assert.ok(gs.HEADERS.InventoryItems.includes(c));
+  for (const c of ['unit_label', 'unit_factor', 'quantity_base']) assert.ok(gs.HEADERS.InventoryCounts.includes(c));
+});
+
+test('SEED_INVENTORY_ITEMS mirror: category/item/active AND base_unit/allowed_units/par_base', () => {
+  const gs = loadSetupGs();
+  const fromSchema = SEED_INVENTORY_ITEMS.map((o) =>
+    [o.category, o.item_text, o.active, norm(o.base_unit), norm(o.allowed_units), norm(o.par_base)]);
+  const fromGs = gs.SEED_INVENTORY_ITEMS.map((a) =>
+    [a[0], a[1], a[2], norm(a[3]), norm(a[4]), norm(a[5])]);
+  assert.deepEqual(fromGs, fromSchema);
+});
+
+test('SEED_HOUSES and SEED_USERS house names mirror between schema.js and setup.gs', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(
+    gs.SEED_HOUSES.map((a) => [a[0], a[1], a[2], a[3]]),
+    SEED_HOUSES.map((o) => [o.name, o.technician, o.cluster, o.status]));
+  assert.deepEqual(
+    gs.SEED_USERS.map((a) => [a[0], a[1], a[2]]),
+    SEED_USERS.map((o) => [o.name, o.role, o.house]));
+});

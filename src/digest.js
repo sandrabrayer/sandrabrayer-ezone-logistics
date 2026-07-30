@@ -7,29 +7,84 @@
 // and NO financial fields, ever. See DIGEST-CONTRACT.md for the frozen schema.
 
 // ---- House id map ----
-// The four OPEN houses that have a coordinator. הפרדס and שדה אליעזר are pre-opening (no
-// coordinator) and are deliberately excluded. Any house name that does not map is OMITTED
-// from the digest — never guessed.
+// ALL SIX houses (increment 33). הפרדס (raanana-hapardes) and שדה אליעזר (sde-eliezer) are
+// pre-opening but already have activity, so they now appear in the digest — a gap shows as
+// 'לא בוצעה', which is the honest state, rather than the house being invisible. Any house name
+// that does not map is still OMITTED, never guessed.
 //
-// The ids use the SHARED ezone-kitchen vocabulary (contract v2) so every E-Zone app keys houses
-// on one namespace. IDs apply at the digest boundary ONLY — inside Logistics, Requests.house /
-// Inspections.house / InventoryCounts.house still key on the Hebrew NAME (renaming would orphan
-// historical rows).
+// Keys are the CANONICAL Hebrew display names (HOUSE-IDS.md); values are the FROZEN ids, shared
+// with ezone-kitchen so every E-Zone app keys houses on one namespace. The id — never the Hebrew
+// name — is what the digest emits and what consumers key on. The map applies at the digest boundary
+// only; inside Logistics, Requests.house / Inspections.house / InventoryCounts.house carry the name.
 export const HOUSE_IDS = {
-  'רעננה': 'raanana-asher',
   'רמות השבים': 'ramot-hashavim',
-  'קיסריה עפרוני': 'caesarea-ofroni',
-  'ריהאב': 'caesarea-rehab',
+  'רעננה אשר': 'raanana-asher',
+  'רעננה הפרדס': 'raanana-hapardes',
+  'עפרוני קיסריה': 'caesarea-ofroni',
+  'ריהאב קיסריה': 'caesarea-rehab',
+  'שדה אליעזר': 'sde-eliezer',
 };
 
-// The digest's four house ids, in their canonical (WeeklyCounts) order.
-export const DIGEST_HOUSE_IDS = ['raanana-asher', 'ramot-hashavim', 'caesarea-ofroni', 'caesarea-rehab'];
+// The digest's six house ids, in their canonical (WeeklyCounts) order — the HOUSE-IDS.md table order.
+export const DIGEST_HOUSE_IDS = [
+  'ramot-hashavim', 'raanana-asher', 'raanana-hapardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
+];
 
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */
 export function houseId(name) {
   if (name == null) return null;
   const key = String(name).trim();
   return Object.prototype.hasOwnProperty.call(HOUSE_IDS, key) ? HOUSE_IDS[key] : null;
+}
+
+// ---- Shortage = below par (increment 33) ----
+// A shortage is `par_base` SET and the counted `quantity_base` strictly below it. An item counted
+// at 0 with a par is a shortage; counted at 0 with no par is not; never counted is never a shortage
+// (there is no row, so isShortage is never even asked about it). This is the SAME meaning of
+// "shortage" ezone-kitchen uses (below-par, early warning) — no longer "already at zero".
+
+/** True when parBase is a real target and quantityBase is a real number strictly below it. */
+export function isShortage(quantityBase, parBase) {
+  if (parBase == null || parBase === '') return false;
+  const p = Number(parBase);
+  if (!Number.isFinite(p)) return false;
+  // A blank / missing base qty is "not counted in base terms" — NOT a zero (Number('') is 0, which
+  // would falsely read as a shortage). Guard it before coercion.
+  if (quantityBase == null || quantityBase === '') return false;
+  const q = Number(quantityBase);
+  if (!Number.isFinite(q)) return false;         // no comparable base qty → not a shortage
+  return q < p;
+}
+
+/**
+ * One shortage's summary text, base unit included so the number is readable — e.g.
+ * "שקיות אשפה: 40/200 unit". An optional note is appended in parentheses. The digest still runs
+ * this through the money scrubber before publishing.
+ */
+export function shortageLabel(item, quantityBase, parBase, baseUnit, note) {
+  const unit = baseUnit ? ' ' + baseUnit : '';
+  let s = String(item == null ? '' : item) + ': ' + quantityBase + '/' + parBase + unit;
+  const n = String(note == null ? '' : note).trim();
+  if (n) s += ' (' + n + ')';
+  return s;
+}
+
+/**
+ * Build the WeeklyCounts rows: every house in DIGEST_HOUSE_IDS × every week, so a gap surfaces
+ * rather than hides. `bucketByKey` maps 'houseId|weekStart' → { shortagesSummary, updatedAt } for
+ * house/weeks that HAVE a count; missing keys emit a 'not done' row. Kept pure (no sheet access) so
+ * the six-houses-×-weeks shape is unit-tested; apps-script/digest.gs builds the buckets and calls it.
+ */
+export function buildWeeklyGrid(bucketByKey, weeks, nowIso, doneLabel, notDoneLabel) {
+  const rows = [];
+  for (const house of DIGEST_HOUSE_IDS) {
+    for (const wk of weeks || []) {
+      const b = bucketByKey ? bucketByKey[house + '|' + wk] : null;
+      if (b) rows.push([house, wk, doneLabel, b.shortagesSummary || '', b.updatedAt || nowIso]);
+      else rows.push([house, wk, notDoneLabel, '', nowIso]);
+    }
+  }
+  return rows;
 }
 
 // ---- Active-ticket filter ----
