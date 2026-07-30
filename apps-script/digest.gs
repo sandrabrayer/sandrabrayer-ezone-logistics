@@ -35,22 +35,84 @@ var DIGEST_NOT_DONE_ = 'לא בוצעה';
 
 // ---- Pure helpers (mirror of src/digest.js) ----
 
-// House id map — the four OPEN houses with a coordinator. הפרדס / שדה אליעזר are pre-opening
-// (excluded). Any house that does not map is OMITTED, never guessed. IDs use the SHARED
-// ezone-kitchen vocabulary (contract v2); the mapping applies at the digest boundary ONLY —
-// Logistics still keys on the Hebrew house NAME internally.
+// House id map — ALL SIX houses (increment 33). הפרדס (raanana-hapardes) / שדה אליעזר (sde-eliezer)
+// are pre-opening but already have activity, so a gap now shows as 'לא בוצעה' instead of the house
+// being invisible. Any house that does not map is OMITTED, never guessed. Keys are the CANONICAL
+// Hebrew display names (HOUSE-IDS.md); values are the FROZEN ids, shared with ezone-kitchen. The
+// mapping applies at the digest boundary ONLY — Logistics keys on the house name internally.
 var DIGEST_HOUSE_IDS_ = {
-  'רעננה': 'raanana-asher',
   'רמות השבים': 'ramot-hashavim',
-  'קיסריה עפרוני': 'caesarea-ofroni',
-  'ריהאב': 'caesarea-rehab',
+  'רעננה אשר': 'raanana-asher',
+  'רעננה הפרדס': 'raanana-hapardes',
+  'עפרוני קיסריה': 'caesarea-ofroni',
+  'ריהאב קיסריה': 'caesarea-rehab',
+  'שדה אליעזר': 'sde-eliezer',
 };
-var DIGEST_HOUSE_ID_ORDER_ = ['raanana-asher', 'ramot-hashavim', 'caesarea-ofroni', 'caesarea-rehab'];
+var DIGEST_HOUSE_ID_ORDER_ = [
+  'ramot-hashavim', 'raanana-asher', 'raanana-hapardes', 'caesarea-ofroni', 'caesarea-rehab', 'sde-eliezer',
+];
 
 function digestHouseId_(name) {
   if (name == null) return null;
   var key = String(name).trim();
   return Object.prototype.hasOwnProperty.call(DIGEST_HOUSE_IDS_, key) ? DIGEST_HOUSE_IDS_[key] : null;
+}
+
+// ---- Shortage = below par (increment 33) — mirror of src/digest.js ----
+// A shortage is par_base SET and quantity_base strictly below it (the same meaning ezone-kitchen
+// uses — below-par, early warning — not "already at zero"). Counted 0 with a par → shortage;
+// counted 0 with no par → not; never counted → no row, never asked.
+function digestIsShortage_(quantityBase, parBase) {
+  if (parBase == null || parBase === '') return false;
+  var p = Number(parBase);
+  if (!isFinite(p)) return false;
+  // Blank base qty is "not counted in base terms", NOT a zero (Number('') is 0) — guard before coercing.
+  if (quantityBase == null || quantityBase === '') return false;
+  var q = Number(quantityBase);
+  if (!isFinite(q)) return false;
+  return q < p;
+}
+
+// One shortage's text, base unit included so the number reads — "שקיות אשפה: 40/200 unit (הערה)".
+function digestShortageLabel_(item, quantityBase, parBase, baseUnit, note) {
+  var unit = baseUnit ? ' ' + baseUnit : '';
+  var s = String(item == null ? '' : item) + ': ' + quantityBase + '/' + parBase + unit;
+  var n = String(note == null ? '' : note).trim();
+  if (n) s += ' (' + n + ')';
+  return s;
+}
+
+// Emit every house × week (gaps surface, never hide). bucketByKey: 'houseId|weekStart' →
+// {shortagesSummary, updatedAt}; missing keys emit a not-done row.
+function digestBuildWeeklyGrid_(bucketByKey, weeks, nowIso, doneLabel, notDoneLabel) {
+  var rows = [];
+  for (var h = 0; h < DIGEST_HOUSE_ID_ORDER_.length; h++) {
+    var house = DIGEST_HOUSE_ID_ORDER_[h];
+    for (var w = 0; w < (weeks || []).length; w++) {
+      var wk = weeks[w];
+      var b = bucketByKey ? bucketByKey[house + '|' + wk] : null;
+      if (b) rows.push([house, wk, doneLabel, b.shortagesSummary || '', b.updatedAt || nowIso]);
+      else rows.push([house, wk, notDoneLabel, '', nowIso]);
+    }
+  }
+  return rows;
+}
+
+// item_text → { par_base (number|null), base_unit (string) } from the InventoryItems catalog.
+function digestItemParMap_() {
+  var rows = readObjects_('InventoryItems');
+  var out = {};
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r || !r.item_text) continue;
+    var rawPar = r.par_base != null ? String(r.par_base).trim() : '';
+    var par = null;
+    if (rawPar !== '') { var p = Number(rawPar); if (isFinite(p) && p >= 0) par = p; }
+    var base = r.base_unit != null ? String(r.base_unit).trim() : '';
+    if (['kg', 'g', 'l', 'ml', 'unit'].indexOf(base) === -1) base = '';
+    out[String(r.item_text)] = { par_base: par, base_unit: base };
+  }
+  return out;
 }
 
 var DIGEST_EXCLUDED_STATUSES_ = ['סגור', 'לא מאושר'];
@@ -250,11 +312,15 @@ function buildOpenTicketRows_() {
 }
 
 /**
- * WeeklyCounts rows — always 4 houses × last 8 weeks (32 rows) so gaps surface as 'לא בוצעה'.
+ * WeeklyCounts rows — always 6 houses × last 8 weeks (48 rows) so gaps surface as 'לא בוצעה'.
  *
  * Increment 26: inventory is WEEKLY and rows carry `week_start`. status is 'בוצעה' whenever a
- * Logistics count row exists for that house+week; otherwise 'לא בוצעה'. shortagesSummary draws
- * from the Logistics count (טואלטיקה + חומרי ניקוי) — items at qty 0, with any note.
+ * Logistics count row exists for that house+week; otherwise 'לא בוצעה'.
+ *
+ * Increment 33: a shortage is BELOW PAR (par_base set on the item AND the latest counted
+ * quantity_base strictly below it) — the same meaning ezone-kitchen uses, so the word means one
+ * thing across the two apps Olga reads side by side. Only the LATEST count per house+week is
+ * compared (re-submissions supersede). shortagesSummary includes the base unit so the number reads.
  *
  * NOTE / TODO (food shortages): Logistics no longer counts מזון — ezone-kitchen owns food. Food
  * shortages will arrive in a LATER increment from the kitchen digest and be merged in here. This
@@ -267,49 +333,45 @@ function buildOpenTicketRows_() {
 function buildWeeklyCountRows_() {
   var weeks = digestRecentWeekStarts_(new Date(), DIGEST_WEEKS_);
   var nowIso = new Date().toISOString();
+  var parMap = digestItemParMap_();
 
   var counts = readObjects_('InventoryCounts');
-  var hasWeek = counts.length > 0 && Object.prototype.hasOwnProperty.call(counts[0], 'week_start');
-  var byKey = {}; // 'houseId|weekStart' -> { updatedAt, shortages[] }
 
-  if (hasWeek) {
-    counts.forEach(function (c) {
-      var house = digestHouseId_(c.house);
-      if (!house) return;
-      var wk = digestDateOnly_(c.week_start);
-      if (!wk) return;
-      var key = house + '|' + wk;
-      var bucket = byKey[key] || (byKey[key] = { updatedAt: '', shortages: [] });
-      var ts = digestIso_(c.counted_at);
-      if (ts && ts > bucket.updatedAt) bucket.updatedAt = ts;
-      // A shortage = an item counted at qty 0; carry any note alongside it.
-      var qtyZero = (c.quantity === 0 || String(c.quantity).trim() === '0');
-      if (qtyZero) {
-        var label = String(c.item || '');
-        var note = String(c.notes || '').trim();
-        bucket.shortages.push(note ? (label + ' (' + note + ')') : label);
-      }
-    });
-  }
-
-  var rows = [];
-  DIGEST_HOUSE_ID_ORDER_.forEach(function (house) {
-    weeks.forEach(function (wk) {
-      var bucket = hasWeek ? byKey[house + '|' + wk] : null;
-      if (bucket) {
-        // A count exists for this house/week → 'בוצעה', with any Logistics shortages.
-        rows.push([
-          house, wk, DIGEST_DONE_,
-          digestScrubMoney_(bucket.shortages.join('; ')),
-          bucket.updatedAt || nowIso,
-        ]);
-      } else {
-        // No count for this house/week → not-done, no shortages.
-        rows.push([house, wk, DIGEST_NOT_DONE_, '', nowIso]);
-      }
-    });
+  // Group every count row by houseId|weekStart (each mapped, dated row).
+  var rowsByKey = {};
+  counts.forEach(function (c) {
+    var house = digestHouseId_(c.house);
+    if (!house) return;
+    var wk = digestDateOnly_(c.week_start);
+    if (!wk) return;
+    var key = house + '|' + wk;
+    (rowsByKey[key] || (rowsByKey[key] = [])).push(c);
   });
-  return rows;
+
+  // For each house+week, compare ONLY the latest submission (by counted_at) against par.
+  var byKey = {};
+  Object.keys(rowsByKey).forEach(function (key) {
+    var group = rowsByKey[key];
+    var latestId = '', latestAt = '';
+    group.forEach(function (c) {
+      var ts = digestIso_(c.counted_at);
+      if (ts >= latestAt) { latestAt = ts; latestId = String(c.count_id); }
+    });
+    var updatedAt = '';
+    var shortages = [];
+    group.forEach(function (c) {
+      if (String(c.count_id) !== latestId) return;   // superseded submission — ignore
+      var ts = digestIso_(c.counted_at);
+      if (ts && ts > updatedAt) updatedAt = ts;
+      var par = parMap[String(c.item)];
+      if (par && par.par_base != null && digestIsShortage_(c.quantity_base, par.par_base)) {
+        shortages.push(digestShortageLabel_(c.item, c.quantity_base, par.par_base, par.base_unit, c.notes));
+      }
+    });
+    byKey[key] = { updatedAt: updatedAt, shortagesSummary: digestScrubMoney_(shortages.join('; ')) };
+  });
+
+  return digestBuildWeeklyGrid_(byKey, weeks, nowIso, DIGEST_DONE_, DIGEST_NOT_DONE_);
 }
 
 // ===== Trigger =====

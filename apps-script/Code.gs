@@ -793,6 +793,93 @@ function handleEditRequest_(p, actor) {
 var INVENTORY_CATEGORIES_ = ['טואלטיקה', 'חומרי ניקוי'];
 var INVENTORY_COUNTERS_ = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
 
+// ---- Units + par (increment 33) — mirror of src/inventory.js (server is the real gate) ----
+// Par is a FLAT weekly par per house. No occupancy scaling — Logistics has no occupancy source until
+// the Dashboard publishes one (a separate build-order item); par scaling is added THEN, not guessed.
+var BASE_UNITS_ = ['kg', 'g', 'l', 'ml', 'unit'];
+
+// "label:factor|label:factor|…" → [{label, factor}] (first = default), or null when empty/malformed
+// (empty label, missing colon, or factor not a finite number > 0). null = do not trust these units.
+function parseAllowedUnits_(spec) {
+  if (typeof spec !== 'string' || spec.trim() === '') return null;
+  var parts = spec.split('|');
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var seg = parts[i].trim();
+    if (seg === '') return null;
+    var idx = seg.lastIndexOf(':');
+    if (idx <= 0 || idx === seg.length - 1) return null;
+    var label = seg.slice(0, idx).trim();
+    var factor = Number(seg.slice(idx + 1).trim());
+    if (!label || !isFinite(factor) || factor <= 0) return null;
+    out.push({ label: label, factor: factor });
+  }
+  return out.length ? out : null;
+}
+
+// One InventoryItems row → validated unit descriptor. A row that declares no units reads as unitless
+// with no par (legacy/retired rows — not an error). A bad base_unit or malformed allowed_units → the
+// item is unitless AND logged (never coerced to a guessed default). par_base is a number ≥ 0 or null.
+function resolveItemUnit_(row) {
+  var rawBase = row && row.base_unit != null ? String(row.base_unit).trim() : '';
+  var rawAllowed = row && row.allowed_units != null ? String(row.allowed_units).trim() : '';
+  var rawPar = row && row.par_base != null ? String(row.par_base).trim() : '';
+  var item = row && row.item_text != null ? String(row.item_text) : '';
+
+  var parBase = null;
+  if (rawPar !== '') {
+    var p = Number(rawPar);
+    if (isFinite(p) && p >= 0) parBase = p;
+    else Logger.log('inventory: par_base is not a number ≥ 0 for "' + item + '" — treated as no par');
+  }
+
+  var unitless = { unitless: true, base_unit: null, units: [], defaultUnit: null, par_base: parBase };
+  if (rawBase === '' && rawAllowed === '') return unitless;
+
+  if (BASE_UNITS_.indexOf(rawBase) === -1) {
+    Logger.log('inventory: unknown base_unit "' + rawBase + '" for "' + item + '" — treated as unitless');
+    return unitless;
+  }
+  var units = parseAllowedUnits_(rawAllowed);
+  if (!units) {
+    Logger.log('inventory: malformed allowed_units "' + rawAllowed + '" for "' + item + '" — treated as unitless');
+    return unitless;
+  }
+  return { unitless: false, base_unit: rawBase, units: units, defaultUnit: units[0], par_base: parBase };
+}
+
+// Freeze the unit onto a count row: {unit_label, unit_factor}. Unitless item / unmatched label →
+// factor 1; a unit item with an unmatched/blank label falls back to the DEFAULT (first) option.
+function unitForCount_(desc, requestedLabel) {
+  if (!desc || desc.unitless || !desc.units || desc.units.length === 0) {
+    return { unit_label: '', unit_factor: 1 };
+  }
+  var chosen = null;
+  for (var i = 0; i < desc.units.length; i++) {
+    if (desc.units[i].label === requestedLabel) { chosen = desc.units[i]; break; }
+  }
+  if (!chosen) chosen = desc.defaultUnit || desc.units[0];
+  return { unit_label: chosen.label, unit_factor: chosen.factor };
+}
+
+function computeQuantityBase_(quantity, factor) {
+  var q = Number(quantity), f = Number(factor);
+  if (!isFinite(q) || !isFinite(f)) return null;
+  return q * f;
+}
+
+// item_text → resolved unit descriptor for the active catalog (used by submit + digest).
+function itemUnitMap_() {
+  var rows = readObjects_('InventoryItems');
+  var out = {};
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r || !r.item_text) continue;
+    out[String(r.item_text)] = resolveItemUnit_(r);
+  }
+  return out;
+}
+
 function isValidMonth_(m) {
   return typeof m === 'string' && /^20[2-9][0-9]-(0[1-9]|1[0-2])$/.test(m);
 }
@@ -827,6 +914,7 @@ function writeInventoryRows_(house, weekStartStr, countedBy, filled, auditAction
       counted_by: countedBy, counted_at: countedAt,
       category: it.category, item: it.item, quantity: it.quantity, notes: it.notes,
       week_start: weekStartStr,
+      unit_label: it.unit_label, unit_factor: it.unit_factor, quantity_base: it.quantity_base,
     };
     return headers.map(function (h) {
       return Object.prototype.hasOwnProperty.call(obj, h) && obj[h] != null ? obj[h] : '';
@@ -845,6 +933,11 @@ function handleSubmitInventory_(p, actor) {
   if (INVENTORY_COUNTERS_.indexOf(p.counted_by) === -1) return jsonOut_({ ok: false, error: 'Invalid counted_by' });
   if (!p.items || !p.items.length) return jsonOut_({ ok: false, error: 'Missing items' });
 
+  // Resolve units from the LIVE catalog: the factor is derived here (submit time) from the item's
+  // current allowed_units and then FROZEN onto the row — never re-derived later, because labels and
+  // factors are edited in the sheet. quantity stays exactly what the counter typed.
+  var unitMap = itemUnitMap_();
+
   var filled = [];
   for (var i = 0; i < p.items.length; i++) {
     var it = p.items[i];
@@ -858,7 +951,12 @@ function handleSubmitInventory_(p, actor) {
     if (isNaN(n) || !isFinite(n) || n < 0) {
       return jsonOut_({ ok: false, error: 'quantity must be a number ≥ 0 (' + it.item + ')' });
     }
-    filled.push({ category: it.category, item: it.item, quantity: n, notes: String(it.notes || '').slice(0, 500) });
+    var chosen = unitForCount_(unitMap[String(it.item)], it.unit_label);
+    filled.push({
+      category: it.category, item: it.item, quantity: n, notes: String(it.notes || '').slice(0, 500),
+      unit_label: chosen.unit_label, unit_factor: chosen.unit_factor,
+      quantity_base: computeQuantityBase_(n, chosen.unit_factor),
+    });
   }
   if (filled.length === 0) return jsonOut_({ ok: false, error: 'No quantities filled' });
 

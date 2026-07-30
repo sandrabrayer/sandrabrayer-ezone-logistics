@@ -12,11 +12,14 @@ coordinators repo.
 
 --- FROZEN CONTRACT ---
 
-House ids (v2): raanana-asher (רעננה) · ramot-hashavim (רמות השבים) ·
-caesarea-ofroni (קיסריה עפרוני) · caesarea-rehab (ריהאב). הפרדס and שדה אליעזר are
-excluded (pre-opening, no coordinator). Houses that do not map are omitted, never guessed.
-The house-id vocabulary is SHARED with ezone-kitchen so all E-Zone apps key houses on one
-namespace; ids apply at the digest boundary only (Logistics keys on the Hebrew name internally).
+House ids (v2, increment 33 — all six houses): ramot-hashavim (רמות השבים) ·
+raanana-asher (רעננה אשר) · raanana-hapardes (רעננה הפרדס) · caesarea-ofroni (עפרוני קיסריה) ·
+caesarea-rehab (ריהאב קיסריה) · sde-eliezer (שדה אליעזר). רעננה הפרדס and שדה אליעזר are
+pre-opening but already have activity, so they are included — a gap surfaces as 'לא בוצעה'
+rather than the house being invisible. Houses that do not map are omitted, never guessed. Display
+names are the canonical forms from HOUSE-IDS.md (the single source). The house-id vocabulary is
+SHARED with ezone-kitchen so all E-Zone apps key houses on one namespace; ids apply at the digest
+boundary only (Logistics keys on the Hebrew name internally).
 
 Tab OpenTickets — columns in this exact order:
   1 house            house id
@@ -31,14 +34,17 @@ Tab WeeklyCounts — columns in this exact order:
   1 house              house id
   2 weekStart          YYYY-MM-DD, Sunday (Israeli week)
   3 status             'בוצעה' / 'לא בוצעה'
-  4 shortagesSummary   text, scrubbed, "" when none; items at qty 0 + notes
+  4 shortagesSummary   text, scrubbed, "" when none; below-par items + base unit + notes
   5 updatedAt          ISO 8601 UTC
-Always emit 4 houses x last 8 weeks so gaps surface as 'לא בוצעה'.
+Always emit 6 houses x last 8 weeks (48 rows) so gaps surface as 'לא בוצעה'.
 
-NOTE: inventory is currently MONTHLY (increment 25); weekly counts are not
-built yet. Read an optional week_start column if present; until it exists,
-emit every row as 'לא בוצעה' with an empty shortagesSummary. Do not fabricate
-weekly data from monthly counts.
+Inventory is WEEKLY (shipped increment 26): each InventoryCounts row carries week_start
+(the Sunday of the Israeli week). status is 'בוצעה' whenever a Logistics count exists for
+that house+week. A shortage is BELOW PAR (increment 33): par_base set on the item AND the
+latest counted quantity_base strictly below it — the same meaning ezone-kitchen uses, not
+"already at zero". Only the latest submission per house+week is compared. If the week_start
+column is somehow absent (pre-migration sheet), every row emits 'לא בוצעה' with an empty
+shortagesSummary — we never fabricate weekly data.
 
 INVARIANTS: no financial fields, ever. Columns are append-only — never reorder
 or remove. Consumers read by header name, not index.

@@ -39,22 +39,27 @@ var HEADERS = {
     'linked_request_id', 'confirmed_by', 'confirmed_at',
   ],
   ChecklistItems: ['domain', 'item_text', 'active'],
-  InventoryItems: ['category', 'item_text', 'active'],
-  // week_start APPENDED at the end (increment 26). Existing sheets gain it via the append branch
-  // in setupSheet() — no reorder, no data loss.
+  // base_unit / allowed_units / par_base APPENDED at the end (increment 33) — units + par, all edited
+  // in the SHEET (no deploy). Existing sheets gain them via the append branch in setupSheet().
+  InventoryItems: ['category', 'item_text', 'active', 'base_unit', 'allowed_units', 'par_base'],
+  // week_start APPENDED at the end (increment 26); unit_label / unit_factor / quantity_base APPENDED
+  // (increment 33). Existing sheets gain them via the append branch in setupSheet() — no reorder, no
+  // data loss. quantity_base = quantity × unit_factor; the factor is frozen at count time.
   InventoryCounts: [
     'count_id', 'house', 'month', 'counted_by', 'counted_at',
     'category', 'item', 'quantity', 'notes',
     'week_start',
+    'unit_label', 'unit_factor', 'quantity_base',
   ],
 };
 
+// Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
 var SEED_HOUSES = [
-  ['רעננה',         'רמי', 'sharon',   'open'],
+  ['רעננה אשר',     'רמי', 'sharon',   'open'],
   ['רמות השבים',    'רמי', 'sharon',   'open'],
-  ['הפרדס',         'רמי', 'sharon',   'pre-opening'],
-  ['קיסריה עפרוני', 'צחי', 'caesarea', 'open'],
-  ['ריהאב',         'צחי', 'caesarea', 'open'],
+  ['רעננה הפרדס',   'רמי', 'sharon',   'pre-opening'],
+  ['עפרוני קיסריה', 'צחי', 'caesarea', 'open'],
+  ['ריהאב קיסריה',  'צחי', 'caesarea', 'open'],
   ['שדה אליעזר',    'צחי', 'north',    'pre-opening'],
 ];
 
@@ -81,9 +86,9 @@ var SEED_USERS = [
   ['סנדרה', 'ceo',         '',               'TRUE', ''],
   ['רמי',   'maintenance', 'sharon',         'TRUE', ''],
   ['צחי',   'maintenance', 'caesarea,north', 'TRUE', ''],
-  ['שירה',  'coordinator', 'קיסריה עפרוני',   'TRUE', ''],
-  ['יעקב',  'coordinator', 'ריהאב',           'TRUE', ''],
-  ['אורן',  'coordinator', 'רעננה',           'TRUE', ''],
+  ['שירה',  'coordinator', 'עפרוני קיסריה',   'TRUE', ''],
+  ['יעקב',  'coordinator', 'ריהאב קיסריה',    'TRUE', ''],
+  ['אורן',  'coordinator', 'רעננה אשר',       'TRUE', ''],
   ['אביב',  'coordinator', 'רמות השבים',      'TRUE', ''],
 ];
 
@@ -107,38 +112,45 @@ var SEED_CHECKLIST = [
 ];
 
 // Inventory catalog seed — edit in the Sheet, no code change needed (active=FALSE hides an item,
-// new rows extend the list). Increment 26: the מזון rows are seeded active=FALSE — food moved to
-// ezone-kitchen, but the rows stay so increment-25 historical counts still resolve. Do NOT delete
-// them (setupSheet only writes seeds on a FRESH sheet; this preserves the retired-but-kept intent).
+// new rows extend the list). Columns: category, item_text, active, base_unit, allowed_units, par_base.
+// base_unit / allowed_units / par_base are STARTING POINTS (increment 33) — labels, options and par
+// are all edited in the sheet afterward with NO deploy. par_base is a flat weekly par per house.
+// Increment 26: the מזון rows are seeded active=FALSE — food moved to ezone-kitchen, but the rows
+// stay so increment-25 historical counts still resolve. Do NOT delete them (setupSheet only writes
+// seeds on a FRESH sheet; this preserves the retired-but-kept intent). Retired rows carry no units.
+// Increment 33 SPLIT: 'אבקת/ג׳ל כביסה' retired → אבקת כביסה (kg) + ג׳ל כביסה (l); no rows to migrate.
+// Every row has the SAME width (6) — seedIfEmpty_ writes a rectangular range.
 var SEED_INVENTORY_ITEMS = [
-  ['טואלטיקה', 'נייר טואלט', 'TRUE'],
-  ['טואלטיקה', 'מגבות נייר', 'TRUE'],
-  ['טואלטיקה', 'טישו', 'TRUE'],
-  ['טואלטיקה', 'סבון ידיים', 'TRUE'],
-  ['טואלטיקה', 'שמפו', 'TRUE'],
-  ['טואלטיקה', 'סבון רחצה', 'TRUE'],
-  ['טואלטיקה', 'משחת שיניים', 'TRUE'],
-  ['טואלטיקה', 'מברשות שיניים', 'TRUE'],
-  ['חומרי ניקוי', 'אקונומיקה', 'TRUE'],
-  ['חומרי ניקוי', 'נוזל רצפות', 'TRUE'],
-  ['חומרי ניקוי', 'נוזל כלים', 'TRUE'],
-  ['חומרי ניקוי', 'ספוגים', 'TRUE'],
-  ['חומרי ניקוי', 'מטליות', 'TRUE'],
-  ['חומרי ניקוי', 'שקיות אשפה', 'TRUE'],
-  ['חומרי ניקוי', 'תרסיס חיטוי', 'TRUE'],
-  ['חומרי ניקוי', 'אבקת/ג׳ל כביסה', 'TRUE'],
-  ['חומרי ניקוי', 'מרכך כביסה', 'TRUE'],
-  // מזון RETIRED (increment 26) — kept as active=FALSE so increment-25 history resolves.
-  ['מזון', 'אורז', 'FALSE'],
-  ['מזון', 'פסטה', 'FALSE'],
-  ['מזון', 'קמח', 'FALSE'],
-  ['מזון', 'סוכר', 'FALSE'],
-  ['מזון', 'מלח', 'FALSE'],
-  ['מזון', 'שמן', 'FALSE'],
-  ['מזון', 'קפה', 'FALSE'],
-  ['מזון', 'תה', 'FALSE'],
-  ['מזון', 'שימורים', 'FALSE'],
-  ['מזון', 'דגני בוקר', 'FALSE'],
+  ['טואלטיקה', 'נייר טואלט', 'TRUE', 'unit', 'גליל:1|חבילה 8:8|חבילה 24:24', 48],
+  ['טואלטיקה', 'מגבות נייר', 'TRUE', 'unit', 'גליל:1|חבילה 4:4', 24],
+  ['טואלטיקה', 'טישו', 'TRUE', 'unit', 'קופסה:1|חבילה 6:6', 12],
+  ['טואלטיקה', 'סבון ידיים', 'TRUE', 'ml', 'בקבוק 500מל:500|ליטר:1000|גלון 4ל:4000', 5000],
+  ['טואלטיקה', 'שמפו', 'TRUE', 'ml', 'בקבוק 750מל:750|ליטר:1000|גלון 4ל:4000', 5000],
+  ['טואלטיקה', 'סבון רחצה', 'TRUE', 'unit', "יח':1|חבילה 6:6", 20],
+  ['טואלטיקה', 'משחת שיניים', 'TRUE', 'unit', "יח':1", 10],
+  ['טואלטיקה', 'מברשות שיניים', 'TRUE', 'unit', "יח':1|חבילה 4:4", 10],
+  ['חומרי ניקוי', 'אקונומיקה', 'TRUE', 'l', 'בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4', 10],
+  ['חומרי ניקוי', 'נוזל רצפות', 'TRUE', 'l', 'בקבוק 1ל:1|בקבוק 2ל:2|גלון 4ל:4', 10],
+  ['חומרי ניקוי', 'נוזל כלים', 'TRUE', 'l', 'בקבוק 750מל:0.75|בקבוק 1ל:1|גלון 4ל:4', 6],
+  ['חומרי ניקוי', 'ספוגים', 'TRUE', 'unit', "יח':1|חבילה 10:10", 20],
+  ['חומרי ניקוי', 'מטליות', 'TRUE', 'unit', "יח':1|חבילה 10:10", 20],
+  ['חומרי ניקוי', 'שקיות אשפה', 'TRUE', 'unit', "גליל 20:20|גליל 50:50|יח':1", 200],
+  ['חומרי ניקוי', 'תרסיס חיטוי', 'TRUE', 'unit', 'בקבוק:1|חבילה 3:3', 6],
+  ['חומרי ניקוי', 'אבקת/ג׳ל כביסה', 'FALSE', '', '', ''],
+  ['חומרי ניקוי', 'אבקת כביסה', 'TRUE', 'kg', 'שקית 5 ק"ג:5|שקית 10 ק"ג:10', 10],
+  ['חומרי ניקוי', 'ג׳ל כביסה', 'TRUE', 'l', 'בקבוק 3ל:3|בקבוק 5ל:5', 5],
+  ['חומרי ניקוי', 'מרכך כביסה', 'TRUE', 'l', 'בקבוק 1ל:1|בקבוק 2ל:2|בקבוק 4ל:4', 5],
+  // מזון RETIRED (increment 26) — active=FALSE, no units (never counted).
+  ['מזון', 'אורז', 'FALSE', '', '', ''],
+  ['מזון', 'פסטה', 'FALSE', '', '', ''],
+  ['מזון', 'קמח', 'FALSE', '', '', ''],
+  ['מזון', 'סוכר', 'FALSE', '', '', ''],
+  ['מזון', 'מלח', 'FALSE', '', '', ''],
+  ['מזון', 'שמן', 'FALSE', '', '', ''],
+  ['מזון', 'קפה', 'FALSE', '', '', ''],
+  ['מזון', 'תה', 'FALSE', '', '', ''],
+  ['מזון', 'שימורים', 'FALSE', '', '', ''],
+  ['מזון', 'דגני בוקר', 'FALSE', '', '', ''],
 ];
 
 function setupSheet() {
