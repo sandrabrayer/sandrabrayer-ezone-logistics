@@ -212,6 +212,12 @@ export const SEED_CONFIG = [
   // Sheet with NO deploy. due_at = created_at + days-for-urgency. A malformed spec → no due date
   // (logged), never a silently wrong default.
   { key: 'sla_days', value: 'חירום:1|דחוף:3|רגיל:14' },
+  // Foreign digest spreadsheet ids the /management screen reads READ-ONLY (never written). Ids live
+  // in Config so they are never hardcoded in code; a BLANK value renders that panel "לא זמין".
+  // kitchen_digest_id seeds the known ezone-kitchen digest (tab FoodShortages). coordinators_digest_id
+  // is blank — no coordinators-PUBLISHED digest exists to read (this app only PUBLISHES one for them).
+  { key: 'kitchen_digest_id', value: '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE' },
+  { key: 'coordinators_digest_id', value: '' },
 ];
 
 // ---- Roles + user seed (increment 30) ----

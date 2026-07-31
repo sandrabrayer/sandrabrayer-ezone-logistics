@@ -58,6 +58,13 @@ test('sla.js MIRROR:sla matches apps-script/Code.gs (increment 36)', () => {
   assert.equal(a, b);
 });
 
+test('digest-consume.js MIRROR:digestconsume matches apps-script/Code.gs (kitchen digest read)', () => {
+  const a = normalize(readBlock('src/digest-consume.js', 'digestconsume'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'digestconsume'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script

@@ -789,13 +789,123 @@ function handleSetBlocked_(p, actor) {
   return jsonOut_({ ok: true, blocked: block });
 }
 
+// === MIRROR:digestconsume START ===
+// Header aliases for the kitchen FoodShortages tab — read by NAME so column order never matters and
+// minor naming differences are tolerated. A row is an object keyed by its header.
+var FOOD_HOUSE_KEYS = ['house', 'house_id', 'houseId', 'houseID'];
+var FOOD_ITEM_KEYS = ['item', 'item_text', 'itemName', 'product', 'name'];
+
+// The first candidate header actually present on the row, or '' if none are.
+function pickHeader(row, candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    if (row && Object.prototype.hasOwnProperty.call(row, candidates[i])) return candidates[i];
+  }
+  return '';
+}
+
+// Shape FoodShortages rows → { available, reason?, houses:[{id,house,count,items}] }.
+//   rows     : array of header-keyed objects (empty array → available with no houses; NOT an error).
+//   idToName : canonical house id → city-first Hebrew display name (HOUSE-IDS.md). A row whose house
+//              id is not in this map is OMITTED (never guessed).
+// Missing the house OR item header entirely → available:false (we will not fabricate a shape or a 0).
+function summarizeFoodShortages(rows, idToName) {
+  if (!rows || rows.length === 0) return { available: true, houses: [] };
+  var houseKey = pickHeader(rows[0], FOOD_HOUSE_KEYS);
+  var itemKey = pickHeader(rows[0], FOOD_ITEM_KEYS);
+  if (!houseKey || !itemKey) return { available: false, reason: 'חסרות כותרות מזוהות בדייג׳סט המטבח' };
+  var map = idToName || {};
+  var byId = {};
+  var order = [];
+  for (var r = 0; r < rows.length; r++) {
+    var id = String(rows[r][houseKey] == null ? '' : rows[r][houseKey]).replace(/^\s+|\s+$/g, '');
+    if (!id || !Object.prototype.hasOwnProperty.call(map, id)) continue; // unmapped house → omit
+    var item = String(rows[r][itemKey] == null ? '' : rows[r][itemKey]).replace(/^\s+|\s+$/g, '');
+    if (!item) continue;
+    if (!Object.prototype.hasOwnProperty.call(byId, id)) { byId[id] = { id: id, house: map[id], count: 0, items: [] }; order.push(id); }
+    byId[id].count++;
+    byId[id].items.push(item);
+  }
+  order.sort(function (a, b) { var x = byId[a].house, y = byId[b].house; return x < y ? -1 : x > y ? 1 : 0; });
+  var out = [];
+  for (var i = 0; i < order.length; i++) out.push(byId[order[i]]);
+  return { available: true, houses: out };
+}
+
+// Turn a read context into a panel. Keeps every "unavailable" reason in ONE pure place so the Code.gs
+// side only does the SpreadsheetApp read and hands the outcome here.
+//   ctx: { configured, readError, missingTab, rows }
+function foodShortagesPanel(ctx, idToName) {
+  var c = ctx || {};
+  if (!c.configured) return { available: false, reason: 'לא הוגדר מזהה דייג׳סט מטבח (Config: kitchen_digest_id)' };
+  if (c.readError) return { available: false, reason: 'שגיאת קריאה מדייג׳סט המטבח — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' };
+  if (c.missingTab) return { available: false, reason: 'הטאב FoodShortages לא נמצא בדייג׳סט המטבח' };
+  return summarizeFoodShortages(c.rows || [], idToName);
+}
+// === MIRROR:digestconsume END ===
+
+// Read an arbitrary (possibly FOREIGN, read-only) sheet into header-keyed objects. By-name reads only.
+function objectsFromSheet_(sheet) {
+  var range = sheet.getDataRange().getValues();
+  if (range.length < 2) return [];
+  var headers = range[0];
+  var out = [];
+  for (var r = 1; r < range.length; r++) {
+    var row = range[r];
+    var obj = {};
+    for (var c = 0; c < headers.length; c++) obj[headers[c]] = row[c];
+    out.push(obj);
+  }
+  return out;
+}
+
+// Canonical house id → city-first Hebrew display name, derived from the digest house map (HOUSE-IDS.md).
+function canonicalHouseIdToName_() {
+  var out = {};
+  for (var name in DIGEST_HOUSE_IDS_) {
+    if (Object.prototype.hasOwnProperty.call(DIGEST_HOUSE_IDS_, name)) out[DIGEST_HOUSE_IDS_[name]] = name;
+  }
+  return out;
+}
+
+// READ-ONLY consumption of the ezone-kitchen digest (tab FoodShortages). Cached ~5 min so the screen
+// doesn't hammer the foreign sheet. Any failure (no id, no access, missing tab, missing headers) yields
+// an "unavailable" panel — never a crash, never a fabricated 0. Never writes anything.
+function readKitchenShortages_() {
+  var CK = 'mgmt_kitchen_food_v1';
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache) { var hit = cache.get(CK); if (hit) { try { return JSON.parse(hit); } catch (e2) {} } }
+
+  var id = String(getConfig('kitchen_digest_id') || '').replace(/^\s+|\s+$/g, '');
+  var ctx = { configured: id !== '' };
+  if (ctx.configured) {
+    try {
+      var ss = SpreadsheetApp.openById(id);
+      var sheet = ss.getSheetByName('FoodShortages');
+      if (!sheet) ctx.missingTab = true;
+      else ctx.rows = objectsFromSheet_(sheet);
+    } catch (e) {
+      ctx.readError = true;
+    }
+  }
+  var panel = foodShortagesPanel(ctx, canonicalHouseIdToName_());
+  if (cache) { try { cache.put(CK, JSON.stringify(panel), 300); } catch (e3) {} }
+  return panel;
+}
+
+// Coordinators digest: no coordinators-PUBLISHED digest exists to read (this app only PUBLISHES one
+// FOR the coordinators app). Reported "unavailable" with what is missing — never invented.
+function readCoordinatorsShortages_() {
+  var id = String(getConfig('coordinators_digest_id') || '').replace(/^\s+|\s+$/g, '');
+  if (!id) return { available: false, reason: 'אין דייג׳סט רכזים מתפרסם לקריאה (Config: coordinators_digest_id ריק)' };
+  return { available: false, reason: 'קריאת דייג׳סט רכזים טרם מומשה (מבנה טאב לא מוגדר)' };
+}
+
 // ===== /management (increment 37) — exec network-management view for ops_manager + ceo =====
 // Role-gated HERE (not UI-only): a request from any other role — including field_ops — is refused
 // 403 before any data is read. Served as a POST so the token identity is verified (doGet is not
-// identity-checked). This handler READS Logistics-owned sheets only and returns them raw; the screen
-// aggregates them in the browser (mirror of src/management.js). It writes nothing, and reads nothing
-// from another app — the kitchen/coordinator digests are NOT wired here (see src/management.js
-// UNAVAILABLE_CAPABILITIES for what that would require).
+// identity-checked). Reads Logistics-owned sheets, PLUS the ezone-kitchen digest READ-ONLY (never
+// written) for the food-shortages panel. It writes nothing to any app.
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
   return jsonOut_({
@@ -807,6 +917,8 @@ function handleManagementData_(p, actor) {
       houses: getHouses(),
       inventoryItems: readObjects_('InventoryItems'),
       inventoryCounts: readObjects_('InventoryCounts'),
+      kitchen: readKitchenShortages_(),
+      coordinators: readCoordinatorsShortages_(),
     },
   });
 }

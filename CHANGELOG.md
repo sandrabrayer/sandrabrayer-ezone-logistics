@@ -3,6 +3,44 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — /management reads the kitchen digest (read-only) for food shortages
+
+The /management screen (ops_manager + ceo) previously marked food/kitchen data as "לא זמין" because
+this repo had no digest-read wiring. It now **reads the ezone-kitchen digest read-only** and shows a
+live **food-shortages-per-house** panel, per DIGEST-CONTRACT.md discipline.
+
+**Coordinators digest:** none exists to read — every "coordinators digest" in this repo is the digest
+this app *publishes for* the coordinators app, not one they publish for us. So this wires **kitchen
+only**; the coordinators panel stays "לא זמין" with a note (and a blank `coordinators_digest_id` Config
+key reserved for if one is ever published).
+
+**Config-driven ids (never hardcoded):** new Config keys `kitchen_digest_id` (seeded with the known
+kitchen digest id) and `coordinators_digest_id` (blank). A blank id renders that panel "לא זמין".
+
+**Read path (`apps-script/Code.gs`, inside the `canManage`-gated `managementData` handler):**
+`SpreadsheetApp.openById(<config id>)` → tab **FoodShortages** → rows read **by header name** →
+shaped per house. Cached in `CacheService` for ~5 min so the screen never hammers the foreign sheet.
+Every failure mode — no id, no access, missing tab, missing headers — renders **"לא זמין — …"**, never
+0 and never a crash of the rest of the screen. It only READS; it never writes into another app.
+
+**Pure shaping (`src/digest-consume.js`, mirrored into Code.gs under `MIRROR:digestconsume`, drift-
+guarded):** `summarizeFoodShortages` reads by header name (order-independent), **omits any house whose
+id isn't a canonical HOUSE-IDS.md id** (never guessed), returns available-but-empty for an empty tab,
+and "unavailable" for a missing header; `foodShortagesPanel` maps a read context (blank id / read error
+/ missing tab / rows) to the panel. Houses are keyed by canonical id and displayed with the **city-first
+Hebrew names**. No financial fields are read or emitted.
+
+**Tests (330 pass):** header-name mapping robust to reordered columns; house-column/item-column aliases;
+unmapped house omitted; empty tab → available-empty; missing header → unavailable; blank config id →
+unavailable; read-failure → unavailable (not zero); the `MIRROR:digestconsume` drift guard; the new
+Config keys in the schema⇄setup mirror; role gating unchanged (managementData still 403s for
+field_ops/maintenance/coordinator).
+
+> **⚠ After this merge:** re-run **`setupSheet()`** once to upsert the two new Config keys
+> (`kitchen_digest_id`, `coordinators_digest_id`). **Grant the Logistics Apps Script account VIEWER
+> access to the kitchen spreadsheet** (id `1sJ62…zfE`) — until then the panel reads "לא זמין — שגיאת
+> קריאה" (loud, never zero). No sheet-column changes; the kitchen digest is read, never written.
+
 ## [Unreleased] — feature — sign-out (התנתקות) on every page
 
 A sign-out control is now shown on **every** served page (all 7 routes). It's injected by the auth
