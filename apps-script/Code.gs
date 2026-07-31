@@ -545,6 +545,8 @@ function buildNewRequest_(input) {
     // Preventive maintenance (תחזוקה מונעת). Blank for a user-filed request; set by
     // createMaintenanceRequest_ for a generated one.
     plan_id: '',
+    // Compliance (עמידה ברגולציה). Blank for a user-filed request; set by createComplianceRequest_.
+    compliance_id: '',
   };
 }
 
@@ -1287,6 +1289,176 @@ function planAdherence(plans, maps, openHouseIds, nowDay, log) {
 }
 // === MIRROR:maintenance END ===
 
+// === MIRROR:compliance START ===
+// A cell → a NON-NEGATIVE integer, or null when blank / non-numeric / negative / fractional (so a bad
+// reminder_days never coerces to a silent value — the caller falls back to the Config default).
+function complianceNum(v) {
+  if (v == null) return null;
+  var s = String(v).replace(/^\s+|\s+$/g, '');
+  if (s === '') return null;
+  var n = Number(s);
+  if (!isFinite(n) || n < 0 || Math.floor(n) !== n) return null;
+  return n;
+}
+
+// Derived status of ONE item as of nowDay ('YYYY-MM-DD'): { expires, daysToExpiry, status, expiring,
+// expired }. reminderDays is the effective window (row override or Config default).
+//   - daysToExpiry < 0          → 'פג תוקף'  (expired)   — past the expiry date.
+//   - 0 <= daysToExpiry <= win  → 'פג בקרוב' (expiring)  — inside the reminder window (0 = expires today).
+//   - else                      → 'בתוקף'    (valid).
+function complianceStatus(expiresAt, reminderDays, nowDay) {
+  var expires = maintDateOnly(expiresAt);
+  var days = maintDaysBetween(nowDay, expires);
+  if (expires === '' || days == null) return { expires: '', daysToExpiry: null, status: 'לא ידוע', expiring: false, expired: false };
+  if (days < 0) return { expires: expires, daysToExpiry: days, status: 'פג תוקף', expiring: false, expired: true };
+  if (days <= reminderDays) return { expires: expires, daysToExpiry: days, status: 'פג בקרוב', expiring: true, expired: false };
+  return { expires: expires, daysToExpiry: days, status: 'בתוקף', expiring: false, expired: false };
+}
+
+// Parse + validate one Compliance row → normalized object, or null (malformed → logged, skipped).
+// idToName is the canonical-id → name map; house must be 'all' or one of its keys. reminder_days blank
+// → defaultReminderDays; a NON-blank but invalid reminder_days is logged and also falls back to it.
+function parseComplianceRow(row, idToName, defaultReminderDays, log) {
+  var idMap = idToName || {};
+  var id = String(row && row.id != null ? row.id : '').replace(/^\s+|\s+$/g, '');
+  var house = String(row && row.house != null ? row.house : '').replace(/^\s+|\s+$/g, '');
+  var item = String(row && row.item != null ? row.item : '').replace(/^\s+|\s+$/g, '');
+  if (!id) { if (log) log('compliance: row missing id — skipped'); return null; }
+  if (!item) { if (log) log('compliance: item "' + id + '" missing name — skipped'); return null; }
+  var expires = maintDateOnly(row ? row.expires_at : '');
+  if (!expires) { if (log) log('compliance: item "' + id + '" blank/unparseable expires_at — skipped'); return null; }
+  if (house !== 'all' && !Object.prototype.hasOwnProperty.call(idMap, house)) {
+    if (log) log('compliance: item "' + id + '" unknown house "' + house + '" — skipped');
+    return null;
+  }
+  var rawReminder = String(row && row.reminder_days != null ? row.reminder_days : '').replace(/^\s+|\s+$/g, '');
+  var reminder = complianceNum(rawReminder);
+  if (reminder == null) {
+    if (rawReminder !== '' && log) log('compliance: item "' + id + '" bad reminder_days "' + rawReminder + '" — using default');
+    reminder = defaultReminderDays;
+  }
+  return {
+    id: id, house: house, item: item, expires: expires, reminderDays: reminder,
+    docUrl: String(row && row.doc_url != null ? row.doc_url : '').replace(/^\s+|\s+$/g, ''),
+    notes: String(row && row.notes != null ? row.notes : ''),
+    active: maintActive(row ? row.active : '')
+  };
+}
+
+// The request-input for a generated renewal. A NORMAL request — it flows through the same approval
+// chain + SLA as any request. urgency is דחוף when the item is already expired, else רגיל.
+// compliance_id links it back to its Compliance row.
+function complianceRequestInput(target) {
+  return {
+    house: target.houseName,
+    category: 'תיקון',
+    urgency: target.expired ? 'דחוף' : 'רגיל',
+    description: 'חידוש: ' + target.item + ' — ' + target.houseName + ' (עמידה ברגולציה)',
+    location_in_house: '',
+    estimated_cost: '',
+    created_by: 'מערכת - רגולציה',
+    compliance_id: target.complianceId
+  };
+}
+
+// Statuses that mean a generated renewal request is CLOSED-OUT and no longer blocks a re-generation.
+var COMPLIANCE_TERMINAL_ = { 'הושלם': 1, 'סגור': 1, 'לא מאושר': 1 };
+
+// Decide what to generate this pass. Returns { toCreate:[{complianceId,houseId,houseName,item,expired}],
+// skippedDuplicate, skippedMalformed, skippedInactive }. An item generates when it is expiring OR
+// expired (a valid item does not). It is SKIPPED when a non-terminal (still-open) request already
+// exists for the same compliance_id + house — no duplicate open request is ever created. maps:
+// { idToName }. defaultReminderDays is the Config default for rows that leave reminder_days blank.
+function complianceGenerationPlan(items, requests, openHouseIds, maps, defaultReminderDays, nowDay, log) {
+  var idToName = (maps && maps.idToName) || {};
+  var openKeys = {};
+  for (var r = 0; r < (requests || []).length; r++) {
+    var req = requests[r];
+    var cid = String(req && req.compliance_id != null ? req.compliance_id : '').replace(/^\s+|\s+$/g, '');
+    if (!cid) continue;
+    var st = String(req && req.status != null ? req.status : '').replace(/^\s+|\s+$/g, '');
+    if (Object.prototype.hasOwnProperty.call(COMPLIANCE_TERMINAL_, st)) continue;
+    var hn = String(req && req.house != null ? req.house : '').replace(/^\s+|\s+$/g, '');
+    openKeys[cid + '|' + hn] = true;
+  }
+  var toCreate = [], skippedDuplicate = 0, skippedMalformed = 0, skippedInactive = 0;
+  for (var i = 0; i < (items || []).length; i++) {
+    var it = parseComplianceRow(items[i], idToName, defaultReminderDays, log);
+    if (!it) { skippedMalformed++; continue; }
+    if (!it.active) { skippedInactive++; continue; }
+    var status = complianceStatus(it.expires, it.reminderDays, nowDay);
+    if (!status.expiring && !status.expired) continue;
+    var houseIds = expandHouses(it.house, openHouseIds);
+    for (var h = 0; h < houseIds.length; h++) {
+      var houseId = houseIds[h];
+      var houseName = idToName[houseId] || houseId;
+      var key = it.id + '|' + houseName;
+      if (openKeys[key]) { skippedDuplicate++; continue; }
+      toCreate.push({ complianceId: it.id, houseId: houseId, houseName: houseName, item: it.item, expired: status.expired });
+      openKeys[key] = true; // guard two rows for the same compliance+house within one pass
+    }
+  }
+  return {
+    toCreate: toCreate, skippedDuplicate: skippedDuplicate,
+    skippedMalformed: skippedMalformed, skippedInactive: skippedInactive
+  };
+}
+
+// Compliance-adherence panel data: per-house items (worst-first: expired first, then soonest-to-expire)
+// as of nowDay, plus a skipped (malformed) count. Open houses are ALWAYS listed (a house with no active
+// compliance row → defined:false → "not defined", never a fabricated 0). maps: { idToName }.
+function complianceAdherence(items, maps, openHouseIds, defaultReminderDays, nowDay, log) {
+  var idToName = (maps && maps.idToName) || {};
+  var openIds = openHouseIds || [];
+  var itemsByHouse = {};
+  var skipped = 0;
+  function ensure(id) {
+    if (!Object.prototype.hasOwnProperty.call(itemsByHouse, id)) itemsByHouse[id] = [];
+    return itemsByHouse[id];
+  }
+  for (var o = 0; o < openIds.length; o++) ensure(openIds[o]);
+  for (var i = 0; i < (items || []).length; i++) {
+    var it = parseComplianceRow(items[i], idToName, defaultReminderDays, log);
+    if (!it) { skipped++; continue; }
+    if (!it.active) continue;
+    var status = complianceStatus(it.expires, it.reminderDays, nowDay);
+    var houseIds = expandHouses(it.house, openIds);
+    for (var h = 0; h < houseIds.length; h++) {
+      ensure(houseIds[h]).push({
+        item: it.item, expires: it.expires, reminderDays: it.reminderDays, docUrl: it.docUrl,
+        daysToExpiry: status.daysToExpiry, status: status.status, expiring: status.expiring, expired: status.expired
+      });
+    }
+  }
+  var houses = [];
+  for (var id in itemsByHouse) {
+    if (!Object.prototype.hasOwnProperty.call(itemsByHouse, id)) continue;
+    var list = itemsByHouse[id];
+    list.sort(function (a, b) {
+      var ad = a.daysToExpiry == null ? 1e9 : a.daysToExpiry;
+      var bd = b.daysToExpiry == null ? 1e9 : b.daysToExpiry;
+      if (ad !== bd) return ad - bd; // most-negative (expired worst) first, then soonest
+      return a.item < b.item ? -1 : a.item > b.item ? 1 : 0;
+    });
+    var expiredCount = 0, expiringCount = 0;
+    for (var t = 0; t < list.length; t++) {
+      if (list[t].expired) expiredCount++;
+      else if (list[t].expiring) expiringCount++;
+    }
+    houses.push({
+      id: id, house: idToName[id] || id, defined: list.length > 0,
+      items: list, expiredCount: expiredCount, expiringCount: expiringCount
+    });
+  }
+  houses.sort(function (a, b) {
+    if (a.expiredCount !== b.expiredCount) return b.expiredCount - a.expiredCount;
+    if (a.expiringCount !== b.expiringCount) return b.expiringCount - a.expiringCount;
+    return a.house < b.house ? -1 : a.house > b.house ? 1 : 0;
+  });
+  return { houses: houses, skipped: skipped };
+}
+// === MIRROR:compliance END ===
+
 // ===== Preventive maintenance (תחזוקה מונעת) — Apps-Script wiring around the pure block above =====
 
 // Canonical ids of the houses that are OPEN (status 'open'). 'all' plans + adherence expand to these.
@@ -1321,21 +1493,35 @@ function createMaintenanceRequest_(target) {
   return row.id;
 }
 
-// The scheduled scan: find due plan tasks and generate their requests (idempotently — never a second
-// OPEN request for the same plan+house). Time-based trigger entry point (see installMaintenanceTrigger).
+// The scheduled scan: find due preventive-maintenance tasks AND due/expired compliance items and
+// generate their requests (idempotently — never a second OPEN request for the same plan/compliance +
+// house). Time-based trigger entry point (see installMaintenanceTrigger). The compliance pass rides on
+// this SAME daily trigger — there is no separate compliance trigger to install.
 function runMaintenanceScan() {
   var lock = null;
   try { lock = LockService.getScriptLock(); lock.waitLock(30000); } catch (e) { return; }
   try {
-    var plans = readObjects_('MaintenancePlan');
-    var requests = getRequests();
+    var openIds = openHouseIds_();
     var maps = { idToName: canonicalHouseIdToName_() };
-    var plan = planGenerationPlan(plans, requests, openHouseIds_(), maps, todayYmd_(),
-      function (m) { Logger.log(m); });
+    var today = todayYmd_();
+    var requests = getRequests();
+    var log = function (m) { Logger.log(m); };
+
+    // Preventive maintenance (תחזוקה מונעת)
+    var plan = planGenerationPlan(readObjects_('MaintenancePlan'), requests, openIds, maps, today, log);
     for (var i = 0; i < plan.toCreate.length; i++) createMaintenanceRequest_(plan.toCreate[i]);
-    if (plan.toCreate.length) rebuildDigest();
-    Logger.log('maintenance scan: created ' + plan.toCreate.length + ', dup ' + plan.skippedDuplicate +
-      ', malformed ' + plan.skippedMalformed + ', inactive ' + plan.skippedInactive);
+
+    // Compliance (עמידה ברגולציה) — same dedup snapshot of requests; a maintenance request just created
+    // carries plan_id (not compliance_id) so it never affects this pass.
+    var comp = complianceGenerationPlan(readObjects_('Compliance'), requests, openIds, maps,
+      complianceDefaultReminder_(), today, log);
+    for (var j = 0; j < comp.toCreate.length; j++) createComplianceRequest_(comp.toCreate[j]);
+
+    if (plan.toCreate.length || comp.toCreate.length) rebuildDigest();
+    Logger.log('scan: maintenance created ' + plan.toCreate.length + ' (dup ' + plan.skippedDuplicate +
+      ', malformed ' + plan.skippedMalformed + ', inactive ' + plan.skippedInactive + '); compliance created ' +
+      comp.toCreate.length + ' (dup ' + comp.skippedDuplicate + ', malformed ' + comp.skippedMalformed +
+      ', inactive ' + comp.skippedInactive + ')');
   } finally {
     if (lock) { try { lock.releaseLock(); } catch (e2) {} }
   }
@@ -1376,6 +1562,46 @@ function readMaintenanceAdherence_() {
   var maps = { idToName: canonicalHouseIdToName_() };
   return planAdherence(readObjects_('MaintenancePlan'), maps, openHouseIds_(), todayYmd_(),
     function (m) { Logger.log(m); });
+}
+
+// ===== Compliance (עמידה ברגולציה) — Apps-Script wiring around the MIRROR:compliance block =====
+
+// The seeded default reminder window (days). Used ONLY as the fallback when compliance_reminder_days is
+// missing/malformed — it is the documented seed value, not a silent invented default.
+var COMPLIANCE_DEFAULT_REMINDER_ = 30;
+
+// Effective Config default reminder window: compliance_reminder_days when valid, else the seed (logged).
+function complianceDefaultReminder_() {
+  var raw = getConfig('compliance_reminder_days');
+  var n = complianceNum(raw);
+  if (n != null) return n;
+  if (raw != null && String(raw).replace(/^\s+|\s+$/g, '') !== '') {
+    Logger.log('compliance: bad compliance_reminder_days "' + raw + '" — using seed default ' + COMPLIANCE_DEFAULT_REMINDER_);
+  }
+  return COMPLIANCE_DEFAULT_REMINDER_;
+}
+
+// Create ONE renewal request from a compliance generation target. Same pipeline as a user-filed request
+// (approval_required + due_at derived, appended, audited). urgency comes from the input (דחוף/רגיל).
+function createComplianceRequest_(target) {
+  var input = complianceRequestInput(target);
+  var row = buildNewRequest_(input);
+  row.compliance_id = target.complianceId;
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
+  row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  appendRequest(row);
+  writeAuditEntry(row.id, '', row.status, 'מערכת - רגולציה',
+    'נוצר מעמידה ברגולציה (compliance ' + target.complianceId + ')');
+  return row.id;
+}
+
+// Compliance-adherence panel for /management (canManage-gated). Derived, read-only; writes nothing.
+// NOTE: on completion of a renewal request NOTHING is written back to the Compliance row — the new
+// expiry lives on the new certificate, so Olga updates expires_at by hand.
+function readComplianceAdherence_() {
+  var maps = { idToName: canonicalHouseIdToName_() };
+  return complianceAdherence(readObjects_('Compliance'), maps, openHouseIds_(),
+    complianceDefaultReminder_(), todayYmd_(), function (m) { Logger.log(m); });
 }
 
 // Current month as YYYY-MM (server clock).
@@ -1420,6 +1646,7 @@ function handleManagementData_(p, actor) {
       coordinators: readCoordinatorsShortages_(),
       budget: readBudgetAdherence_(p && p.period, requests),
       maintenance: readMaintenanceAdherence_(),
+      compliance: readComplianceAdherence_(),
     },
   });
 }

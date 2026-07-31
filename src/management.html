@@ -145,11 +145,11 @@
         inventoryCounted: !!countedHouse[h.name],
       }));
 
-      // kitchen + coordinators + budget + maintenance are computed SERVER-SIDE (Code.gs) and passed
-      // through as-is; the browser only renders them.
+      // kitchen + coordinators + budget + maintenance + compliance are computed SERVER-SIDE (Code.gs)
+      // and passed through as-is; the browser only renders them.
       return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
         preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null,
-        maintenance: d.maintenance || null };
+        maintenance: d.maintenance || null, compliance: d.compliance || null };
     }
 
     // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget
@@ -291,6 +291,37 @@
           return block;
         }).join('');
         if (mnt.skipped) html += `<p class="sub">${mnt.skipped} שורות תוכנית לא תקינות דולגו (בדוק id/משימה/תדירות/בית בגיליון MaintenancePlan).</p>`;
+      }
+
+      // Compliance (עמידה ברגולציה) — computed server-side from the Compliance sheet. Per house,
+      // worst-first: expired first, then soonest-to-expire, with a doc link when present. A house with
+      // no compliance row shows "לא הוגדרו פריטי רגולציה" (never a fabricated 0). status is derived.
+      const cmp = m.compliance;
+      html += '<h2>עמידה ברגולציה</h2>';
+      if (!cmp || !cmp.houses) {
+        html += '<div class="unavail"><div class="t">עמידה ברגולציה — לא זמין</div><div class="r">אין נתוני רגולציה</div></div>';
+      } else if (!cmp.houses.length) {
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים פעילים</div></div>';
+      } else {
+        html += cmp.houses.map((h) => {
+          const badges = `${h.expiredCount ? ` <span class="pill red">${h.expiredCount} פג תוקף</span>` : ''}${h.expiringCount ? ` <span class="pill amber">${h.expiringCount} פג בקרוב</span>` : ''}`;
+          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${badges}</h3>`;
+          if (!h.defined) {
+            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרו פריטי רגולציה לבית זה.</div></div>';
+            return block;
+          }
+          block += '<table><thead><tr><th>פריט</th><th>תוקף עד</th><th>ימים לתפוגה</th><th>סטטוס</th><th>מסמך</th></tr></thead><tbody>';
+          block += h.items.map((it) => {
+            const days = it.daysToExpiry == null ? '—' : (it.daysToExpiry < 0 ? `−${Math.abs(it.daysToExpiry)}` : it.daysToExpiry);
+            const status = it.expired ? `<span class="pill red">${esc(it.status)}</span>`
+              : (it.expiring ? `<span class="pill amber">${esc(it.status)}</span>` : `<span class="pill ok">${esc(it.status)}</span>`);
+            const doc = it.docUrl ? `<a href="${esc(it.docUrl)}" target="_blank" rel="noopener">מסמך</a>` : '<span class="na">—</span>';
+            return `<tr><td>${esc(it.item)}</td><td>${fmtDate(it.expires)}</td><td>${days}</td><td>${status}</td><td>${doc}</td></tr>`;
+          }).join('');
+          block += '</tbody></table>';
+          return block;
+        }).join('');
+        if (cmp.skipped) html += `<p class="sub">${cmp.skipped} שורות רגולציה לא תקינות דולגו (בדוק id/פריט/תאריך תוקף/בית בגיליון Compliance).</p>`;
       }
 
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';

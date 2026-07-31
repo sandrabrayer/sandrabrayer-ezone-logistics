@@ -79,6 +79,13 @@ test('maintenance.js MIRROR:maintenance matches apps-script/Code.gs (preventive 
   assert.equal(a, b);
 });
 
+test('compliance.js MIRROR:compliance matches apps-script/Code.gs (compliance tracker)', () => {
+  const a = normalize(readBlock('src/compliance.js', 'compliance'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'compliance'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
@@ -145,8 +152,20 @@ test('MaintenancePlan header + Requests plan_id mirror between schema.js and set
   assert.deepEqual(gs.HEADERS.MaintenancePlan, SCHEMA_HEADERS.MaintenancePlan);
   assert.deepEqual(SCHEMA_HEADERS.MaintenancePlan,
     ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes']);
-  // plan_id is appended to Requests on BOTH sides, at the very end.
+  // plan_id is appended to Requests on BOTH sides (second-to-last, just before compliance_id).
   assert.ok(gs.HEADERS.Requests.includes('plan_id'), 'setup.gs Requests missing plan_id');
-  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 1], 'plan_id');
-  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 1], 'plan_id');
+});
+
+test('Compliance header + Requests compliance_id + config mirror between schema.js and setup.gs (compliance tracker)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.Compliance, SCHEMA_HEADERS.Compliance);
+  assert.deepEqual(SCHEMA_HEADERS.Compliance,
+    ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active']);
+  // compliance_id is appended to Requests on BOTH sides, at the very end.
+  assert.ok(gs.HEADERS.Requests.includes('compliance_id'), 'setup.gs Requests missing compliance_id');
+  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 1], 'compliance_id');
+  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 1], 'compliance_id');
+  // compliance_reminder_days is seeded on both sides (the SEED_CONFIG deep-equal below also covers it).
+  assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'compliance_reminder_days'));
+  assert.ok(SEED_CONFIG.some((o) => o.key === 'compliance_reminder_days'));
 });

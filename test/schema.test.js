@@ -8,24 +8,25 @@ import {
 
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
-    'AuditLog', 'Budgets', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
+    'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'Houses', 'InspectionFindings',
     'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan', 'Requests',
     'Technicians', 'Users',
   ].sort());
 });
 
-test('Requests sheet has all 29 columns; plan_id appended last (preventive maintenance)', () => {
-  assert.equal(HEADERS.Requests.length, 29);
+test('Requests sheet has all 30 columns; compliance_id appended last (compliance tracker)', () => {
+  assert.equal(HEADERS.Requests.length, 30);
   assert.equal(HEADERS.Requests[0], 'id');
-  // plan_id is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
-  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'plan_id');
+  // compliance_id is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
+  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'compliance_id');
   assert.equal(HEADERS.Requests[23], 'execution_status');
-  // The SLA columns (increment 36) stay put just before plan_id.
+  // The SLA columns (36) and plan_id (maintenance) stay put just before compliance_id.
   assert.equal(HEADERS.Requests[27], 'blocked_at');
+  assert.equal(HEADERS.Requests[28], 'plan_id');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
     'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status',
-    'due_at', 'blocked', 'blocked_reason', 'blocked_at', 'plan_id']) {
+    'due_at', 'blocked', 'blocked_reason', 'blocked_at', 'plan_id', 'compliance_id']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
 });
@@ -33,6 +34,11 @@ test('Requests sheet has all 29 columns; plan_id appended last (preventive maint
 test('MaintenancePlan sheet has the append-only plan columns', () => {
   assert.deepEqual(HEADERS.MaintenancePlan,
     ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes']);
+});
+
+test('Compliance sheet has the append-only compliance columns', () => {
+  assert.deepEqual(HEADERS.Compliance,
+    ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active']);
 });
 
 test('execution-status vocabulary: three pickable values + empty default', () => {
@@ -85,6 +91,9 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
   // sla_days (increment 36) — the tunable SLA spec.
   assert.ok(keys.includes('sla_days'));
   assert.equal(SEED_CONFIG.find((c) => c.key === 'sla_days').value, 'חירום:1|דחוף:3|רגיל:14');
+  // compliance_reminder_days (compliance tracker) — default reminder window, seeded 30.
+  assert.ok(keys.includes('compliance_reminder_days'));
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'compliance_reminder_days').value, '30');
   // Foreign digest ids (read-only consumption): kitchen seeded with the known id, coordinators blank.
   assert.equal(SEED_CONFIG.find((c) => c.key === 'kitchen_digest_id').value, '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE');
   assert.equal(SEED_CONFIG.find((c) => c.key === 'coordinators_digest_id').value, '');
