@@ -3,6 +3,27 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — sign-out (התנתקות) on every page
+
+A sign-out control is now shown on **every** served page (all 7 routes). It's injected by the auth
+shim (which already runs on every route), so it appears without touching each page: a fixed
+RTL-Hebrew **"התנתקות"** button in the corner, visible whenever a session is active.
+
+**What it does:** clears the persisted session — the `localStorage` token + expiry AND the in-memory
+token/role/scope — then reloads, which drops the user back to the login prompt. **No server call:**
+session tokens are **stateless HMAC** (`src/auth.js` signs/verifies them with no server-side session
+store or blacklist — verified), so there is nothing to revoke server-side; clearing the client token
+is a complete sign-out. The token's own `exp` claim and the server's independent verification remain
+the security boundary regardless.
+
+**Tests:** the per-route guard now also asserts every served HTML page carries the sign-out control;
+a new sandbox test drives the real injected shim and proves that after a sign-out click the persisted
+token is removed, the in-memory session flag is cleared, and the next data call is **unauthenticated**
+(blocked behind the login prompt — no Bearer sent). Full `node --test` suite green (320).
+
+> **After this merge:** no `setupSheet()` re-run, sheet edits, or digest rebuild. Purely a client-side
+> control injected by the gateway; it takes effect on next page load.
+
 ## [Unreleased] — bugfix — service worker served stale HTML on non-shell pages, re-prompting for login
 
 **Follow-up to the #46 session fix.** After one login, the shell pages accepted the persisted session

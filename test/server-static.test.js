@@ -76,5 +76,10 @@ test('EVERY served HTML route carries the persisted-session auth shim, before it
     }
     // The page routes its data calls through the shimmed sentinel (so the Bearer token is attached).
     assert.ok(html.includes('__EXEC_URL__'), `${path} must call data through window.__EXEC_URL__`);
+    // Sign-out (התנתקות) is injected on EVERY page and clears the persisted session.
+    assert.ok(html.includes('התנתקות'), `${path} must show the sign-out control`);
+    assert.ok(html.includes("id='ezone-signout'"), `${path} must carry the sign-out button`);
+    assert.ok(html.includes('mountSignOut(') && html.includes('function signOut('),
+      `${path} sign-out must clear the session`);
   }
 });
