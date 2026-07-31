@@ -23,7 +23,11 @@
  * dependency on the service-worker globals, so the test suite can evaluate this
  * exact file and assert on them directly.
  */
-var CACHE = 'ezone-logistics-v2';
+// Bumped v2 → v3: v2 cached the non-shell HTML pages (inventory/reports/workorders/inspection/
+// management) CACHE-FIRST, so after a redeploy those pages served STALE html — including the pre-fix
+// version WITHOUT the persisted-session shim, which re-prompted for the PIN. Bumping purges v2 on
+// activate, and every app document is now network-first (below) so a redeploy is always picked up.
+var CACHE = 'ezone-logistics-v3';
 var SHELL = [
   './',
   './index.html',
@@ -42,10 +46,22 @@ function isNetworkOnly(url) {
   return s.indexOf('sheets') !== -1 || s.indexOf('/api/') !== -1;
 }
 
-// NETWORK-FIRST: the shell documents. Kept fresh so a redeploy shows up at once.
+// NETWORK-FIRST: EVERY app HTML document (not just the shell). Kept fresh so a redeploy shows up at
+// once — critical because the injected auth shim lives in the page HTML, so a stale cached document
+// would run an outdated shim and re-prompt for login. Any page served by the Node HTML_ROUTES must be
+// listed here (both its extensionless and .html forms); the fetch handler also treats ANY navigation
+// (request.mode === 'navigate') as network-first, so a newly added page can't regress to stale cache.
+var DOCUMENT_ROUTES = [
+  '/', '/index.html',
+  '/dashboard', '/dashboard.html',
+  '/inspection', '/inspection.html',
+  '/inventory', '/inventory.html',
+  '/reports', '/reports.html',
+  '/workorders', '/workorders.html',
+  '/management', '/management.html',
+];
 function isNetworkFirst(url) {
-  var p = url.pathname;
-  return p === '/' || p === '/index.html' || p === '/dashboard' || p === '/dashboard.html';
+  return DOCUMENT_ROUTES.indexOf(url.pathname) !== -1;
 }
 
 // Whether a successful same-origin GET response for this URL may be written to
@@ -85,8 +101,9 @@ self.addEventListener('fetch', function (e) {
 
   var origin = self.location.origin;
 
-  // NETWORK-FIRST for the shell documents.
-  if (isNetworkFirst(url)) {
+  // NETWORK-FIRST for every app document — by explicit route OR any top-level navigation. The
+  // navigate check future-proofs pages not yet in DOCUMENT_ROUTES: a page load never serves stale HTML.
+  if (isNetworkFirst(url) || req.mode === 'navigate') {
     e.respondWith(
       fetch(req).then(function (res) {
         if (res && res.ok && shouldCache(url, origin)) {

@@ -472,3 +472,6 @@ if (isMain) {
 }
 
 export { loginAttempts as _loginAttempts };
+// Exported so a guard test can enumerate EVERY served HTML route and assert each carries the auth
+// shim (a page missing it would re-prompt for login — the bug this guards against).
+export { HTML_ROUTES as _HTML_ROUTES };
