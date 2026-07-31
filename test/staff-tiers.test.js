@@ -188,6 +188,16 @@ test('BUG 2: one login token is accepted across ALL page endpoints (GET /api/dat
   assert.notEqual((await postAction('managementData', token)).status, 401);
 });
 
+test('the /management data (incl. budget) is exec-only: field_ops / coordinator / maintenance → 403', async () => {
+  // Budget figures ride on managementData; the same canManage gate refuses everyone but ops_manager/ceo.
+  const roy = (await login('רועי', 'roy-password')).body.token;   // field_ops (manager tier elsewhere)
+  assert.equal((await postAction('managementData', roy)).status, 403);
+  const coord = (await login('שירה', APP_PIN)).body.token;        // coordinator
+  assert.equal((await postAction('managementData', coord)).status, 403);
+  const maint = (await login('רמי', APP_PIN)).body.token;         // maintenance
+  assert.equal((await postAction('managementData', maint)).status, 403);
+});
+
 test('tier B is refused manager-only reads (inspections) → 403; a manager gets them', async () => {
   const coord = (await login('שירה', APP_PIN)).body.token;
   assert.equal((await getData('inspections', coord)).status, 403);

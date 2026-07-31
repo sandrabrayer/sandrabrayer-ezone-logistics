@@ -33,8 +33,8 @@ function isOpenRequest(r) {
 // JD capabilities that map to data NOT available anywhere in this repo (category (c)). Each is shown
 // explicitly as unavailable, with what would need to be built — never faked with a placeholder number.
 export const UNAVAILABLE_CAPABILITIES = [
-  { key: 'budget_adherence', label: 'עמידה בתקציב', reason: 'אין מקור נתוני תקציב — נדרש גיליון/מקור תקציבים לכל בית להשוואה מול ההוצאה בפועל.' },
-  // food_quality moved to a LIVE panel (increment: kitchen-digest read) — see the "חוסרי מזון" panel.
+  // budget_adherence moved to a LIVE panel (Budgets sheet vs Requests spend) — see the "עמידה בתקציב" panel.
+  // food_quality moved to a LIVE panel (kitchen-digest read) — see the "חוסרי מזון" panel.
   { key: 'preventive_maintenance', label: 'עמידה בתוכנית תחזוקה מונעת', reason: 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.' },
   { key: 'training_adherence', label: 'עמידה בתוכנית הדרכה', reason: 'אין מקור נתוני הדרכת מדריכים.' },
   { key: 'systems_adoption', label: 'הטמעת מערכות', reason: 'אין מקור נתוני הטמעת תוכנות/אפליקציות.' },

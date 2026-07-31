@@ -143,16 +143,15 @@
         inventoryCounted: !!countedHouse[h.name],
       }));
 
-      // kitchen + coordinators are shaped SERVER-SIDE (Code.gs reads the foreign digests) and passed
-      // through as-is; the browser only renders them.
+      // kitchen + coordinators + budget are computed SERVER-SIDE (Code.gs) and passed through as-is;
+      // the browser only renders them.
       return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
-        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null };
+        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null };
     }
 
     // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality is now
     // a LIVE panel below, so it is no longer listed here).
     const UNAVAILABLE = [
-      ['עמידה בתקציב', 'אין מקור נתוני תקציב — נדרש גיליון תקציבים לכל בית להשוואה מול ההוצאה בפועל.'],
       ['עמידה בתוכנית תחזוקה מונעת', 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.'],
       ['עמידה בתוכנית הדרכה', 'אין מקור נתוני הדרכת מדריכים.'],
       ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
@@ -231,16 +230,48 @@
         html += `<div class="unavail" style="margin-top:8px"><div class="t">דייג׳סט רכזים — לא זמין</div><div class="r">${esc((co && co.reason) || 'אין דייג׳סט רכזים מתפרסם לקריאה')}</div></div>`;
       }
 
+      // Budget adherence (עמידה בתקציב) — computed server-side per selected month. Financial data;
+      // shown only here (canManage-gated), never in any digest. Over-budget highlighted worst-first;
+      // a house with no budget row shows "לא הוגדר תקציב" (never a fabricated 0).
+      const bud = m.budget;
+      html += '<h2>עמידה בתקציב</h2>';
+      if (!bud) {
+        html += '<div class="unavail"><div class="t">עמידה בתקציב — לא זמין</div><div class="r">אין נתוני תקציב</div></div>';
+      } else {
+        const opts = (bud.periods || []).map((p) => `<option value="${esc(p)}"${p === bud.period ? ' selected' : ''}>${esc(p)}</option>`).join('');
+        html += `<div class="grid" style="margin-bottom:10px"><div class="kpi"><label class="l">חודש</label><br><select onchange="loadMonth(this.value)" style="margin-top:6px;min-height:36px">${opts || `<option>${esc(bud.period)}</option>`}</select></div></div>`;
+        const rows = (bud.adherence && bud.adherence.houses) || [];
+        if (!rows.length) {
+          html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין תקציב או הוצאה לחודש זה</div></div>';
+        } else {
+          html += '<table><thead><tr><th>בית</th><th>תקציב</th><th>בפועל</th><th>יתרה</th><th>ניצול</th><th>סטטוס</th></tr></thead><tbody>';
+          html += rows.map((r) => {
+            if (!r.budgetDefined) {
+              return `<tr><td>${esc(r.house)}</td><td colspan="3" class="na">לא הוגדר תקציב</td><td>—</td><td>${nis(r.actual)} הוצאה${r.usedEstimated ? ' *' : ''}</td></tr>`;
+            }
+            const pct = r.percentUsed == null ? '—' : r.percentUsed + '%';
+            const status = r.over ? '<span class="pill red">חריגה</span>' : (r.percentUsed != null && r.percentUsed >= 90 ? '<span class="pill amber">קרוב לתקרה</span>' : '<span class="pill ok">בתקציב</span>');
+            return `<tr><td>${esc(r.house)}</td><td>${nis(r.budget)}</td><td>${nis(r.actual)}${r.usedEstimated ? ' *' : ''}</td><td>${nis(r.remaining)}</td><td>${pct}</td><td>${status}</td></tr>`;
+          }).join('');
+          html += '</tbody></table>';
+          html += '<p class="sub">* כולל אומדן (estimated_cost) כאשר עלות בפועל טרם הוזנה.</p>';
+        }
+        if (bud.adherence && bud.adherence.skipped) html += `<p class="sub">${bud.adherence.skipped} שורות תקציב לא תקינות דולגו (בדוק פורמט חודש/סכום בגיליון Budgets).</p>`;
+      }
+
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';
       html += UNAVAILABLE.map(([t, r]) => `<div class="unavail" style="margin-bottom:8px"><div class="t">${esc(t)} — לא זמין</div><div class="r">${esc(r)}</div></div>`).join('');
 
       document.getElementById('out').innerHTML = html;
     }
 
-    async function load() {
+    // Month selector re-requests the same screen for the chosen budget month (server recomputes).
+    window.loadMonth = (period) => load(period);
+
+    async function load(period) {
       try {
         const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: {} }) });
+          body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: period ? { period } : {} }) });
         if (res.status === 403) { document.getElementById('out').innerHTML = '<div class="deny">אין הרשאה לצפייה במסך זה. המסך פתוח למנהלת התפעול ולמנכ״לית בלבד.</div>'; return; }
         const j = await res.json();
         if (!j || !j.ok) {

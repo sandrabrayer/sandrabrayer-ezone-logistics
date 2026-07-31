@@ -53,6 +53,9 @@ var HEADERS = {
     'week_start',
     'unit_label', 'unit_factor', 'quantity_base',
   ],
+  // Budgets — one row per house (canonical id) per month (YYYY-MM), amount in NIS. Created empty by
+  // setupSheet(); Olga fills rows in the Sheet. Financial — never written to any digest. Append-only.
+  Budgets: ['house', 'period', 'amount', 'notes'],
 };
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
