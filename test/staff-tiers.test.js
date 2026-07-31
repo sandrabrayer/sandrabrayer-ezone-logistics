@@ -5,7 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { hashPin, rosterProof } from '../src/auth.js';
+import { hashPin, rosterProof, signToken } from '../src/auth.js';
 
 const SECRET = 'k'.repeat(40);
 const APP_PIN = '555555';
@@ -84,6 +84,14 @@ async function getData(action, token) {
   });
   return { status: r.status, body: r.status === 200 ? await r.json() : null };
 }
+async function postAction(action, token, payload) {
+  const r = await fetch(`${base}/api/action`, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: `Bearer ${token}` } : {}),
+    body: JSON.stringify({ action, payload: payload || {} }),
+  });
+  return { status: r.status };
+}
 
 // ---- tier A: personal passwords ----
 
@@ -145,6 +153,39 @@ test('a manager reads ALL houses requests', async () => {
   const token = (await login('רועי', 'roy-password')).body.token;
   const { body } = await getData('requests', token);
   assert.deepEqual(body.data.map((r) => r.id).sort(), ['REQ-1', 'REQ-2', 'REQ-3', 'REQ-4']);
+});
+
+test('BUG 1: BOTH manager tiers (field_ops AND ops_manager) read all houses when logged in as themselves', async () => {
+  for (const [name, pw] of [['רועי', 'roy-password'], ['אולגה', 'olga-password']]) {
+    const r = await login(name, pw);
+    assert.equal(r.status, 200, `${name} must be able to log in as themselves`);
+    const { status, body } = await getData('requests', r.body.token);
+    assert.equal(status, 200);
+    assert.deepEqual(body.data.map((x) => x.id).sort(), ['REQ-1', 'REQ-2', 'REQ-3', 'REQ-4'],
+      `${name} (${r.body.role}) must see ALL houses' requests`);
+  }
+});
+
+test('BUG 1: unauthenticated read of scoped data is rejected (401), never served', async () => {
+  assert.equal((await getData('requests')).status, 401);          // no token
+  assert.equal((await getData('requests', 'garbage.token')).status, 401); // bad token
+});
+
+test('BUG 1 hardening: an authenticated session with an UNKNOWN role fails CLOSED (403), not a silent empty list', async () => {
+  const ghost = signToken(SECRET, 7, { name: 'שד', role: 'ghost', scope: '' });
+  const { status } = await getData('requests', ghost);
+  assert.equal(status, 403);   // fail closed — a role/roster mismatch is loud, not an empty manager list
+});
+
+test('BUG 2: one login token is accepted across ALL page endpoints (GET /api/data AND POST /api/action)', async () => {
+  // The persisted token must work on every page's endpoints without re-login. One manager token,
+  // used against both the read proxy (multiple actions) and the write proxy, is accepted throughout.
+  const token = (await login('אולגה', 'olga-password')).body.token; // ops_manager
+  assert.equal((await getData('requests', token)).status, 200);
+  assert.equal((await getData('houses', token)).status, 200);
+  assert.equal((await getData('inspections', token)).status, 200);   // manager-only read
+  assert.equal((await postAction('managementData', token)).status, 200); // exec POST endpoint
+  assert.notEqual((await postAction('managementData', token)).status, 401);
 });
 
 test('tier B is refused manager-only reads (inspections) → 403; a manager gets them', async () => {
