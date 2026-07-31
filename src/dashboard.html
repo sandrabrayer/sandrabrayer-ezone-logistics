@@ -308,8 +308,9 @@
         ['פתוחות', open], ['ממתין לאישור', pending], ['נדחו', deferred], ['הושלמו/נסגרו', closed],
       ].map(([l, n]) => `<div class="counter"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
 
+      const nowMs = Date.now();
       board.innerHTML = renderBatchSuggestions() + renderHouseConsolidation() + (GROUPS.map(g => {
-        const items = reqs.filter(r => g.statuses.includes(r.status));
+        const items = reqs.filter(r => g.statuses.includes(r.status)).sort((a, b) => agingSort(a, b, nowMs));
         if (items.length === 0) return '';
         return `<div class="group"><h2><span class="dot" style="background:${g.color}"></span><span style="border-inline-start:4px solid ${g.color};padding-inline-start:8px">${g.title}</span> <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(r => card(r, g.color)).join('')}</div>`;
       }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
@@ -361,6 +362,35 @@
       const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (!m) return escapeHtml(String(v));
       return `${m[3]}/${m[2]}/${m[1]}`;
+    }
+
+    // ── SLA / aging (increment 36) — mirror of src/sla.js (read-only view; the server is the gate).
+    function isBlockedUI(r) { return String(r.blocked == null ? '' : r.blocked).toUpperCase() === 'TRUE'; }
+    function isOverdueUI(r, now) {
+      if (!r.due_at) return false;
+      if (r.status === ST.COMPLETED || r.status === ST.CLOSED || r.status === ST.DEFERRED) return false;
+      const due = new Date(r.due_at).getTime();
+      return !isNaN(due) && (now || Date.now()) > due;
+    }
+    function daysOverdueUI(r, now) {
+      if (!isOverdueUI(r, now)) return 0;
+      return Math.floor(((now || Date.now()) - new Date(r.due_at).getTime()) / 86400000);
+    }
+    // Worst-first: overdue (by days overdue) first, then blocked, then more-urgent, then oldest.
+    const URGENCY_WEIGHT = { 'חירום': 3, 'דחוף': 2, 'רגיל': 1 };
+    function agingSort(a, b, now) {
+      const oa = isOverdueUI(a, now), ob = isOverdueUI(b, now);
+      if (oa !== ob) return oa ? -1 : 1;
+      if (oa && ob) { const d = daysOverdueUI(b, now) - daysOverdueUI(a, now); if (d) return d; }
+      const ba = isBlockedUI(a), bb = isBlockedUI(b);
+      if (ba !== bb) return ba ? -1 : 1;
+      const uw = (URGENCY_WEIGHT[b.urgency] || 0) - (URGENCY_WEIGHT[a.urgency] || 0);
+      if (uw) return uw;
+      return String(a.created_at).localeCompare(String(b.created_at));  // oldest first
+    }
+    // Is the logged-in user a manager tier (field_ops / ops_manager / ceo) — may block/unblock.
+    function canBlockUI() {
+      return ['field_ops', 'ops_manager', 'ceo'].includes(String(window.__ROLE__ || ''));
     }
 
     // Per-house consolidation of open inspection defects (ליקויים פתוחים), de-duplicated by text,
@@ -449,12 +479,27 @@
       return '<span class="pill normal">רגיל</span>';
     }
 
+    // Overdue / blocked badges (increment 36) — visible at a glance on every card.
+    function agingBadges(r) {
+      const b = [];
+      if (isOverdueUI(r)) {
+        const d = daysOverdueUI(r);
+        b.push(`<span class="pill emergency">באיחור${d ? ' · ' + d + ' ימים' : ''}</span>`);
+      }
+      if (isBlockedUI(r)) {
+        b.push(`<span class="pill" style="background:#4a3410;color:#e0a23a">⛔ חסום${r.blocked_reason ? ': ' + escapeHtml(String(r.blocked_reason)) : ''}</span>`);
+      }
+      return b.join(' ');
+    }
+
     function card(r, color) {
       const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
-      return `<div class="req" style="border-inline-start:4px solid ${color || 'var(--card-line)'}">
+      const badges = agingBadges(r);
+      const edge = isOverdueUI(r) ? '#e0584a' : (color || 'var(--card-line)');
+      return `<div class="req" style="border-inline-start:4px solid ${edge}">
         <div class="head">
           <div>
-            <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}</div>
+            <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}${badges ? ' ' + badges : ''}</div>
             <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''}${r.deferred_until ? ' · נדחה ל-<span dir="ltr">' + fmtDate(r.deferred_until) + '</span>' : ''}</div>
             ${r.assigned_to ? `<div class="meta" style="color:var(--accent-2);font-weight:700;margin-top:4px">↩ הועבר ל: ${escapeHtml(r.assigned_to)}${r.assignment_type === 'external' ? ' (בעל מקצוע)' : ' (אחראי בית)'}${r.batch_id ? ' · 🔗 ביקור מרוכז' : ''}</div>` : (r.trade && r.assignment_type === 'external' ? `<div class="meta" style="color:var(--amber);font-weight:700;margin-top:4px">סומן ל: ${escapeHtml(r.trade)} — ממתין לאיגום</div>` : '')}
           </div>
@@ -483,6 +528,13 @@
       if ([ST.REQUEST, ST.PENDING].includes(s)) {
         btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
       }
+      // Block / unblock (increment 36) — manager tier only, on still-open requests. The server
+      // enforces canBlock regardless of what the UI shows.
+      if (canBlockUI() && ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(s)) {
+        btns.push(isBlockedUI(r)
+          ? `<button class="act" onclick="doUnblock('${id}')">בטל חסימה</button>`
+          : `<button class="act" onclick="doBlock('${id}')">חסום</button>`);
+      }
       if (who() === 'רועי') {
         btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
       }
@@ -501,6 +553,9 @@
 
     window.doApprove = (id) => post('approve', { id, by: who() });
     window.doReject = (id) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }); };
+    // Block requires a reason (server also enforces); unblock clears it.
+    window.doBlock = (id) => { const reason = (prompt('סיבת החסימה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }); };
+    window.doUnblock = (id) => { if (!confirm('לבטל את החסימה?')) return; post('setBlocked', { id, blocked: false }); };
 
     // Deferral via calendar modal + reminder N days before (default 7).
     let _deferId = null;

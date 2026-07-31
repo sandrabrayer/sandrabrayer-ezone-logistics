@@ -40,6 +40,12 @@ function canDispatch(actorRole) {
   return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
 }
 
+// block / unblock a request (increment 36): field_ops, ops_manager, ceo. A coordinator/maintenance
+// gets 403 — same tier boundary as defer/dispatch.
+function canBlock(actorRole) {
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+}
+
 // Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
 // ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
 function isManagerRole(role) {
@@ -64,4 +70,4 @@ function houseInScope(role, scope, houseName, houseCluster) {
 }
 // === MIRROR:roles END ===
 
-export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, isManagerRole, houseInScope };
+export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, canBlock, isManagerRole, houseInScope };

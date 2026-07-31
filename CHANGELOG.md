@@ -3,6 +3,51 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 36 — SLA due dates + aging (overdue / blocked), surfaced on the list and the digest
+
+**Why:** two needs from one build — Roy's הצפת עיכובים (delays surfaced in real time) and Olga's
+סגירת ליקויים במועד (closing findings on time). Requests now carry a **due date** derived from urgency,
+and the list + digest show what is **overdue** or **blocked** at a glance.
+
+**Schema — APPEND-ONLY (existing rows/positions untouched).** `Requests` gains `due_at`, `blocked`,
+`blocked_reason`, `blocked_at`. `Config` gains **`sla_days`** — a parseable `urgency:days` spec
+(`חירום:1|דחוף:3|רגיל:14`), tunable in the Sheet with no deploy, read exactly like `allowed_units`:
+a malformed spec (or an unknown urgency) yields **no due date, logged**, never a silently wrong default.
+
+**Due date + aging (`src/sla.js`, mirrored verbatim into `Code.gs` under `MIRROR:sla`).**
+- `due_at = created_at + days-for-urgency`, derived at creation; **re-derived when urgency changes**.
+- **Deferral parks the SLA:** while a request is `נדחה לתאריך` it is never overdue; on **wake-up**
+  (approved out of deferral) `due_at` is re-derived from the **deferral date forward**, not from
+  creation — a woken request that then passes its new due date IS overdue.
+- Derived, never stored: `days_open` (created→now, **freezes at completion**), `overdue` (due passed
+  and not completed/closed/deferred), `days_overdue`.
+
+**Blocked is a manual flag, not a pause.** Set by field_ops / ops_manager / ceo (new `setBlocked`
+action, gated by `canBlock` in `MIRROR:roles`); a coordinator/maintenance gets **403** — enforced
+server-side AND in Code.gs, never UI-only. **Blocking requires a reason.** Every block/unblock is
+logged to AuditLog with actor + timestamp. A blocked request **still ages and can still be overdue**.
+
+**List UI (`dashboard.html`):** overdue and blocked badges on every card, each status group sorted
+**worst-first** (overdue by days-overdue, then blocked, then urgency, then oldest); a manager-tier
+block/unblock control (reason required). Existing role scoping is unchanged — a coordinator still sees
+only their own house's requests (filtered server-side).
+
+**Digest:** the OpenTickets tab gains **`daysOpen`, `overdue`, `blocked`** (append-only) so the
+coordinators app can show them. No financial fields — `due_at` itself and `blocked_reason` are NOT
+published. `DIGEST-CONTRACT.md` updated.
+
+**Tests:** `src/sla.js` derivations + every edge case (per-urgency due date; malformed spec → blank +
+logged; overdue only past due and only while ageing; deferred not overdue; wake-up re-derivation
+forward; woken-and-passed overdue; days_open freezes at completion; block requires a reason;
+block/unblock 403 for a coordinator with no state change); the `MIRROR:sla` drift guard; the schema.js⇄
+setup.gs mirror extended to `HEADERS.Requests` + `SEED_CONFIG`; the digest OpenTickets columns. Full
+`node --test` suite green (302).
+
+> **⚠ After this merge:** re-run **`setupSheet()`** once — it APPENDS the four new `Requests` columns
+> (`due_at`, `blocked`, `blocked_reason`, `blocked_at`) to the existing sheet and upserts the new
+> `sla_days` Config row (no reorder, no data loss). Existing open requests have a blank `due_at` until
+> they are edited or re-created; adjust `sla_days` in the Config tab to tune the SLA with no deploy.
+
 ## [Unreleased] — increment 35 — הפרדס digest id corrected to `pardes` (ecosystem alignment); DIGEST-CONTRACT.md names fixed
 
 **Why:** this repo assigned `raanana-hapardes` (increment 33) to רעננה הפרדס, but HOUSE-IDS.md and

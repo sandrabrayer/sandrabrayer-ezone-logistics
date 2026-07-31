@@ -8,7 +8,19 @@ import {
   scrubMoney, truncateTitle, formatTitle, TITLE_MAX,
   weekStart, recentWeekStarts,
   isShortage, shortageLabel, buildWeeklyGrid,
+  DIGEST_OPEN_HEADERS,
 } from '../src/digest.js';
+
+// ---- OpenTickets columns (increment 36: aging appended) ----
+
+test('OpenTickets carries daysOpen / overdue / blocked, appended after the original six', () => {
+  assert.deepEqual(DIGEST_OPEN_HEADERS, [
+    'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
+  ]);
+  // The original six keep their positions; the three aging columns are appended last.
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(0, 6),
+    ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt']);
+});
 
 // ---- house-id map (increment 33: all six houses, canonical names) ----
 

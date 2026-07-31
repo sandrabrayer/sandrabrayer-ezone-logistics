@@ -18,6 +18,8 @@ var HEADERS = {
     'approved_at', 'rejection_reason', 'deferred_until', 'assigned_to', 'assignment_type',
     'trade', 'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
     'execution_status',
+    // SLA + aging (increment 36) — APPENDED at the end (existing sheets gain them via setupSheet()).
+    'due_at', 'blocked', 'blocked_reason', 'blocked_at',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
@@ -74,6 +76,9 @@ var SEED_CONFIG = [
   // ceo_ceiling — kept but DORMANT since increment 31 (chain B v2 does not read it). Upserted by
   // key so a re-run of setupSheet() ADDS it to existing sheets without overwriting approval_threshold.
   ['ceo_ceiling', ''],
+  // sla_days (increment 36) — "urgency:days" spec, tunable in the Sheet with no deploy. Upserted by
+  // key, so a re-run ADDS it to existing sheets without touching other Config rows.
+  ['sla_days', 'חירום:1|דחוף:3|רגיל:14'],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites
