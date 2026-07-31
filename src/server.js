@@ -62,6 +62,31 @@ const CLIENT_SHIM = `<script>(function(){
   window.__EXEC_URL__='/api/exec'; window.__STAFF_TOKEN__='';
   try{sessionStorage.setItem('ezone_staff_token','1');}catch(e){}
   var NAMES=${JSON.stringify(LOGIN_NAMES)};
+  // Session persistence (bug fix): the token is kept in localStorage so ONE login is valid across
+  // every page AND every tab until it expires — navigating no longer re-prompts. localStorage is
+  // shared across tabs (sessionStorage is not) and survives full-page navigations. The stored value
+  // carries an expiry mirrored from the server's SESSION_DAYS; the server token's own exp claim stays
+  // authoritative (an expired/invalid token → 401 → we clear and re-login). No password is ever stored.
+  var STORE_KEY='ezone_session';
+  function loadSession(){
+    try{
+      var raw=localStorage.getItem(STORE_KEY); if(!raw)return null;
+      var s=JSON.parse(raw);
+      if(!s||!s.token||!(s.exp>Date.now())){localStorage.removeItem(STORE_KEY);return null;}
+      return s;
+    }catch(e){return null;}
+  }
+  function saveSession(tok,role,scope,days){
+    try{
+      var d=Number(days)>0?Number(days):7;
+      localStorage.setItem(STORE_KEY,JSON.stringify({token:tok,role:role||'',scope:scope||'',exp:Date.now()+d*864e5}));
+    }catch(e){}
+  }
+  function clearSession(){try{localStorage.removeItem(STORE_KEY);}catch(e){}}
+  function applySession(s){TOKEN=s.token;window.__STAFF_TOKEN__='1';window.__ROLE__=s.role||'';window.__SCOPE__=s.scope||'';}
+  // Rehydrate any still-valid session BEFORE the page's own scripts run, so a manager who logged in on
+  // one page arrives at the request list already authenticated (and reads all houses, as their role).
+  var _boot=loadSession(); if(_boot)applySession(_boot);
   function el(t,s,txt){var e=document.createElement(t);if(s)e.setAttribute('style',s);if(txt!=null)e.textContent=txt;return e;}
   function doLogin(){return new Promise(function(resolve){
     function mount(){
@@ -82,7 +107,7 @@ const CLIENT_SHIM = `<script>(function(){
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){TOKEN=res.j.token;window.__STAFF_TOKEN__='1';window.__ROLE__=res.j.role||'';window.__SCOPE__=res.j.scope||'';if(ov.parentNode)ov.parentNode.removeChild(ov);resolve();}
+          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);resolve();}
           else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
         }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
@@ -102,7 +127,7 @@ const CLIENT_SHIM = `<script>(function(){
       if(method==='POST'){target='/api/action';}
       else{var qs=url.indexOf('?')>=0?url.slice(url.indexOf('?')):'';target='/api/data'+qs;}
       return origFetch(target,ni).then(function(r){
-        if(r.status===401){TOKEN=null;authPromise=null;return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return origFetch(target,Object.assign({},init,{headers:headers}));});}
+        if(r.status===401){TOKEN=null;authPromise=null;clearSession();return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return origFetch(target,Object.assign({},init,{headers:headers}));});}
         return r;
       });
     });
@@ -313,7 +338,13 @@ async function handleData(req, res, url) {
       if (!manager) return sendJson(res, 403, { ok: false, error: 'forbidden' });
       payload.data = payload.data.map((u) => { const c = Object.assign({}, u); delete c.pin_hash; return c; });
     } else if (action === 'requests' && !manager) {
-      // Tier B sees ONLY their in-scope houses' requests (all submitters). Filtered SERVER-SIDE.
+      // Managers (field_ops / ops_manager / ceo) never reach here — they get the unfiltered list above.
+      // Tier B sees ONLY their in-scope houses. Any OTHER role is an invalid session for a scoped read:
+      // fail CLOSED with a loud 403 rather than silently returning an empty filtered list (which is how
+      // a role/roster mismatch used to hide as "manager sees nothing").
+      if (actor.role !== ROLE.COORDINATOR && actor.role !== ROLE.MAINTENANCE) {
+        return sendJson(res, 403, { ok: false, error: 'forbidden' });
+      }
       const houses = (await fetchAppsScriptData('houses')) || [];
       const clusterOf = {};
       for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
@@ -329,6 +360,7 @@ async function handleData(req, res, url) {
 async function handleAction(req, res) {
   const auth = authFromRequest(req);
   if (!auth) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+  const { actor } = auth;
   const body = await readJsonBody(req, 65536);
   if (!body || typeof body.action !== 'string') {
     return sendJson(res, 400, { ok: false, error: 'missing action' });

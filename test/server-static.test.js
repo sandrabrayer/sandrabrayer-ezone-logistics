@@ -52,3 +52,17 @@ test('icon route returns 404 for disallowed names and missing files (no leak, no
   assert.equal((await fetch(`${base}/icons/nope.txt`)).status, 404);          // extension not allowed
   assert.equal((await fetch(`${base}/icons/does-not-exist-v9.png`)).status, 404); // valid name, missing file
 });
+
+test('served pages persist the session across pages/tabs (bug fix): shim uses localStorage', async () => {
+  // The injected auth shim must persist the token so ONE login carries across every page/tab until
+  // expiry — otherwise navigating re-prompts (the reported bug). Guard the persistence code is present
+  // on every HTML route (browser code can't be unit-run here, so we assert it is served).
+  for (const path of ['/', '/dashboard', '/workorders', '/management']) {
+    const html = await (await fetch(`${base}${path}`)).text();
+    assert.match(html, /localStorage/, `${path} shim must use localStorage`);
+    assert.match(html, /ezone_session/, `${path} shim must key the persisted session`);
+    assert.match(html, /saveSession\(/, `${path} shim must save the session on login`);
+    assert.match(html, /loadSession\(\)/, `${path} shim must rehydrate the session on load`);
+    assert.match(html, /exp>Date\.now\(\)/, `${path} shim must honor an expiry`);
+  }
+});

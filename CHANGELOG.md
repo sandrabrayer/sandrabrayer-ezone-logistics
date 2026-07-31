@@ -3,6 +3,51 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — bugfix — session persists across pages; manager-tier request visibility restored
+
+Two owner-reported bugs, one shared root cause in the browser session layer.
+
+**BUG 2 — session did not persist across pages/tabs (root cause).** The client auth shim kept the
+session token in an in-memory closure variable only (a deliberate "never store it" choice). Every
+full-page navigation started a fresh shim with `TOKEN=null`, so moving to any other tab/page
+re-prompted for the password. **Fix (`src/server.js` shim):** the token is now persisted in
+`localStorage` with an expiry mirrored from `SESSION_DAYS`, rehydrated BEFORE the page's own scripts
+run, and cleared on 401/expiry. One login is now valid across every page and tab until it expires.
+`localStorage` (not `sessionStorage`) so it is shared across tabs; the server token's own `exp` claim
+stays authoritative.
+
+**BUG 1 — manager-tier roles saw no requests; only a coordinator login worked.** Investigated the read
+path end to end. The **server-side scoping was already correct** — reproduced directly: with a valid
+token, field_ops and ops_manager both receive ALL houses' requests, a coordinator only their own
+(now locked by tests). The real cause was the session layer above: because the token did not persist
+(BUG 2), a manager's authenticated identity was lost on the request-listing pages, so their reads were
+not authenticated as a manager; in the owner's flow only the coordinator session (shared PIN, easy to
+re-enter) "stuck". Persisting the session (above) keeps managers authenticated across all pages, so the
+server returns every house's requests as intended.
+
+Two supporting server-side fixes made while here:
+- **Fail-closed read scoping (`src/server.js`).** A scoped `requests` read by an authenticated session
+  whose role is neither a known manager nor coordinator/maintenance now returns a loud **403** instead
+  of a silently-empty filtered list — so any future role/roster mismatch surfaces instead of masquerading
+  as "manager sees nothing". Managers (unfiltered) and coordinators/maintenance (scoped) are unchanged.
+- **Latent `handleAction` crash (from increment 37).** The `managementData` gate referenced `actor.role`
+  but `handleAction` never destructured `actor` from the verified auth — so every POST to `/api/action`
+  for `managementData` threw `ReferenceError` and hung (the /management screen's data load). No test had
+  POSTed it through the gateway, so it shipped unnoticed. Fixed by resolving `actor` from the token; the
+  exec-only gate now works server-side, with `Code.gs` `handleManagementData_` still enforcing independently.
+
+**Tests:** both manager tiers (field_ops + ops_manager) read all houses when logged in as themselves; a
+coordinator reads only their house; an unauthenticated scoped read is rejected (401); an unknown-role
+session fails closed (403); one login token is accepted across both page endpoints (GET `/api/data` and
+POST `/api/action`); and the served shim persists the session (localStorage, rehydrate, expiry). Full
+`node --test` suite green (317).
+
+> **After this merge:** no `setupSheet()` re-run, no sheet-cell edits, no digest rebuild. Users will be
+> asked to log in once more after deploy (the new persisted-session format), then stay logged in across
+> pages/tabs until `SESSION_DAYS`. If a manager still cannot log in *as themselves*, their tier-A
+> personal password was never set — run `setUserPin('רועי', …)` / `setUserPin('אולגה', …)` once in the
+> Apps Script editor (unrelated to this fix; it is how tier-A passwords are provisioned).
+
 ## [Unreleased] — increment 37 — /management network-management screen for the ops manager + CEO
 
 **Why:** Olga's role (מנהלת תפעול, איכות והטמעה רשתית) needs a single network-management view. This
