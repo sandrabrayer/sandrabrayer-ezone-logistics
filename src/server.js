@@ -88,6 +88,22 @@ const CLIENT_SHIM = `<script>(function(){
   // one page arrives at the request list already authenticated (and reads all houses, as their role).
   var _boot=loadSession(); if(_boot)applySession(_boot);
   function el(t,s,txt){var e=document.createElement(t);if(s)e.setAttribute('style',s);if(txt!=null)e.textContent=txt;return e;}
+  // Sign-out (התנתקות): tokens are STATELESS HMAC — there is no server-side session to revoke, so
+  // clearing the persisted token client-side is a complete sign-out. Clear localStorage + the in-memory
+  // token, then reload → the shim finds no session and shows the login prompt. A fixed control is
+  // injected on EVERY page (the shim runs on all routes), so sign-out is always one tap away.
+  function signOut(){clearSession();TOKEN=null;authPromise=null;window.__STAFF_TOKEN__='';window.__ROLE__='';window.__SCOPE__='';try{location.reload();}catch(e){}}
+  function mountSignOut(){
+    function m(){
+      if(!document.body||document.getElementById('ezone-signout'))return;
+      var b=el('button','position:fixed;bottom:12px;inset-inline-start:12px;z-index:99998;min-height:36px;padding:6px 14px;border-radius:999px;border:1px solid #143a30;background:#0e211b;color:#eef1f5;font-family:system-ui,Arial,sans-serif;font-size:13px;font-weight:700;cursor:pointer;direction:rtl;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.4)','התנתקות');
+      b.id='ezone-signout';b.setAttribute('type','button');b.setAttribute('aria-label','התנתקות');
+      b.addEventListener('click',signOut);
+      document.body.appendChild(b);
+    }
+    if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
+  }
+  if(_boot)mountSignOut();
   function doLogin(){return new Promise(function(resolve){
     function mount(){
       var ov=el('div','position:fixed;inset:0;z-index:99999;background:#071410;display:flex;align-items:center;justify-content:center;direction:rtl;font-family:system-ui,Arial,sans-serif');
@@ -107,7 +123,7 @@ const CLIENT_SHIM = `<script>(function(){
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);resolve();}
+          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();resolve();}
           else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
         }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
@@ -475,3 +491,5 @@ export { loginAttempts as _loginAttempts };
 // Exported so a guard test can enumerate EVERY served HTML route and assert each carries the auth
 // shim (a page missing it would re-prompt for login — the bug this guards against).
 export { HTML_ROUTES as _HTML_ROUTES };
+// Exported so a test can run the shim in a sandbox and exercise the sign-out flow (clear + reload).
+export { CLIENT_SHIM as _CLIENT_SHIM };
