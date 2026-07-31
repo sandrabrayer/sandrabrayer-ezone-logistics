@@ -78,6 +78,9 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
   // sla_days (increment 36) — the tunable SLA spec.
   assert.ok(keys.includes('sla_days'));
   assert.equal(SEED_CONFIG.find((c) => c.key === 'sla_days').value, 'חירום:1|דחוף:3|רגיל:14');
+  // Foreign digest ids (read-only consumption): kitchen seeded with the known id, coordinators blank.
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'kitchen_digest_id').value, '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE');
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'coordinators_digest_id').value, '');
   // ceo_ceiling ships blank (disabled) — never hardcoded to a value.
   assert.equal(SEED_CONFIG.find((c) => c.key === 'ceo_ceiling').value, '');
 });

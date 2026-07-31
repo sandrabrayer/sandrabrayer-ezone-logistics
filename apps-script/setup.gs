@@ -79,6 +79,10 @@ var SEED_CONFIG = [
   // sla_days (increment 36) — "urgency:days" spec, tunable in the Sheet with no deploy. Upserted by
   // key, so a re-run ADDS it to existing sheets without touching other Config rows.
   ['sla_days', 'חירום:1|דחוף:3|רגיל:14'],
+  // Foreign digest ids the /management screen reads READ-ONLY. Upserted by key. Blank = panel "לא זמין".
+  // Grant the Logistics Apps Script account VIEWER access to the kitchen spreadsheet for the read to work.
+  ['kitchen_digest_id', '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE'],
+  ['coordinators_digest_id', ''],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites

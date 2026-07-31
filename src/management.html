@@ -143,13 +143,16 @@
         inventoryCounted: !!countedHouse[h.name],
       }));
 
-      return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) }, preOpening: pre };
+      // kitchen + coordinators are shaped SERVER-SIDE (Code.gs reads the foreign digests) and passed
+      // through as-is; the browser only renders them.
+      return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
+        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null };
     }
 
-    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES.
+    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality is now
+    // a LIVE panel below, so it is no longer listed here).
     const UNAVAILABLE = [
       ['עמידה בתקציב', 'אין מקור נתוני תקציב — נדרש גיליון תקציבים לכל בית להשוואה מול ההוצאה בפועל.'],
-      ['איכות ובטיחות מזון', 'בבעלות אפליקציית המטבח (ezone-kitchen); נדרשת קריאת דייג׳סט המטבח (טרם חוברה).'],
       ['עמידה בתוכנית תחזוקה מונעת', 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.'],
       ['עמידה בתוכנית הדרכה', 'אין מקור נתוני הדרכת מדריכים.'],
       ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
@@ -206,6 +209,26 @@
         html += '<h2>מוכנות בתים לפתיחה</h2><table><thead><tr><th>בית</th><th>דרישות פתוחות</th><th>ליקויים פתוחים</th><th>ספירת מלאי בוצעה</th></tr></thead><tbody>';
         html += m.preOpening.map((p) => `<tr><td>${esc(p.house)}</td><td>${p.openRequests}</td><td>${p.openDefects}</td><td>${p.inventoryCounted ? '<span class="pill ok">כן</span>' : '<span class="pill amber">לא</span>'}</td></tr>`).join('');
         html += '</tbody></table>';
+      }
+
+      // Kitchen food shortages — READ-ONLY from the ezone-kitchen digest. Unavailable renders as a
+      // "לא זמין" card with the reason (never as 0); an available-but-empty result says "no shortages".
+      html += '<h2>חוסרי מזון לפי בית (דייג׳סט המטבח — קריאה בלבד)</h2>';
+      const k = m.kitchen;
+      if (!k || !k.available) {
+        html += `<div class="unavail"><div class="t">חוסרי מזון — לא זמין</div><div class="r">${esc((k && k.reason) || 'אין מקור נתונים')}</div></div>`;
+      } else if (!k.houses || !k.houses.length) {
+        html += '<div class="kpi"><div class="n ok">אין חוסרים</div><div class="l">לא דווחו חוסרי מזון כרגע</div></div>';
+      } else {
+        html += '<table><thead><tr><th>בית</th><th>מספר פריטים בחוסר</th><th>פריטים</th></tr></thead><tbody>';
+        html += k.houses.map((h) => `<tr><td>${esc(h.house)}</td><td><span class="pill red">${h.count}</span></td><td>${(h.items || []).map(esc).join('، ')}</td></tr>`).join('');
+        html += '</tbody></table>';
+      }
+
+      // Coordinators digest — no coordinators-published source exists yet; shown as "לא זמין" with why.
+      const co = m.coordinators;
+      if (!co || !co.available) {
+        html += `<div class="unavail" style="margin-top:8px"><div class="t">דייג׳סט רכזים — לא זמין</div><div class="r">${esc((co && co.reason) || 'אין דייג׳סט רכזים מתפרסם לקריאה')}</div></div>`;
       }
 
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';
