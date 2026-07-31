@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — ניהול רשת</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #15171c; --bg2: #1b1e24; --card: #1f232b; --card-line: #333a45;
+      --ink: #eef1f5; --muted: #8b93a0; --accent: #2dd4bf; --accent-2: #5eead4;
+      --accent-grad: linear-gradient(120deg, #14b8a6 0%, #2dd4bf 50%, #5eead4 100%);
+      --glow: rgba(45,212,191,.45); --red: #e0584a; --amber: #e0a23a; --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: radial-gradient(1100px 480px at 82% -12%, #262b36 0%, transparent 58%), var(--bg); font-family: 'Heebo', "Segoe UI", system-ui, Arial, sans-serif; line-height: 1.55; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--card-line); background: linear-gradient(180deg, var(--bg2), transparent); }
+    .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
+    .brand-emblem { width: 30px; height: 30px; }
+    .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav a { font-size: .92rem; font-weight: 700; color: #c8cdd6; text-decoration: none; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; }
+    .nav a:hover { color: var(--ink); border-color: var(--card-line); }
+    .nav a.active { color: #14171c; background: var(--accent-grad); }
+    .wrap { max-width: 1020px; margin: 0 auto; padding: 22px 18px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 800; margin: 6px 0 2px; color: #fff; }
+    .sub { color: #b8bfc9; margin: 0 0 18px; font-size: .95rem; }
+    h2 { font-size: 1.15rem; margin: 26px 0 12px; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .kpi { background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 16px; }
+    .kpi.alarm { border-color: var(--red); box-shadow: 0 0 30px -14px var(--red); }
+    .kpi .n { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; }
+    .kpi .l { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+    .kpi .n.red { color: var(--red); } .kpi .n.amber { color: var(--amber); } .kpi .n.ok { color: var(--accent-2); }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); overflow: hidden; }
+    th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--card-line); }
+    th { color: var(--accent-2); font-weight: 700; }
+    tr:last-child td { border-bottom: none; }
+    .pill { font-size: .74rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+    .pill.red { background: #3a1512; color: #ff8a80; } .pill.amber { background: #4a3410; color: var(--amber); }
+    .pill.ok { background: #06251f; color: var(--accent-2); }
+    .unavail { background: repeating-linear-gradient(135deg, #23262e, #23262e 8px, #20232b 8px, #20232b 16px); border: 1px dashed var(--card-line); border-radius: 12px; padding: 12px 14px; }
+    .unavail .t { font-weight: 800; color: #cfd5de; }
+    .unavail .r { color: var(--muted); font-size: .85rem; margin-top: 3px; }
+    .na { color: var(--muted); font-style: italic; }
+    .loading, .empty { color: var(--muted); }
+    .deny { background: var(--card); border: 1px solid var(--red); border-radius: var(--radius); padding: 28px; text-align: center; color: #ff8a80; font-weight: 700; }
+    @media (max-width: 640px) {
+      html, body { overflow-x: hidden; max-width: 100vw; }
+      .topbar { flex-wrap: wrap; gap: 10px; }
+      .nav { order: 2; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      .nav::-webkit-scrollbar { display: none; }
+      .nav a { flex: 0 0 auto; white-space: nowrap; min-height: 40px; display: inline-flex; align-items: center; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/management" class="active">ניהול רשת</a></nav>
+    <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span>לוגיסטיקה</span></div>
+  </div>
+  <div class="wrap">
+    <h1>ניהול רשת — תפעול, איכות ובקרה</h1>
+    <p class="sub">מסך הנהלה (מנהלת תפעול / מנכ״לית). מוצג רק מה שיש לו מקור נתונים אמיתי בלוגיסטיקה — מדד ללא מקור מסומן במפורש כ״לא זמין״, לעולם לא כאפס.</p>
+    <div id="out"><p class="loading">טוען…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+
+    // ---- Aggregation mirror of src/management.js (read-only view; the server is the gate). ----
+    const CLOSED = ['הושלם', 'סגור'];
+    const TERMINAL = ['הושלם', 'סגור', 'לא מאושר'];
+    const isOpenReq = (r) => r && TERMINAL.indexOf(String(r.status)) === -1;
+    const isBlockedR = (r) => String(r.blocked == null ? '' : r.blocked).toUpperCase() === 'TRUE';
+    function isOverdueR(r, now) {
+      if (!r.due_at) return false;
+      if (r.status === 'הושלם' || r.status === 'סגור' || r.status === 'נדחה לתאריך') return false;
+      const due = new Date(r.due_at).getTime();
+      return !isNaN(due) && now > due;
+    }
+    const daysOverdueR = (r, now) => Math.floor((now - new Date(r.due_at).getTime()) / 86400000);
+
+    function build(d, now) {
+      const reqs = d.requests || [], findings = d.findings || [], inspections = d.inspections || [],
+        houses = d.houses || [], counts = d.inventoryCounts || [];
+      const open = reqs.filter(isOpenReq);
+
+      // Panel: SLA / delays
+      const byHouse = {};
+      open.forEach((r) => {
+        const b = byHouse[r.house] || (byHouse[r.house] = { house: r.house, open: 0, overdue: 0, blocked: 0 });
+        b.open++; if (isOverdueR(r, now)) b.overdue++; if (isBlockedR(r)) b.blocked++;
+      });
+      const overdue = open.filter((r) => isOverdueR(r, now));
+      const worst = overdue.map((r) => ({ ...r, dov: daysOverdueR(r, now) })).sort((a, b) => b.dov - a.dov);
+      const sla = { openCount: open.length, overdueCount: overdue.length,
+        blockedCount: open.filter(isBlockedR).length, byHouse: Object.values(byHouse), worst };
+
+      // Panel: defect closure
+      const reqById = {}; reqs.forEach((r) => reqById[String(r.id)] = r);
+      const defects = findings.filter((f) => f && f.finding_type === 'physical_defect');
+      let dOpen = 0, onTime = 0, late = 0, noDue = 0;
+      defects.forEach((f) => {
+        const r = f.linked_request_id ? reqById[String(f.linked_request_id)] : null;
+        if (!r || CLOSED.indexOf(String(r.status)) === -1) { dOpen++; return; }
+        if (r.due_at && r.completed_at) {
+          if (new Date(r.completed_at).getTime() <= new Date(r.due_at).getTime()) onTime++; else late++;
+        } else noDue++;
+      });
+      const measured = onTime + late;
+      const defectClosure = { total: defects.length, open: dOpen, onTime, late, noDue,
+        rate: measured > 0 ? Math.round(100 * onTime / measured) : null };
+
+      // Panel: house quality
+      const insById = {}; inspections.forEach((i) => { if (i && i.id != null) insById[String(i.id)] = i; });
+      const hq = {};
+      houses.forEach((h) => hq[h.name] = { house: h.name, status: h.status, last: '', low: 0, medium: 0, high: 0, recurring: 0 });
+      inspections.forEach((i) => { const b = hq[i.house]; if (b) { const dt = String(i.inspection_date || ''); if (dt > b.last) b.last = dt; } });
+      const tally = {};
+      findings.forEach((f) => {
+        if (!f || f.finding_type !== 'physical_defect') return;
+        const ins = insById[String(f.inspection_id)]; const house = ins ? ins.house : ''; const b = hq[house]; if (!b) return;
+        if (!f.linked_request_id) { const s = String(f.severity || '').toLowerCase(); b[(s === 'medium' || s === 'high') ? s : 'low']++; }
+        const k = String(f.finding_text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        if (k) { (tally[house] = tally[house] || {})[k] = ((tally[house] || {})[k] || 0) + 1; }
+      });
+      Object.keys(tally).forEach((house) => { if (hq[house]) hq[house].recurring = Object.values(tally[house]).filter((n) => n >= 2).length; });
+
+      // Panel: spend (owned cost)
+      let est = 0, act = 0; const spendHouse = {};
+      reqs.forEach((r) => { const e = Number(r.estimated_cost) || 0, a = Number(r.actual_cost) || 0; est += e; act += a;
+        const b = spendHouse[r.house] || (spendHouse[r.house] = { house: r.house, estimated: 0, actual: 0 }); b.estimated += e; b.actual += a; });
+
+      // Panel: pre-opening readiness
+      const countedHouse = {}; counts.forEach((c) => { if (c && c.house) countedHouse[c.house] = true; });
+      const pre = houses.filter((h) => String(h.status) === 'pre-opening').map((h) => ({
+        house: h.name,
+        openRequests: reqs.filter((r) => r.house === h.name && isOpenReq(r)).length,
+        openDefects: findings.filter((f) => f && f.finding_type === 'physical_defect' && !f.linked_request_id && insById[String(f.inspection_id)] && insById[String(f.inspection_id)].house === h.name).length,
+        inventoryCounted: !!countedHouse[h.name],
+      }));
+
+      return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) }, preOpening: pre };
+    }
+
+    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES.
+    const UNAVAILABLE = [
+      ['עמידה בתקציב', 'אין מקור נתוני תקציב — נדרש גיליון תקציבים לכל בית להשוואה מול ההוצאה בפועל.'],
+      ['איכות ובטיחות מזון', 'בבעלות אפליקציית המטבח (ezone-kitchen); נדרשת קריאת דייג׳סט המטבח (טרם חוברה).'],
+      ['עמידה בתוכנית תחזוקה מונעת', 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.'],
+      ['עמידה בתוכנית הדרכה', 'אין מקור נתוני הדרכת מדריכים.'],
+      ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
+      ['איכות הרשומה ועמידה בדרישות משרד הבריאות', 'בבעלות האפליקציות הקליניות; אינו בתחום הלוגיסטיקה.'],
+    ];
+
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const nis = (n) => '₪' + Number(n || 0).toLocaleString('he-IL');
+    const fmtDate = (v) => { const m = String(v || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (v ? esc(v) : '—'); };
+
+    function kpi(n, label, cls, alarm) {
+      return `<div class="kpi${alarm ? ' alarm' : ''}"><div class="n ${cls || ''}">${n}</div><div class="l">${esc(label)}</div></div>`;
+    }
+    // A metric with no data source → explicit "לא זמין", never 0.
+    function naKpi(label) { return `<div class="kpi"><div class="n na">לא זמין</div><div class="l">${esc(label)}</div></div>`; }
+
+    function render(m) {
+      const s = m.sla, dc = m.defectClosure;
+      let html = '';
+
+      html += '<h2>עיכובים ו-SLA (הצפת עיכובים)</h2><div class="grid">';
+      html += kpi(s.openCount, 'דרישות פתוחות');
+      html += kpi(s.overdueCount, 'באיחור (חריגה מיעד)', s.overdueCount ? 'red' : 'ok', s.overdueCount > 0);
+      html += kpi(s.blockedCount, 'חסומות', s.blockedCount ? 'amber' : 'ok');
+      html += '</div>';
+      if (s.worst.length) {
+        html += '<h2>הדרישות הכי באיחור</h2><table><thead><tr><th>בית</th><th>תיאור</th><th>דחיפות</th><th>ימי איחור</th><th></th></tr></thead><tbody>';
+        html += s.worst.slice(0, 12).map((r) => `<tr><td>${esc(r.house)}</td><td>${esc(r.description || r.id)}</td><td>${esc(r.urgency || '')}</td><td><span class="pill red">${r.dov}</span></td><td>${r.blocked ? '<span class="pill amber">חסום</span>' : ''}</td></tr>`).join('');
+        html += '</tbody></table>';
+      }
+
+      html += '<h2>סגירת ליקויים במועד</h2><div class="grid">';
+      html += kpi(dc.total, 'ליקויים (פגמים פיזיים)');
+      html += kpi(dc.open, 'ליקויים פתוחים', dc.open ? 'amber' : 'ok');
+      html += (dc.rate == null) ? naKpi('אחוז סגירה במועד') : kpi(dc.rate + '%', 'סגירה במועד', dc.rate >= 80 ? 'ok' : 'amber');
+      html += kpi(dc.onTime + ' / ' + dc.late, 'במועד / באיחור');
+      html += '</div>';
+      if (dc.noDue) html += `<p class="sub">(${dc.noDue} ליקויים נסגרו ללא תאריך יעד — לא נכללים באחוז הסגירה במועד.)</p>`;
+
+      html += '<h2>רמת הבתים ואירועים חוזרים</h2><table><thead><tr><th>בית</th><th>סטטוס</th><th>בקרה אחרונה</th><th>ליקויים פתוחים (גבוה/בינוני/נמוך)</th><th>חוזרים</th></tr></thead><tbody>';
+      html += m.houseQuality.map((h) => `<tr><td>${esc(h.house)}</td><td>${h.status === 'pre-opening' ? 'טרום-פתיחה' : 'פתוח'}</td><td>${h.last ? fmtDate(h.last) : '<span class="na">אין בקרה</span>'}</td><td><span class="pill red">${h.high}</span> / <span class="pill amber">${h.medium}</span> / ${h.low}</td><td>${h.recurring ? '<span class="pill amber">' + h.recurring + '</span>' : '0'}</td></tr>`).join('');
+      html += '</tbody></table>';
+
+      html += '<h2>הוצאות (רכש) — לפי בית</h2><div class="grid">';
+      html += kpi(nis(m.spend.act), 'הוצאה בפועל (סה״כ)');
+      html += kpi(nis(m.spend.est), 'הערכת עלות (סה״כ)');
+      html += naKpi('עמידה בתקציב');
+      html += '</div>';
+      html += '<table><thead><tr><th>בית</th><th>הערכה</th><th>בפועל</th></tr></thead><tbody>';
+      html += m.spend.byHouse.filter((b) => b.house).sort((a, b) => b.actual - a.actual).map((b) => `<tr><td>${esc(b.house)}</td><td>${nis(b.estimated)}</td><td>${nis(b.actual)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">אין נתוני הוצאה.</td></tr>';
+      html += '</tbody></table>';
+
+      if (m.preOpening.length) {
+        html += '<h2>מוכנות בתים לפתיחה</h2><table><thead><tr><th>בית</th><th>דרישות פתוחות</th><th>ליקויים פתוחים</th><th>ספירת מלאי בוצעה</th></tr></thead><tbody>';
+        html += m.preOpening.map((p) => `<tr><td>${esc(p.house)}</td><td>${p.openRequests}</td><td>${p.openDefects}</td><td>${p.inventoryCounted ? '<span class="pill ok">כן</span>' : '<span class="pill amber">לא</span>'}</td></tr>`).join('');
+        html += '</tbody></table>';
+      }
+
+      html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';
+      html += UNAVAILABLE.map(([t, r]) => `<div class="unavail" style="margin-bottom:8px"><div class="t">${esc(t)} — לא זמין</div><div class="r">${esc(r)}</div></div>`).join('');
+
+      document.getElementById('out').innerHTML = html;
+    }
+
+    async function load() {
+      try {
+        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: {} }) });
+        if (res.status === 403) { document.getElementById('out').innerHTML = '<div class="deny">אין הרשאה לצפייה במסך זה. המסך פתוח למנהלת התפעול ולמנכ״לית בלבד.</div>'; return; }
+        const j = await res.json();
+        if (!j || !j.ok) {
+          if (j && /forbidden/i.test(j.error || '')) { document.getElementById('out').innerHTML = '<div class="deny">אין הרשאה לצפייה במסך זה.</div>'; return; }
+          throw new Error((j && j.error) || 'load failed');
+        }
+        render(build(j.data || {}, Date.now()));
+      } catch (e) {
+        document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

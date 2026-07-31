@@ -52,6 +52,13 @@ function isManagerRole(role) {
   return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
 }
 
+// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) and the CEO.
+// NARROWER than isManagerRole — field_ops (Roy) is a manager tier for dispatch but is NOT an exec, so
+// he gets 403 here. Enforced server-side AND in Code.gs, never UI-only.
+function canManage(role) {
+  return role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+}
+
 // House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their
 // own house (scope = that house name). A maintenance lead sees the houses in their cluster(s)
 // (scope = a comma-separated cluster list; houseCluster is the candidate house's cluster). The
@@ -70,4 +77,4 @@ function houseInScope(role, scope, houseName, houseCluster) {
 }
 // === MIRROR:roles END ===
 
-export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, canBlock, isManagerRole, houseInScope };
+export { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, canBlock, canManage, isManagerRole, houseInScope };

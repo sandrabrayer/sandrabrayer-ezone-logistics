@@ -3,6 +3,47 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — increment 37 — /management network-management screen for the ops manager + CEO
+
+**Why:** Olga's role (מנהלת תפעול, איכות והטמעה רשתית) needs a single network-management view. This
+increment builds it from Olga's approved JD — but ONLY the parts that have a real data source in this
+repo. Every JD metric that has no source is shown explicitly as **"לא זמין"**, never faked as a number.
+
+**Role-gated to ops_manager + ceo.** New `canManage` predicate (in `MIRROR:roles`, both `src/roles.js`
+and `Code.gs`). Data is served via a POST action `managementData` so the token identity is verified
+(a `doGet` is not identity-checked); refused **403 in `Code.gs` AND in `server.js`** for every other
+role — including field_ops (Roy), who is manager-tier for dispatch but not an exec. Not UI-only.
+
+**JD → capabilities, mapped by data source.** Built (data this repo owns):
+- **Delays / SLA** (Roy's הצפת עיכובים): open / overdue / blocked requests, by house, worst-first.
+- **סגירת ליקויים במועד** (Olga's headline): physical-defect findings → their linked requests, closed
+  on-time vs late; the on-time RATE is **unavailable until a defect closes against a due date** (never 0%).
+- **רמת הבתים + recurring exceptions**: per house — last inspection, open defects by severity, and
+  defects that recur (same text ≥2×).
+- **Spend** (Logistics owns cost): estimated/actual by house + category.
+- **Pre-opening readiness**: for pre-opening houses — open requests, open defects, stock counted?
+
+**Reported, NOT built** (no data source in this repo — listed on-screen with what each would need):
+עמידה בתקציב (no budget source) · איכות ובטיחות מזון (owned by ezone-kitchen; the kitchen-digest read
+is **not wired** here) · תחזוקה מונעת (no preventive-maintenance schedule) · הדרכה · הטמעת מערכות ·
+איכות הרשומה/עמידת משרד הבריאות (clinical apps). No kitchen or coordinator digest is read — that
+plumbing does not exist in this repo, so it is reported rather than invented.
+
+**Honesty discipline:** nothing on the screen shows a number it cannot source; absent metrics render
+as "לא זמין", the same missing-vs-zero rule as elsewhere. The screen writes nothing to any app.
+
+**Files:** new pure `src/management.js` (unit-tested), `src/management.html` (renders via an inline
+mirror), a `/management` route, `handleManagementData_` in `Code.gs`, and the `canManage` gate in
+`server.js`.
+
+**Tests:** each panel against fixtures; the on-time rate + budget adherence render **unavailable, not
+zero**, on empty data; `canManage` gating (ops_manager/ceo pass; field_ops/coordinator/maintenance
+refused); the `MIRROR:roles` drift guard covers `canManage`. Full `node --test` suite green (312).
+
+> **After this merge:** no `setupSheet()` re-run, no sheet-cell edits, no digest rebuild — the screen
+> only reads existing sheets. Reach it at `/management` (visible to ops_manager + ceo; others get a
+> "no access" screen). It is deliberately not linked from the other pages' nav yet.
+
 ## [Unreleased] — increment 36 — SLA due dates + aging (overdue / blocked), surfaced on the list and the digest
 
 **Why:** two needs from one build — Roy's הצפת עיכובים (delays surfaced in real time) and Olga's
