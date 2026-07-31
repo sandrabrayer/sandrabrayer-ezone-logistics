@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EZone לוגיסטיקה — ניהול רשת</title>
+  <title>EZone לוגיסטיקה — ניהול תפעולי רשת</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -58,11 +58,13 @@
 </head>
 <body>
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/management" class="active">ניהול רשת</a></nav>
+    <!-- The /management nav link is injected by the auth shim for exec roles only (ops_manager/ceo),
+         so it never shows for other roles. Kept out of the static markup on purpose. -->
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span>לוגיסטיקה</span></div>
   </div>
   <div class="wrap">
-    <h1>ניהול רשת — תפעול, איכות ובקרה</h1>
+    <h1>ניהול תפעולי רשת</h1>
     <p class="sub">מסך הנהלה (מנהלת תפעול / מנכ״לית). מוצג רק מה שיש לו מקור נתונים אמיתי בלוגיסטיקה — מדד ללא מקור מסומן במפורש כ״לא זמין״, לעולם לא כאפס.</p>
     <div id="out"><p class="loading">טוען…</p></div>
   </div>

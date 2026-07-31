@@ -37,6 +37,7 @@ function runShim(seedSession) {
     body,
     createElement: makeEl,
     getElementById: (id) => byId[id] || null,
+    querySelector: () => null,   // shim's mgmt-nav injection looks up '.nav' (none here)
     addEventListener: () => {},
   };
 
