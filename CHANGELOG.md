@@ -3,6 +3,58 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — compliance tracker (עמידה ברגולציה — תעודות, רישיונות, תוקף ותזכורות) on /management
+
+Olga's "עמידה ברגולציה" was "לא זמין". This adds the data model, a reminder generator, and the
+adherence panel so per-house certificates/licenses/inspections (e.g. *רישיון עסק, ביטוח, בדיקת גז,
+גלאי עשן, תו תקן מטבח*) with an expiry are **tracked**, **surfaced** when expiring/expired, and turned
+into renewal requests **ahead of time**.
+
+**New `Compliance` sheet** (`id, house, item, expires_at, reminder_days, doc_url, notes, active`) —
+created empty + idempotently by `setupSheet()`; Olga fills rows in the Sheet (no entry UI this
+increment). `house` = a **canonical id** (HOUSE-IDS.md) **or** `all` (every OPEN house). `reminder_days`
+blank = the Config default. **`days_to_expiry` / `status` are DERIVED, never stored.** A new append-only
+`compliance_id` column on **Requests** links a generated renewal to its row. New Config key
+**`compliance_reminder_days`** (seeded **30**), read like `sla_days` — a malformed value is logged and
+falls back to the seed, never a silent number beyond it.
+
+**Status:** `בתוקף` (valid) / `פג בקרוב` (expiring — within the reminder window, `0 ≤ days ≤ reminder`,
+so the expiry day itself is "expiring") / `פג תוקף` (expired — `days < 0`), worst-first.
+
+**Reminder generation** rides on the **existing daily scan** (`runMaintenanceScan`, 06:00) — **no new
+trigger to install.** For each **active** item that is expiring or expired it creates a **normal**
+Request — category `תיקון`, urgency **`דחוף` if expired / `רגיל` if expiring**, `created_by` =
+"מערכת - רגולציה", description = "חידוש: <item> — <house> (עמידה ברגולציה)" — through the **same approval
+chain + SLA**. **Idempotent** (one open request per compliance id + house; a terminal one lets the next
+cycle regenerate). An `all` item expands to every open house. **On completion NOTHING is written back** —
+the new expiry lives on the new certificate, so Olga updates `expires_at` by hand (the panel keeps
+showing expiring/expired until she does). Malformed rows (missing id/item, blank/unparseable
+`expires_at`, unknown house id) are skipped and logged.
+
+**Panel:** the /management "עמידה ברגולציה" section (canManage-gated) shows compliance **per house**,
+worst-first (expired first, then soonest-to-expire), with days-to-expiry and a **doc link** when
+present. A house with **no rows** shows "לא הוגדרו פריטי רגולציה" — never a fabricated 0. **No
+compliance data enters any digest.**
+
+**Mirror + enforcement:** pure logic in `src/compliance.js` behind a `MIRROR:compliance` fence
+duplicated verbatim in `apps-script/Code.gs` (drift-guarded). It reuses four date/house primitives from
+`maintenance.js` (`maintDateOnly`, `maintDaysBetween`, `maintActive`, `expandHouses`) so both features
+share one implementation. Role gate enforced server-side and in Code.gs (compliance data rides on the
+`managementData` `canManage` gate).
+
+**Tests:** new `test/compliance.test.js` — status derivation incl. the boundaries at **exactly
+reminder_days** and at **0**, per-row `reminder_days` override, blank/malformed `expires_at` skipping,
+duplicate-prevention (open blocks, terminal doesn't), renewal shaping (`compliance_id` + `דחוף`/`רגיל`),
+a guard that the module has **no completion write-back**, inactive rows never generating, `all`
+expansion, and the panel's unavailable-vs-zero discipline. Schema + mirror-drift tests extended for
+`Compliance`, the `compliance_id` column and the new Config key. Full `node --test` suite green (409).
+
+> **After this merge:** re-run **`setupSheet()`** once (creates the `Compliance` sheet, appends the
+> `compliance_id` column to Requests, and adds the `compliance_reminder_days` Config row — existing rows
+> untouched). **No new trigger** — the compliance pass runs on the already-installed daily
+> `runMaintenanceScan` trigger. Olga fills `Compliance` rows (`house` = canonical id or `all`, an
+> `expires_at` date, `active` = `TRUE`; `reminder_days` optional). Nothing is written to any digest.
+
 ## [Unreleased] — feature — preventive-maintenance scheduler (תחזוקה מונעת) on /management
 
 Olga's "עמידה בתוכנית תחזוקה מונעת" was "לא זמין" (no recurring-maintenance source existed — every

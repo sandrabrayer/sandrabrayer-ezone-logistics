@@ -38,6 +38,8 @@ export const HEADERS = {
     'blocked_at',          // ISO when the block was set
     // ---- Preventive maintenance (תחזוקה מונעת) — APPENDED at the end (never reorder earlier columns) ----
     'plan_id',             // MaintenancePlan.id that generated this request; blank for normal requests.
+    // ---- Compliance (עמידה ברגולציה) — APPENDED at the end (never reorder earlier columns) ----
+    'compliance_id',       // Compliance.id that generated this renewal request; blank for normal requests.
   ],
 
   // Self-owned house list (NOT fed from Dashboard). §4.
@@ -129,6 +131,16 @@ export const HEADERS = {
   // due immediately). `active` is 'TRUE'/'FALSE'. next_due / overdue are DERIVED, never stored.
   // The only cell the system writes back is `last_done`, when a generated request reaches הושלם.
   MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
+
+  // Compliance tracker (עמידה ברגולציה) — one row per certificate/license/inspection with an expiry.
+  // Olga fills rows directly in the Sheet (no entry UI this increment). Created empty + idempotently by
+  // setupSheet(); columns are append-only. `house` is a CANONICAL id (HOUSE-IDS.md) OR the literal 'all'
+  // (every OPEN house). `item` is the Hebrew name (e.g. רישיון עסק). `expires_at` is a date (YYYY-MM-DD).
+  // `reminder_days` is a number of days before expiry to start warning; BLANK = the Config default
+  // (compliance_reminder_days). `doc_url` links the scanned certificate (optional). `active` is
+  // 'TRUE'/'FALSE'. days_to_expiry / status are DERIVED, never stored. NOTHING is written back on
+  // completion — the new expiry lives on the new certificate, so Olga updates expires_at by hand.
+  Compliance: ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -234,6 +246,11 @@ export const SEED_CONFIG = [
   // is blank — no coordinators-PUBLISHED digest exists to read (this app only PUBLISHES one for them).
   { key: 'kitchen_digest_id', value: '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE' },
   { key: 'coordinators_digest_id', value: '' },
+  // compliance_reminder_days (compliance tracker) — how many days before a certificate/license expiry
+  // to start warning + generating a renewal request, when a Compliance row leaves reminder_days blank.
+  // Read like sla_days (tunable in the Sheet, no deploy). A malformed value is logged and falls back to
+  // this seeded default (30) — never a silent number beyond the seed.
+  { key: 'compliance_reminder_days', value: '30' },
 ];
 
 // ---- Roles + user seed (increment 30) ----

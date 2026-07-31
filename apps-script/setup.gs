@@ -23,6 +23,9 @@ var HEADERS = {
     // Preventive maintenance (תחזוקה מונעת) — plan_id APPENDED at the end (existing sheets gain it
     // via the append branch in setupSheet()). Blank for normal requests.
     'plan_id',
+    // Compliance (עמידה ברגולציה) — compliance_id APPENDED at the end (existing sheets gain it via the
+    // append branch in setupSheet()). Blank for normal requests.
+    'compliance_id',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
@@ -64,6 +67,12 @@ var HEADERS = {
   // frequency_months = positive int; last_done = date (blank = never → due now); active = TRUE/FALSE.
   // next_due / overdue are DERIVED, never stored. Append-only. Only last_done is written back (on הושלם).
   MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
+  // Compliance (עמידה ברגולציה) — one row per certificate/license/inspection with an expiry; Olga fills
+  // rows in the Sheet (no entry UI). Created empty by setupSheet(). house = canonical id (HOUSE-IDS.md)
+  // OR 'all'. item = Hebrew name; expires_at = date; reminder_days = int (blank = Config default); doc_url
+  // optional; active = TRUE/FALSE. days_to_expiry / status are DERIVED, never stored. Append-only. Nothing
+  // is written back on completion — Olga updates expires_at from the new certificate by hand.
+  Compliance: ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active'],
 };
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
@@ -94,6 +103,10 @@ var SEED_CONFIG = [
   // Grant the Logistics Apps Script account VIEWER access to the kitchen spreadsheet for the read to work.
   ['kitchen_digest_id', '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE'],
   ['coordinators_digest_id', ''],
+  // compliance_reminder_days (compliance tracker) — days before a certificate expiry to start warning +
+  // generating a renewal request, when a Compliance row leaves reminder_days blank. Upserted by key. A
+  // malformed value is logged and falls back to this seeded default (30) — never a silent number beyond it.
+  ['compliance_reminder_days', '30'],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites
