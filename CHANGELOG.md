@@ -3,6 +3,50 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — preventive-maintenance scheduler (תחזוקה מונעת) on /management
+
+Olga's "עמידה בתוכנית תחזוקה מונעת" was "לא זמין" (no recurring-maintenance source existed — every
+request was reactive). This adds the data model, the generator, and the adherence panel so recurring
+tasks (e.g. *בדיקת מטפי כיבוי כל 6 חודשים*) are tracked and turned into ordinary requests when due.
+
+**New `MaintenancePlan` sheet** (`id, house, task, frequency_months, last_done, active, notes`) —
+created empty and idempotently by `setupSheet()`; Olga fills rows in the Sheet (no entry UI this
+increment). `house` is a **canonical id** (HOUSE-IDS.md) **or** the literal `all` (every OPEN house).
+`last_done` blank = *never done* → due immediately. **`next_due` / `days_until` / `overdue` are DERIVED,
+never stored.** A new append-only `plan_id` column on **Requests** links a generated request back to its
+plan row (blank for a normal request).
+
+**Generation** — a daily time-based trigger (`installMaintenanceTrigger`, 06:00) runs
+`runMaintenanceScan()`: for each **active, due** plan it creates a **normal** Request (category `תיקון`,
+urgency `רגיל`, `created_by` = "מערכת - תחזוקה מונעת", description = *task* + " (תחזוקה מונעת)") that flows
+through the **same approval chain + SLA** as any request. It is **idempotent** — never a second OPEN
+request for the same plan+house (a still-open request blocks; a terminal one — הושלם/סגור/לא מאושר —
+lets the next cycle regenerate). An `all` plan expands to every open house. When a generated request
+reaches **הושלם** (via either completion path), the plan row's `last_done` is written back — the one
+write to the plan sheet. Malformed rows (bad frequency, unknown house id, missing id/task) are skipped
+and logged, never miscounted.
+
+**Panel** — the /management "תחזוקה מונעת" section (canManage-gated, same 403 authority) shows
+plan adherence **per house**, worst-first (overdue first, then soonest-due), with last-done / next-due
+dates. A house with **no plan row** shows "לא הוגדרה תוכנית" — **never a fabricated 0**. No plan/
+maintenance data enters any digest.
+
+**Mirror + enforcement:** the pure logic lives in `src/maintenance.js` behind a `MIRROR:maintenance`
+fence duplicated verbatim in `apps-script/Code.gs` (drift-guarded). The role gate is enforced
+server-side and in Code.gs (maintenance data rides on the `managementData` `canManage` gate).
+
+**Tests:** a new `test/maintenance.test.js` covers next_due derivation (incl. blank last_done → due
+now, month-end clamping), due/overdue, duplicate-prevention (open blocks, terminal doesn't), request
+shaping (plan_id + normal category/urgency), last_done write-back, inactive/malformed skipping, `all`
+expansion to every open house, and the panel's unavailable-vs-zero discipline. Schema + mirror-drift
+tests extended for `MaintenancePlan` and the `plan_id` column; the management "unavailable" list drops
+`preventive_maintenance` (now live). Full `node --test` suite green (381).
+
+> **After this merge:** re-run **`setupSheet()`** once (creates the `MaintenancePlan` sheet and appends
+> the `plan_id` column to Requests — existing rows are untouched), then run **`installMaintenanceTrigger()`**
+> once to install the daily scan. Olga fills `MaintenancePlan` rows (house = canonical id or `all`,
+> a positive `frequency_months`, `active` = `TRUE`). Nothing is written to any digest.
+
 ## [Unreleased] — feature — "ניהול תפעולי רשת" nav link to /management (exec-only, display)
 
 A nav link labeled **"ניהול תפעולי רשת"** → `/management` now appears in the nav on **every** page,

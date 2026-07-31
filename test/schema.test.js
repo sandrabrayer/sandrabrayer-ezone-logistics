@@ -9,23 +9,30 @@ import {
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
     'AuditLog', 'Budgets', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
-    'Inspections', 'InventoryCounts', 'InventoryItems', 'Requests', 'Technicians',
-    'Users',
+    'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan', 'Requests',
+    'Technicians', 'Users',
   ].sort());
 });
 
-test('Requests sheet has all 28 columns; SLA columns appended last (increment 36)', () => {
-  assert.equal(HEADERS.Requests.length, 28);
+test('Requests sheet has all 29 columns; plan_id appended last (preventive maintenance)', () => {
+  assert.equal(HEADERS.Requests.length, 29);
   assert.equal(HEADERS.Requests[0], 'id');
-  // blocked_at is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
-  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'blocked_at');
+  // plan_id is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
+  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'plan_id');
   assert.equal(HEADERS.Requests[23], 'execution_status');
+  // The SLA columns (increment 36) stay put just before plan_id.
+  assert.equal(HEADERS.Requests[27], 'blocked_at');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
     'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status',
-    'due_at', 'blocked', 'blocked_reason', 'blocked_at']) {
+    'due_at', 'blocked', 'blocked_reason', 'blocked_at', 'plan_id']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
+});
+
+test('MaintenancePlan sheet has the append-only plan columns', () => {
+  assert.deepEqual(HEADERS.MaintenancePlan,
+    ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes']);
 });
 
 test('execution-status vocabulary: three pickable values + empty default', () => {

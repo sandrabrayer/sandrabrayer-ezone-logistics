@@ -20,6 +20,9 @@ var HEADERS = {
     'execution_status',
     // SLA + aging (increment 36) — APPENDED at the end (existing sheets gain them via setupSheet()).
     'due_at', 'blocked', 'blocked_reason', 'blocked_at',
+    // Preventive maintenance (תחזוקה מונעת) — plan_id APPENDED at the end (existing sheets gain it
+    // via the append branch in setupSheet()). Blank for normal requests.
+    'plan_id',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
@@ -56,6 +59,11 @@ var HEADERS = {
   // Budgets — one row per house (canonical id) per month (YYYY-MM), amount in NIS. Created empty by
   // setupSheet(); Olga fills rows in the Sheet. Financial — never written to any digest. Append-only.
   Budgets: ['house', 'period', 'amount', 'notes'],
+  // Preventive-maintenance plan (תחזוקה מונעת) — one row per recurring task; Olga fills rows in the
+  // Sheet (no entry UI). Created empty by setupSheet(). house = canonical id (HOUSE-IDS.md) OR 'all'.
+  // frequency_months = positive int; last_done = date (blank = never → due now); active = TRUE/FALSE.
+  // next_due / overdue are DERIVED, never stored. Append-only. Only last_done is written back (on הושלם).
+  MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
 };
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.

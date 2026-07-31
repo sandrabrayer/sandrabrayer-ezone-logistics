@@ -145,16 +145,16 @@
         inventoryCounted: !!countedHouse[h.name],
       }));
 
-      // kitchen + coordinators + budget are computed SERVER-SIDE (Code.gs) and passed through as-is;
-      // the browser only renders them.
+      // kitchen + coordinators + budget + maintenance are computed SERVER-SIDE (Code.gs) and passed
+      // through as-is; the browser only renders them.
       return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
-        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null };
+        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null,
+        maintenance: d.maintenance || null };
     }
 
-    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality is now
-    // a LIVE panel below, so it is no longer listed here).
+    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget
+    // and preventive_maintenance are now LIVE panels below, so they are no longer listed here).
     const UNAVAILABLE = [
-      ['עמידה בתוכנית תחזוקה מונעת', 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.'],
       ['עמידה בתוכנית הדרכה', 'אין מקור נתוני הדרכת מדריכים.'],
       ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
       ['איכות הרשומה ועמידה בדרישות משרד הבריאות', 'בבעלות האפליקציות הקליניות; אינו בתחום הלוגיסטיקה.'],
@@ -259,6 +259,38 @@
           html += '<p class="sub">* כולל אומדן (estimated_cost) כאשר עלות בפועל טרם הוזנה.</p>';
         }
         if (bud.adherence && bud.adherence.skipped) html += `<p class="sub">${bud.adherence.skipped} שורות תקציב לא תקינות דולגו (בדוק פורמט חודש/סכום בגיליון Budgets).</p>`;
+      }
+
+      // Preventive maintenance (תחזוקה מונעת) — computed server-side from the MaintenancePlan sheet.
+      // Per house, worst-first: overdue tasks first, then soonest-due. A house with no plan row shows
+      // "לא הוגדרה תוכנית" (never a fabricated 0). next_due / overdue are derived, never stored.
+      const mnt = m.maintenance;
+      html += '<h2>תחזוקה מונעת</h2>';
+      if (!mnt || !mnt.houses) {
+        html += '<div class="unavail"><div class="t">תחזוקה מונעת — לא זמין</div><div class="r">אין נתוני תוכנית תחזוקה</div></div>';
+      } else if (!mnt.houses.length) {
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים פעילים</div></div>';
+      } else {
+        html += mnt.houses.map((h) => {
+          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${h.overdueCount ? ` <span class="pill red">${h.overdueCount} באיחור</span>` : ''}</h3>`;
+          if (!h.planDefined) {
+            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרה תוכנית תחזוקה מונעת לבית זה.</div></div>';
+            return block;
+          }
+          block += '<table><thead><tr><th>משימה</th><th>תדירות</th><th>בוצע לאחרונה</th><th>מועד הבא</th><th>סטטוס</th></tr></thead><tbody>';
+          block += h.tasks.map((t) => {
+            const freq = `כל ${t.frequency} חוד׳`;
+            const last = t.lastDone ? fmtDate(t.lastDone) : '<span class="na">מעולם לא</span>';
+            const next = t.nextDue ? fmtDate(t.nextDue) : '<span class="na">מיידי</span>';
+            const status = t.overdue
+              ? '<span class="pill red">' + (t.lastDone ? `באיחור ${Math.abs(t.daysUntil)} ימים` : 'טרם בוצע') + '</span>'
+              : (t.daysUntil <= 30 ? `<span class="pill amber">בעוד ${t.daysUntil} ימים</span>` : `<span class="pill ok">בעוד ${t.daysUntil} ימים</span>`);
+            return `<tr><td>${esc(t.task)}</td><td>${esc(freq)}</td><td>${last}</td><td>${next}</td><td>${status}</td></tr>`;
+          }).join('');
+          block += '</tbody></table>';
+          return block;
+        }).join('');
+        if (mnt.skipped) html += `<p class="sub">${mnt.skipped} שורות תוכנית לא תקינות דולגו (בדוק id/משימה/תדירות/בית בגיליון MaintenancePlan).</p>`;
       }
 
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';

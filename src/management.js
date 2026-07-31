@@ -35,7 +35,7 @@ function isOpenRequest(r) {
 export const UNAVAILABLE_CAPABILITIES = [
   // budget_adherence moved to a LIVE panel (Budgets sheet vs Requests spend) — see the "עמידה בתקציב" panel.
   // food_quality moved to a LIVE panel (kitchen-digest read) — see the "חוסרי מזון" panel.
-  { key: 'preventive_maintenance', label: 'עמידה בתוכנית תחזוקה מונעת', reason: 'אין מקור לתוכנית תחזוקה מונעת/תקופתית — הדרישות כיום תגובתיות בלבד.' },
+  // preventive_maintenance moved to a LIVE panel (MaintenancePlan sheet) — see the "תחזוקה מונעת" panel.
   { key: 'training_adherence', label: 'עמידה בתוכנית הדרכה', reason: 'אין מקור נתוני הדרכת מדריכים.' },
   { key: 'systems_adoption', label: 'הטמעת מערכות', reason: 'אין מקור נתוני הטמעת תוכנות/אפליקציות.' },
   { key: 'record_quality', label: 'איכות הרשומה המקצועית ועמידה בדרישות משרד הבריאות', reason: 'בבעלות האפליקציות הקליניות (outpatient/therapists); אינו בתחום הלוגיסטיקה.' },
