@@ -542,6 +542,9 @@ function buildNewRequest_(input) {
     // SLA + aging (increment 36). due_at is derived in handleCreateRequest_ (needs Config); a request
     // starts unblocked.
     due_at: '', blocked: 'FALSE', blocked_reason: '', blocked_at: '',
+    // Preventive maintenance (תחזוקה מונעת). Blank for a user-filed request; set by
+    // createMaintenanceRequest_ for a generated one.
+    plan_id: '',
   };
 }
 
@@ -732,6 +735,9 @@ function handleSetStatus_(p, actor) {
     if (p.completion_notes) fields.completion_notes = p.completion_notes;
   }
   updateRequest_(p.id, fields, req.status, p.to, actor.name, p.note || '');
+  // Preventive maintenance: a completed plan-linked request writes its completion date back to the
+  // plan's last_done (no-op for a normal request — plan_id blank).
+  if (p.to === ST.COMPLETED) updatePlanLastDone_({ plan_id: req.plan_id, completed_at: fields.completed_at });
   rebuildDigest();
   return jsonOut_({ ok: true });
 }
@@ -749,9 +755,12 @@ function handleSetExecution_(p, actor) {
     if (!canTransition_(req.status, ST.COMPLETED)) {
       return jsonOut_({ ok: false, error: 'ניתן לסמן בוצע רק למשימה בביצוע' });
     }
+    var completedAt = new Date().toISOString();
     updateRequest_(p.id,
-      { execution_status: 'בוצע', status: ST.COMPLETED, completed_at: new Date().toISOString() },
+      { execution_status: 'בוצע', status: ST.COMPLETED, completed_at: completedAt },
       req.status, ST.COMPLETED, actor.name, 'סומן כבוצע');
+    // Preventive maintenance: write completion date back to the plan's last_done (no-op if not linked).
+    updatePlanLastDone_({ plan_id: req.plan_id, completed_at: completedAt });
     rebuildDigest();
     return jsonOut_({ ok: true, completed: true });
   }
@@ -1050,6 +1059,325 @@ function budgetPeriods(budgets, requests, maps, currentPeriod) {
 }
 // === MIRROR:budget END ===
 
+// === MIRROR:maintenance START ===
+// Two-digit zero-pad for a month/day number.
+function maintPad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+// A cell → a POSITIVE integer, or null when blank / non-numeric / not a positive whole number (so a
+// bad frequency never coerces to a silent default).
+function maintNum(v) {
+  if (v == null) return null;
+  var s = String(v).replace(/^\s+|\s+$/g, '');
+  if (s === '') return null;
+  var n = Number(s);
+  if (!isFinite(n) || n <= 0 || Math.floor(n) !== n) return null;
+  return n;
+}
+
+// TRUE/FALSE cell → boolean. Only the explicit 'TRUE' (any case) is active; blank / anything else is
+// inactive (an inactive plan never generates a request and is not tracked in the panel).
+function maintActive(v) {
+  return String(v == null ? '' : v).replace(/^\s+|\s+$/g, '').toUpperCase() === 'TRUE';
+}
+
+// Any date-ish cell → 'YYYY-MM-DD', or '' when blank / unparseable. Handles a Date object (Apps Script
+// reads a date cell as one) and an ISO/date string; the time portion is dropped.
+function maintDateOnly(v) {
+  if (v == null) return '';
+  if (typeof v === 'object' && typeof v.getFullYear === 'function' && isFinite(v.getTime())) {
+    return v.getFullYear() + '-' + maintPad2(v.getMonth() + 1) + '-' + maintPad2(v.getDate());
+  }
+  var m = String(v).replace(/^\s+|\s+$/g, '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+}
+
+// 'YYYY-MM-DD' → UTC epoch ms at midnight, or null when unparseable.
+function ymdToUTC(ymd) {
+  var m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+// Days in a (UTC) month; mZeroBased is 0..11.
+function daysInMonthUTC_(y, mZeroBased) {
+  return new Date(Date.UTC(y, mZeroBased + 1, 0)).getUTCDate();
+}
+
+// Add whole months to a 'YYYY-MM-DD' (clamping the day to the target month's length, so
+// 2026-01-31 + 1 month = 2026-02-28). Returns '' when the input is unparseable.
+function addMonthsToDate(ymd, months) {
+  var m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  var y = Number(m[1]);
+  var mo = Number(m[2]) - 1;
+  var d = Number(m[3]);
+  var total = mo + months;
+  var ny = y + Math.floor(total / 12);
+  var nm = total % 12;
+  if (nm < 0) { nm += 12; ny -= 1; }
+  var dim = daysInMonthUTC_(ny, nm);
+  var nd = d > dim ? dim : d;
+  return ny + '-' + maintPad2(nm + 1) + '-' + maintPad2(nd);
+}
+
+// Whole days from fromYmd to toYmd (to - from), or null when either is unparseable.
+function maintDaysBetween(fromYmd, toYmd) {
+  var a = ymdToUTC(fromYmd), b = ymdToUTC(toYmd);
+  if (a == null || b == null) return null;
+  return Math.round((b - a) / 86400000);
+}
+
+// Derived status of ONE task as of nowDay ('YYYY-MM-DD'): { nextDue, daysUntil, overdue }.
+//   - blank last_done (never done) OR bad frequency → due immediately: { nextDue:'', daysUntil:0, overdue:true }.
+//   - else nextDue = last_done + frequency months; daysUntil = nextDue - now; overdue = daysUntil <= 0.
+function planTaskStatus(lastDone, frequencyMonths, nowDay) {
+  var last = maintDateOnly(lastDone);
+  var freq = maintNum(frequencyMonths);
+  if (!last || freq == null) return { nextDue: '', daysUntil: 0, overdue: true };
+  var nextDue = addMonthsToDate(last, freq);
+  var daysUntil = maintDaysBetween(nowDay, nextDue);
+  if (daysUntil == null) return { nextDue: nextDue, daysUntil: 0, overdue: true };
+  return { nextDue: nextDue, daysUntil: daysUntil, overdue: daysUntil <= 0 };
+}
+
+// Parse + validate one MaintenancePlan row → normalized object, or null (malformed → logged, skipped).
+// idToName is the canonical-id → name map; house must be 'all' or one of its keys.
+function parsePlanRow(row, idToName, log) {
+  var idMap = idToName || {};
+  var id = String(row && row.id != null ? row.id : '').replace(/^\s+|\s+$/g, '');
+  var house = String(row && row.house != null ? row.house : '').replace(/^\s+|\s+$/g, '');
+  var task = String(row && row.task != null ? row.task : '').replace(/^\s+|\s+$/g, '');
+  if (!id) { if (log) log('maintenance: plan row missing id — skipped'); return null; }
+  if (!task) { if (log) log('maintenance: plan "' + id + '" missing task — skipped'); return null; }
+  var freq = maintNum(row ? row.frequency_months : null);
+  if (freq == null) { if (log) log('maintenance: plan "' + id + '" bad frequency_months — skipped'); return null; }
+  if (house !== 'all' && !Object.prototype.hasOwnProperty.call(idMap, house)) {
+    if (log) log('maintenance: plan "' + id + '" unknown house "' + house + '" — skipped');
+    return null;
+  }
+  return {
+    id: id, house: house, task: task, frequency: freq,
+    lastDone: maintDateOnly(row ? row.last_done : ''),
+    active: maintActive(row ? row.active : ''),
+    notes: String(row && row.notes != null ? row.notes : '')
+  };
+}
+
+// A plan's target house(s) → array of canonical ids. 'all' → every OPEN house; a specific id → itself.
+function expandHouses(house, openHouseIds) {
+  if (house === 'all') return (openHouseIds || []).slice();
+  return [house];
+}
+
+// The request-input for a generated maintenance task. A NORMAL request (תיקון / רגיל) — it flows
+// through the same approval chain + SLA as any request. plan_id links it back to its plan row.
+function maintenanceRequestInput(target) {
+  return {
+    house: target.houseName,
+    category: 'תיקון',
+    urgency: 'רגיל',
+    description: target.task + ' (תחזוקה מונעת)',
+    location_in_house: '',
+    estimated_cost: '',
+    created_by: 'מערכת - תחזוקה מונעת',
+    plan_id: target.planId
+  };
+}
+
+// A completed request → { planId, day } to write back to its plan's last_done, or null when the
+// request is not plan-linked or has no completion date. Idempotent to compute (pure).
+function planLastDoneOnComplete(request) {
+  if (!request) return null;
+  var planId = String(request.plan_id == null ? '' : request.plan_id).replace(/^\s+|\s+$/g, '');
+  if (!planId) return null;
+  var day = maintDateOnly(request.completed_at);
+  if (!day) return null;
+  return { planId: planId, day: day };
+}
+
+// The set of statuses that mean a generated request is CLOSED-OUT and no longer blocks a re-generation.
+var MAINT_TERMINAL_ = { 'הושלם': 1, 'סגור': 1, 'לא מאושר': 1 };
+
+// Decide what to generate this pass. Returns { toCreate:[{planId,houseId,houseName,task}],
+// skippedDuplicate, skippedMalformed, skippedInactive }. A task generates only when it is due
+// (overdue==true). It is SKIPPED when a non-terminal (still-open) request already exists for the same
+// plan_id + house — no duplicate open request is ever created. maps: { idToName }.
+function planGenerationPlan(plans, requests, openHouseIds, maps, nowDay, log) {
+  var idToName = (maps && maps.idToName) || {};
+  var openKeys = {};
+  for (var r = 0; r < (requests || []).length; r++) {
+    var req = requests[r];
+    var pid = String(req && req.plan_id != null ? req.plan_id : '').replace(/^\s+|\s+$/g, '');
+    if (!pid) continue;
+    var st = String(req && req.status != null ? req.status : '').replace(/^\s+|\s+$/g, '');
+    if (Object.prototype.hasOwnProperty.call(MAINT_TERMINAL_, st)) continue;
+    var hn = String(req && req.house != null ? req.house : '').replace(/^\s+|\s+$/g, '');
+    openKeys[pid + '|' + hn] = true;
+  }
+  var toCreate = [], skippedDuplicate = 0, skippedMalformed = 0, skippedInactive = 0;
+  for (var i = 0; i < (plans || []).length; i++) {
+    var plan = parsePlanRow(plans[i], idToName, log);
+    if (!plan) { skippedMalformed++; continue; }
+    if (!plan.active) { skippedInactive++; continue; }
+    var status = planTaskStatus(plan.lastDone, plan.frequency, nowDay);
+    if (!status.overdue) continue;
+    var houseIds = expandHouses(plan.house, openHouseIds);
+    for (var h = 0; h < houseIds.length; h++) {
+      var houseId = houseIds[h];
+      var houseName = idToName[houseId] || houseId;
+      var key = plan.id + '|' + houseName;
+      if (openKeys[key]) { skippedDuplicate++; continue; }
+      toCreate.push({ planId: plan.id, houseId: houseId, houseName: houseName, task: plan.task });
+      openKeys[key] = true; // guard two plan rows for the same plan+house within one pass
+    }
+  }
+  return {
+    toCreate: toCreate, skippedDuplicate: skippedDuplicate,
+    skippedMalformed: skippedMalformed, skippedInactive: skippedInactive
+  };
+}
+
+// Plan-adherence panel data: per-house tasks (worst-first) as of nowDay, plus a skipped (malformed)
+// count. Open houses are ALWAYS listed (a house with no active plan row → planDefined:false →
+// "not defined", never a fabricated 0). maps: { idToName }.
+function planAdherence(plans, maps, openHouseIds, nowDay, log) {
+  var idToName = (maps && maps.idToName) || {};
+  var openIds = openHouseIds || [];
+  var tasksByHouse = {};
+  var skipped = 0;
+  function ensure(id) {
+    if (!Object.prototype.hasOwnProperty.call(tasksByHouse, id)) tasksByHouse[id] = [];
+    return tasksByHouse[id];
+  }
+  for (var o = 0; o < openIds.length; o++) ensure(openIds[o]);
+  for (var i = 0; i < (plans || []).length; i++) {
+    var plan = parsePlanRow(plans[i], idToName, log);
+    if (!plan) { skipped++; continue; }
+    if (!plan.active) continue;
+    var status = planTaskStatus(plan.lastDone, plan.frequency, nowDay);
+    var houseIds = expandHouses(plan.house, openIds);
+    for (var h = 0; h < houseIds.length; h++) {
+      ensure(houseIds[h]).push({
+        task: plan.task, lastDone: plan.lastDone, frequency: plan.frequency,
+        nextDue: status.nextDue, daysUntil: status.daysUntil, overdue: status.overdue
+      });
+    }
+  }
+  var houses = [];
+  for (var id in tasksByHouse) {
+    if (!Object.prototype.hasOwnProperty.call(tasksByHouse, id)) continue;
+    var tasks = tasksByHouse[id];
+    tasks.sort(function (a, b) {
+      if ((a.overdue ? 1 : 0) !== (b.overdue ? 1 : 0)) return (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0);
+      if (a.daysUntil !== b.daysUntil) return a.daysUntil - b.daysUntil;
+      return a.task < b.task ? -1 : a.task > b.task ? 1 : 0;
+    });
+    var overdueCount = 0;
+    for (var t = 0; t < tasks.length; t++) if (tasks[t].overdue) overdueCount++;
+    houses.push({
+      id: id, house: idToName[id] || id, planDefined: tasks.length > 0,
+      tasks: tasks, overdueCount: overdueCount
+    });
+  }
+  houses.sort(function (a, b) {
+    if (a.overdueCount !== b.overdueCount) return b.overdueCount - a.overdueCount;
+    return a.house < b.house ? -1 : a.house > b.house ? 1 : 0;
+  });
+  return { houses: houses, skipped: skipped };
+}
+// === MIRROR:maintenance END ===
+
+// ===== Preventive maintenance (תחזוקה מונעת) — Apps-Script wiring around the pure block above =====
+
+// Canonical ids of the houses that are OPEN (status 'open'). 'all' plans + adherence expand to these.
+function openHouseIds_() {
+  var houses = getHouses();
+  var out = [];
+  for (var i = 0; i < houses.length; i++) {
+    if (String(houses[i].status).replace(/^\s+|\s+$/g, '') !== 'open') continue;
+    var id = DIGEST_HOUSE_IDS_[String(houses[i].name).replace(/^\s+|\s+$/g, '')];
+    if (id) out.push(id);
+  }
+  return out;
+}
+
+// Today as 'YYYY-MM-DD' in the script's timezone (server clock). The one impure input to the scan/panel.
+function todayYmd_() {
+  var d = new Date();
+  return d.getFullYear() + '-' + maintPad2(d.getMonth() + 1) + '-' + maintPad2(d.getDate());
+}
+
+// Create ONE maintenance request from a generation target. Goes through the SAME pipeline as a
+// user-filed request — approval_required + due_at derived, appended, audited. Returns the new id.
+function createMaintenanceRequest_(target) {
+  var input = maintenanceRequestInput(target);
+  var row = buildNewRequest_(input);
+  row.plan_id = target.planId;
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
+  row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  appendRequest(row);
+  writeAuditEntry(row.id, '', row.status, 'מערכת - תחזוקה מונעת',
+    'נוצר מתוכנית תחזוקה מונעת (plan ' + target.planId + ')');
+  return row.id;
+}
+
+// The scheduled scan: find due plan tasks and generate their requests (idempotently — never a second
+// OPEN request for the same plan+house). Time-based trigger entry point (see installMaintenanceTrigger).
+function runMaintenanceScan() {
+  var lock = null;
+  try { lock = LockService.getScriptLock(); lock.waitLock(30000); } catch (e) { return; }
+  try {
+    var plans = readObjects_('MaintenancePlan');
+    var requests = getRequests();
+    var maps = { idToName: canonicalHouseIdToName_() };
+    var plan = planGenerationPlan(plans, requests, openHouseIds_(), maps, todayYmd_(),
+      function (m) { Logger.log(m); });
+    for (var i = 0; i < plan.toCreate.length; i++) createMaintenanceRequest_(plan.toCreate[i]);
+    if (plan.toCreate.length) rebuildDigest();
+    Logger.log('maintenance scan: created ' + plan.toCreate.length + ', dup ' + plan.skippedDuplicate +
+      ', malformed ' + plan.skippedMalformed + ', inactive ' + plan.skippedInactive);
+  } finally {
+    if (lock) { try { lock.releaseLock(); } catch (e2) {} }
+  }
+}
+
+// Idempotently (re)install the daily maintenance scan trigger (06:00, script timezone). Same convention
+// as installDigestTrigger: delete any existing handler first so re-running never stacks triggers.
+function installMaintenanceTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runMaintenanceScan') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('runMaintenanceScan').timeBased().everyDays(1).atHour(6).create();
+}
+
+// Write a completion date back to a plan row's last_done (the ONE write to the plan sheet). Called from
+// both completion paths (setStatus → הושלם and setExecution → בוצע). Idempotent: overwrites with the
+// same value on a repeat. No-op when the request is not plan-linked.
+function updatePlanLastDone_(request) {
+  var back = planLastDoneOnComplete(request);
+  if (!back) return;
+  var sheet = getSheet_('MaintenancePlan');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  var lastCol = headers.indexOf('last_done');
+  if (idCol === -1 || lastCol === -1) return;
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]).replace(/^\s+|\s+$/g, '') === back.planId) {
+      sheet.getRange(r + 1, lastCol + 1).setValue(back.day);
+      return;
+    }
+  }
+}
+
+// Plan-adherence panel for /management (canManage-gated). Derived, read-only; writes nothing.
+function readMaintenanceAdherence_() {
+  var maps = { idToName: canonicalHouseIdToName_() };
+  return planAdherence(readObjects_('MaintenancePlan'), maps, openHouseIds_(), todayYmd_(),
+    function (m) { Logger.log(m); });
+}
+
 // Current month as YYYY-MM (server clock).
 function currentPeriod_() {
   var d = new Date();
@@ -1091,6 +1419,7 @@ function handleManagementData_(p, actor) {
       kitchen: readKitchenShortages_(),
       coordinators: readCoordinatorsShortages_(),
       budget: readBudgetAdherence_(p && p.period, requests),
+      maintenance: readMaintenanceAdherence_(),
     },
   });
 }

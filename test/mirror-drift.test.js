@@ -72,6 +72,13 @@ test('budget.js MIRROR:budget matches apps-script/Code.gs (budget adherence)', (
   assert.equal(a, b);
 });
 
+test('maintenance.js MIRROR:maintenance matches apps-script/Code.gs (preventive maintenance)', () => {
+  const a = normalize(readBlock('src/maintenance.js', 'maintenance'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'maintenance'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
@@ -131,4 +138,15 @@ test('Requests headers and Config seed mirror between schema.js and setup.gs (in
     gs.SEED_CONFIG.map((a) => [a[0], a[1]]),
     SEED_CONFIG.map((o) => [o.key, o.value]));
   assert.ok(SEED_CONFIG.some((o) => o.key === 'sla_days'));
+});
+
+test('MaintenancePlan header + Requests plan_id mirror between schema.js and setup.gs (preventive maintenance)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.MaintenancePlan, SCHEMA_HEADERS.MaintenancePlan);
+  assert.deepEqual(SCHEMA_HEADERS.MaintenancePlan,
+    ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes']);
+  // plan_id is appended to Requests on BOTH sides, at the very end.
+  assert.ok(gs.HEADERS.Requests.includes('plan_id'), 'setup.gs Requests missing plan_id');
+  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 1], 'plan_id');
+  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 1], 'plan_id');
 });

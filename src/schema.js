@@ -36,6 +36,8 @@ export const HEADERS = {
     'blocked',             // 'TRUE'/'FALSE'; a manual flag (field_ops/ops_manager/ceo). Still ages.
     'blocked_reason',      // required free text when blocked
     'blocked_at',          // ISO when the block was set
+    // ---- Preventive maintenance (תחזוקה מונעת) — APPENDED at the end (never reorder earlier columns) ----
+    'plan_id',             // MaintenancePlan.id that generated this request; blank for normal requests.
   ],
 
   // Self-owned house list (NOT fed from Dashboard). §4.
@@ -119,6 +121,14 @@ export const HEADERS = {
   // `amount` is NIS. Created empty + idempotently by setupSheet(); columns are append-only.
   // NOTE: budget/actual figures are financial and MUST NEVER be written into any digest tab.
   Budgets: ['house', 'period', 'amount', 'notes'],
+
+  // Preventive-maintenance plan (תחזוקה מונעת) — one row per recurring task. Olga fills rows directly
+  // in the Sheet; there is no plan-entry UI. Created empty + idempotently by setupSheet(); columns are
+  // append-only. `house` is a CANONICAL id (HOUSE-IDS.md) OR the literal 'all' (every open house).
+  // `frequency_months` is a positive integer. `last_done` is a date (YYYY-MM-DD; blank = never done →
+  // due immediately). `active` is 'TRUE'/'FALSE'. next_due / overdue are DERIVED, never stored.
+  // The only cell the system writes back is `last_done`, when a generated request reaches הושלם.
+  MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
