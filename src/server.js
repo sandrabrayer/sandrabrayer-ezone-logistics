@@ -16,7 +16,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { signToken, verifyToken, checkPin, verifyPin, rosterProof } from './auth.js';
-import { ROLE, isManagerRole, houseInScope } from './roles.js';
+import { ROLE, isManagerRole, houseInScope, canManage } from './roles.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -129,6 +129,7 @@ const HTML_ROUTES = {
   '/inventory': 'inventory.html', '/inventory.html': 'inventory.html',
   '/reports': 'reports.html', '/reports.html': 'reports.html',
   '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
+  '/management': 'management.html', '/management.html': 'management.html',
 };
 
 function notFound(res) {
@@ -331,6 +332,11 @@ async function handleAction(req, res) {
   const body = await readJsonBody(req, 65536);
   if (!body || typeof body.action !== 'string') {
     return sendJson(res, 400, { ok: false, error: 'missing action' });
+  }
+  // /management is exec-only (ops_manager + ceo). Enforced here (server-side) AND independently in
+  // Code.gs — field_ops and every tier-B role get 403 with no data read.
+  if (body.action === 'managementData' && !canManage(actor.role)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   const upstreamBody = JSON.stringify({ action: body.action, payload: body.payload || {}, token: auth.token });
   try {

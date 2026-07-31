@@ -244,6 +244,13 @@ function isManagerRole(role) {
   return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
 }
 
+// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) and the CEO.
+// NARROWER than isManagerRole — field_ops (Roy) is a manager tier for dispatch but is NOT an exec, so
+// he gets 403 here. Enforced server-side AND in Code.gs, never UI-only.
+function canManage(role) {
+  return role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+}
+
 // House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their
 // own house (scope = that house name). A maintenance lead sees the houses in their cluster(s)
 // (scope = a comma-separated cluster list; houseCluster is the candidate house's cluster). The
@@ -466,6 +473,7 @@ function doPost(e) {
     case 'setStatus':     return handleSetStatus_(body.payload || {}, actor);
     case 'setExecution':  return handleSetExecution_(body.payload || {}, actor);
     case 'setBlocked':    return handleSetBlocked_(body.payload || {}, actor);
+    case 'managementData': return handleManagementData_(body.payload || {}, actor);
     case 'createInspection': return handleCreateInspection_(body.payload || {}, actor);
     case 'addFinding':       return handleAddFinding_(body.payload || {}, actor);
     case 'confirmFinding':   return handleConfirmFinding_(body.payload || {}, actor);
@@ -779,6 +787,28 @@ function handleSetBlocked_(p, actor) {
   }
   rebuildDigest();
   return jsonOut_({ ok: true, blocked: block });
+}
+
+// ===== /management (increment 37) — exec network-management view for ops_manager + ceo =====
+// Role-gated HERE (not UI-only): a request from any other role — including field_ops — is refused
+// 403 before any data is read. Served as a POST so the token identity is verified (doGet is not
+// identity-checked). This handler READS Logistics-owned sheets only and returns them raw; the screen
+// aggregates them in the browser (mirror of src/management.js). It writes nothing, and reads nothing
+// from another app — the kitchen/coordinator digests are NOT wired here (see src/management.js
+// UNAVAILABLE_CAPABILITIES for what that would require).
+function handleManagementData_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  return jsonOut_({
+    ok: true,
+    data: {
+      requests: getRequests(),
+      inspections: readObjects_('Inspections'),
+      findings: readObjects_('InspectionFindings'),
+      houses: getHouses(),
+      inventoryItems: readObjects_('InventoryItems'),
+      inventoryCounts: readObjects_('InventoryCounts'),
+    },
+  });
 }
 
 // ===== Inspections module =====
