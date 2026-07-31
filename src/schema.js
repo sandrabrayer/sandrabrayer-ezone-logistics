@@ -113,6 +113,12 @@ export const HEADERS = {
     'week_start',                            // YYYY-MM-DD, Sunday (Israeli week) — appended inc. 26
     'unit_label', 'unit_factor', 'quantity_base', // appended inc. 33 (unit chosen + frozen factor + base qty)
   ],
+
+  // Budgets (budget module) — one row per house per month. Olga fills rows directly in the Sheet;
+  // there is no budget-entry UI. `house` is a CANONICAL id (HOUSE-IDS.md), `period` is YYYY-MM,
+  // `amount` is NIS. Created empty + idempotently by setupSheet(); columns are append-only.
+  // NOTE: budget/actual figures are financial and MUST NEVER be written into any digest tab.
+  Budgets: ['house', 'period', 'amount', 'notes'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);

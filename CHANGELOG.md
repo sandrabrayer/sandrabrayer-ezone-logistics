@@ -3,6 +3,45 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — budget adherence (עמידה בתקציב) on /management
+
+Olga's "עמידה בתקציב" was "לא זמין" (no budget data existed). This adds the data model + the panel.
+
+**New `Budgets` sheet** (`HEADERS.Budgets = house, period, amount, notes`) — created empty and
+idempotently by `setupSheet()`; append-only. One row per house per month: `house` is a CANONICAL id
+(HOUSE-IDS.md), `period` is `YYYY-MM`, `amount` is NIS. **Olga fills rows directly in the Sheet** —
+no budget-entry UI in this increment.
+
+**Actuals from data we already own — one pure attribution rule (`attributeRequest`):** a request's
+spend = `actual_cost`, falling back to `estimated_cost` when actual is blank (**the panel flags which
+was used** with `*`), attributed to the request's house (Hebrew name → canonical id; unmapped houses
+omitted, never guessed) and to the **month of `completed_at`, else `created_at`**. Rejected requests
+(`לא מאושר`) never count as spend.
+
+**Pure logic `src/budget.js`, mirrored into Code.gs under `MIRROR:budget` (drift-guarded):** per house
+per period → budget, actual, remaining, percent used, over-budget flag. **A house with no budget row
+renders "לא הוגדר תקציב" — never 0, never assumed** (and a house that spent with no budget still shows,
+flagged). **Malformed budget rows** (bad `period` format, non-numeric/negative `amount`, unknown house
+id) are **skipped and logged**, never silently miscounted.
+
+**/management panel:** current month per house — budget vs actual, % used, over-budget highlighted
+**worst-first**, with a **month selector** for past months (re-requests the screen for the chosen month;
+the server recomputes). Computed server-side inside the existing **`canManage`-gated** `managementData`
+handler (ops_manager + ceo; field_ops/coordinator/maintenance → 403), enforced in `server.js` AND
+`Code.gs`. **Financial figures appear ONLY here and are NEVER written to any digest** — a guard test
+asserts no budget/financial column exists in the OpenTickets or WeeklyCounts tabs.
+
+**Tests (344 pass):** the attribution rule (actual vs estimated fallback, month bucketing, completed
+vs not, rejected/unmapped omitted); adherence math + worst-first; missing budget → not-defined (not 0);
+budget-but-no-spend → actual 0; malformed rows skipped+logged; the month-selector period list; the
+`MIRROR:budget` drift guard; the `Budgets` header in the schema⇄setup mirror + `SHEET_NAMES`;
+managementData 403 for field_ops/coordinator/maintenance; and the no-financial-columns-in-any-digest guard.
+
+> **⚠ After this merge:** re-run **`setupSheet()`** once to create the `Budgets` sheet (empty, with
+> headers). Then **Olga fills Budgets rows** — one per house (canonical id) per month (`YYYY-MM`),
+> amount in NIS. Until a house/month has a budget row it shows "לא הוגדר תקציב" (never a fake 0). No
+> other sheet changes; nothing financial is added to any digest.
+
 ## [Unreleased] — feature — /management reads the kitchen digest (read-only) for food shortages
 
 The /management screen (ops_manager + ceo) previously marked food/kitchen data as "לא זמין" because

@@ -2,6 +2,9 @@
 // These helpers are mirrored verbatim in apps-script/digest.gs (Apps Script is the writer).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   HOUSE_IDS, DIGEST_HOUSE_IDS, houseId,
   EXCLUDED_TICKET_STATUSES, isActiveTicket,
@@ -10,6 +13,23 @@ import {
   isShortage, shortageLabel, buildWeeklyGrid,
   DIGEST_OPEN_HEADERS,
 } from '../src/digest.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, '..');
+
+// ---- financial-data guard: the budget module must NEVER leak into any digest ----
+test('NO financial/budget columns in any digest tab (OpenTickets + WeeklyCounts)', () => {
+  const FINANCIAL = /budget|amount|cost|actual|estimated|remaining|₪/i;
+  // The exported OpenTickets header list has no financial column.
+  for (const h of DIGEST_OPEN_HEADERS) assert.ok(!FINANCIAL.test(h), `financial column leaked into digest: ${h}`);
+  // The Apps Script writer's two header arrays (the only columns ever written) carry none either.
+  const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
+  for (const name of ['DIGEST_OPEN_HEADERS_', 'DIGEST_WEEKLY_HEADERS_']) {
+    const m = gs.match(new RegExp(name + '\\s*=\\s*\\[([^\\]]*)\\]'));
+    assert.ok(m, `${name} header array not found in digest.gs`);
+    assert.ok(!FINANCIAL.test(m[1]), `financial column in ${name}: ${m[1]}`);
+  }
+});
 
 // ---- OpenTickets columns (increment 36: aging appended) ----
 

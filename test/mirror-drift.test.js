@@ -65,6 +65,13 @@ test('digest-consume.js MIRROR:digestconsume matches apps-script/Code.gs (kitche
   assert.equal(a, b);
 });
 
+test('budget.js MIRROR:budget matches apps-script/Code.gs (budget adherence)', () => {
+  const a = normalize(readBlock('src/budget.js', 'budget'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'budget'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
@@ -106,6 +113,12 @@ test('SEED_HOUSES and SEED_USERS house names mirror between schema.js and setup.
   assert.deepEqual(
     gs.SEED_USERS.map((a) => [a[0], a[1], a[2]]),
     SEED_USERS.map((o) => [o.name, o.role, o.house]));
+});
+
+test('Budgets headers mirror between schema.js and setup.gs (budget module)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.Budgets, SCHEMA_HEADERS.Budgets);
+  assert.deepEqual(SCHEMA_HEADERS.Budgets, ['house', 'period', 'amount', 'notes']);
 });
 
 test('Requests headers and Config seed mirror between schema.js and setup.gs (increment 36)', () => {

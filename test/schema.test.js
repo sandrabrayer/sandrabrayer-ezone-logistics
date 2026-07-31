@@ -8,7 +8,7 @@ import {
 
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
-    'AuditLog', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
+    'AuditLog', 'Budgets', 'ChecklistItems', 'Config', 'Houses', 'InspectionFindings',
     'Inspections', 'InventoryCounts', 'InventoryItems', 'Requests', 'Technicians',
     'Users',
   ].sort());
