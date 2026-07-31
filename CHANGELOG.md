@@ -3,6 +3,26 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — "ניהול תפעולי רשת" nav link to /management (exec-only, display)
+
+A nav link labeled **"ניהול תפעולי רשת"** → `/management` now appears in the nav on **every** page,
+shown **only** when the logged-in session role is `ops_manager` or `ceo` (hidden for coordinator /
+field_ops / maintenance). It's **display-only** convenience — the server + Code.gs `canManage` **403**
+gate remains the sole authority (unchanged).
+
+The auth shim already knows the session role (`window.__ROLE__`), so it injects the link into each
+page's `.nav` for exec roles — **no per-page edits**, and it can't show for a non-exec (the shim never
+adds it). The link is marked active on the /management page. The hardcoded `/management` link was
+removed from management.html's own nav so it too is exec-gated by the shim. The /management page
+**title and heading are now "ניהול תפעולי רשת"**.
+
+**Tests:** a sandbox drives the real injected shim per role and asserts the nav link is present for
+ops_manager/ceo, **absent** for coordinator/field_ops/maintenance and for a logged-out session, and
+marked active on /management. Full `node --test` suite green (348).
+
+> **After this merge:** no `setupSheet()` re-run, sheet edits, or digest rebuild. Purely a client-side
+> nav convenience injected by the gateway; effective on next page load.
+
 ## [Unreleased] — feature — budget adherence (עמידה בתקציב) on /management
 
 Olga's "עמידה בתקציב" was "לא זמין" (no budget data existed). This adds the data model + the panel.
