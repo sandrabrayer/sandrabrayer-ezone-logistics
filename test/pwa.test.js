@@ -84,12 +84,38 @@ test('service worker never caches Google Sheets or /api/ (network-only)', () => 
   // Cross-origin static is never cached either.
   assert.equal(sw.shouldCache(new URL('https://cdn.other/app.js'), O), false);
 
-  // Shell documents are network-first.
-  assert.equal(sw.isNetworkFirst(new URL(O + '/')), true);
-  assert.equal(sw.isNetworkFirst(new URL(O + '/dashboard.html')), true);
+  // EVERY app document is network-first — not just the shell. A cache-first HTML page would serve
+  // stale markup after a redeploy (this is exactly what re-prompted for login on the 3rd page: the
+  // stale page ran an outdated auth shim). Guard all served routes, extensionless AND .html.
+  for (const p of ['/', '/index.html', '/dashboard', '/dashboard.html', '/inspection', '/inspection.html',
+    '/inventory', '/inventory.html', '/reports', '/reports.html', '/workorders', '/workorders.html',
+    '/management', '/management.html']) {
+    assert.equal(sw.isNetworkFirst(new URL(O + p)), true, `${p} must be network-first (never stale HTML)`);
+  }
+  // A genuinely static asset stays cache-first (not a document).
+  assert.equal(sw.isNetworkFirst(new URL(O + '/icon-v1-192.png')), false);
 
   // Cache name is versioned.
   assert.match(sw.CACHE, /^ezone-logistics-v\d+$/);
+});
+
+test('HTML documents are network-first while static assets stay cache-first (no stale shim)', () => {
+  const sw = loadSW();
+  const O = 'https://logistics.example';
+  // The regression this locks: a non-shell page (e.g. /management, /inventory) served CACHE-FIRST ran
+  // a stale auth shim after a redeploy and re-prompted for login. All documents must be network-first.
+  const documents = ['/management', '/inventory', '/workorders', '/reports', '/inspection'];
+  for (const p of documents) {
+    assert.equal(sw.isNetworkFirst(new URL(O + p)), true, `${p} (a document) must be network-first`);
+  }
+  // Static assets must NOT be network-first (they stay instant/cache-first) but remain cacheable.
+  for (const a of ['/icon-v1-192.png', '/manifest.json']) {
+    assert.equal(sw.isNetworkFirst(new URL(O + a)), false, `${a} stays cache-first`);
+    assert.equal(sw.shouldCache(new URL(O + a), O), true);
+  }
+  // The cache was bumped so existing clients purge the stale (pre-fix) cached documents on activate.
+  const v = Number((sw.CACHE.match(/v(\d+)$/) || [])[1]);
+  assert.ok(v >= 3, `CACHE must be bumped to purge stale HTML (got ${sw.CACHE})`);
 });
 
 // ---- icon palette + logo presence ----------------------------------------

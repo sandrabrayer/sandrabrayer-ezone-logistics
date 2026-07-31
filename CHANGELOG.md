@@ -3,6 +3,39 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — bugfix — service worker served stale HTML on non-shell pages, re-prompting for login
+
+**Follow-up to the #46 session fix.** After one login, the shell pages accepted the persisted session
+but a third page still re-prompted for the PIN.
+
+**Root cause — the service worker, not a missing shim.** Every served page *does* carry the persisted
+-session auth shim (the Node gateway injects it into `<head>` on all routes — now locked by a guard test
+that enumerates every served HTML route). The failure was `src/public/sw.js`: only the shell documents
+(`/`, `/index.html`, `/dashboard`) were **network-first**; the other app documents — **`/inspection`,
+`/inventory`, `/reports`, `/workorders`, and `/management`** (added in increment 37) — fell through to
+**cache-first**. Clients with a pre-#46 cache kept serving the OLD cached HTML for those pages, which
+ran the previous in-memory-only shim (no `localStorage` rehydrate) and so re-prompted. The shell pages,
+being network-first, fetched the new shim — hence "two pages accept, the third prompts".
+
+**Fix (`src/public/sw.js`):**
+- Every app document is now **network-first** — by an explicit route list (each route's extensionless
+  AND `.html` form) PLUS a `request.mode === 'navigate'` catch-all, so any page load fetches fresh HTML
+  and a newly added page can't silently regress to cache-first.
+- Bumped the cache `ezone-logistics-v2` → **`v3`** so the `activate` handler purges the stale v2 entries
+  (the old cached documents) on the next service-worker activation.
+- Static assets (icons, manifest) stay cache-first for instant loads — unchanged.
+
+**Tests:** a new guard enumerates EVERY served HTML route (from the server's own route table) and
+asserts each carries the shim in `<head>` before its page scripts, with the `localStorage` persistence
+markers — so a future page that misses the shim fails loudly. The service-worker test now asserts all
+app documents are network-first (static assets stay cache-first) and that the cache version was bumped.
+Full `node --test` suite green (318).
+
+> **After this merge:** no `setupSheet()` re-run, sheet edits, or digest rebuild. Service workers update
+> lazily: the new SW (`skipWaiting` + `clients.claim` already in place) takes over on the next load and
+> the v3 bump clears the stale cache on activate. Existing users may need **one refresh** (or to close
+> all app tabs once) for the new worker to activate; after that every page shares the one session.
+
 ## [Unreleased] — bugfix — session persists across pages; manager-tier request visibility restored
 
 Two owner-reported bugs, one shared root cause in the browser session layer.
