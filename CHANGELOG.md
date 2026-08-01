@@ -3,6 +3,28 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — rename — compliance display name "עמידה ברגולציה" → "עמידה באמות מידה"
+
+Display-text-only rename of the compliance tracker's user-facing Hebrew name from **"עמידה ברגולציה"**
+to **"עמידה באמות מידה"**. Nothing structural changed — the `Compliance` sheet, its columns, the
+`compliance_id` Requests column, the `compliance_reminder_days` Config key, and every `compliance*`
+function/id keep their names.
+
+Renamed everywhere the user sees it: the /management panel heading, the empty-state / unavailable texts
+("אין נתוני אמות מידה", "לא הוגדרו פריטי אמות מידה", the skipped-rows note), and the generated renewal
+request's description suffix "(עמידה ברגולציה)" → "(עמידה באמות מידה)".
+
+**`created_by` WAS renamed** "מערכת - רגולציה" → **"מערכת - אמות מידה"** (and the matching AuditLog
+author + note). This is safe: the idempotent dedup keys **only** on `compliance_id + house`
+(`complianceGenerationPlan`), never on `created_by`, so already-open generated requests — which carry
+their `compliance_id` — are still matched and never re-created. The rename touches the `MIRROR:compliance`
+string literals identically in `src/compliance.js` and `apps-script/Code.gs`, so the drift guard stays
+green.
+
+**Tests:** the `test/compliance.test.js` request-shaping assertions now expect the new description suffix
+and `created_by`. Full `node --test` suite green (409). No `setupSheet()` re-run, no data migration — the
+change is display text (a code deploy suffices).
+
 ## [Unreleased] — feature — compliance tracker (עמידה ברגולציה — תעודות, רישיונות, תוקף ותזכורות) on /management
 
 Olga's "עמידה ברגולציה" was "לא זמין". This adds the data model, a reminder generator, and the

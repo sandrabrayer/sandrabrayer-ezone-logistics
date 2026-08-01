@@ -1,4 +1,4 @@
-// compliance.js — compliance tracker (עמידה ברגולציה — תעודות, רישיונות, תוקף ותזכורות) for the
+// compliance.js — compliance tracker (עמידה באמות מידה — תעודות, רישיונות, תוקף ותזכורות) for the
 // /management screen.
 //
 // Olga tracks per-house certificates/licenses/inspections in the Compliance sheet (id, house, item,
@@ -6,7 +6,7 @@
 // literal 'all' (every OPEN house). Each item has an expiry; days_to_expiry / status are DERIVED here
 // and NEVER stored. A scheduled pass (the SAME daily trigger as תחזוקה מונעת) turns an item that has
 // entered its reminder window (or expired) into a NORMAL Request (category תיקון; urgency דחוף if
-// expired, else רגיל; created_by "מערכת - רגולציה") linked by compliance_id. On completion NOTHING is
+// expired, else רגיל; created_by "מערכת - אמות מידה") linked by compliance_id. On completion NOTHING is
 // written back — the new expiry lives on the new certificate, so Olga updates expires_at by hand.
 //
 // The MIRROR:compliance block below is duplicated verbatim in apps-script/Code.gs (the mirror-drift
@@ -84,10 +84,10 @@ function complianceRequestInput(target) {
     house: target.houseName,
     category: 'תיקון',
     urgency: target.expired ? 'דחוף' : 'רגיל',
-    description: 'חידוש: ' + target.item + ' — ' + target.houseName + ' (עמידה ברגולציה)',
+    description: 'חידוש: ' + target.item + ' — ' + target.houseName + ' (עמידה באמות מידה)',
     location_in_house: '',
     estimated_cost: '',
-    created_by: 'מערכת - רגולציה',
+    created_by: 'מערכת - אמות מידה',
     compliance_id: target.complianceId
   };
 }
