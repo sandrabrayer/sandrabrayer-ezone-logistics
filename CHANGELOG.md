@@ -3,6 +3,40 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — bug fix — Israeli day-first date parsing for Sheet-filled dates
+
+**Problem:** Olga fills dates in the Sheets in the Israeli convention **day/month/year** (e.g. `12/7/2026`
+= 12 July). With the spreadsheet in a US locale, Google Sheets parsed that as 7 December — and any cell
+stored as *text* never reached the app as a date at all — so the /management screen showed wrong (or
+missing) expiry/due dates. The affected fields are the two **hand-typed** Sheet dates: `Compliance.expires_at`
+and `MaintenancePlan.last_done`. (`Budgets.period` is `YYYY-MM` — locale-agnostic — and every other date
+field comes from an in-app date-picker as ISO, never hand-typed; an audit confirmed no others.)
+
+**Fix — two levels:**
+
+1. **Spreadsheet locale (manual, fixes entry going forward):** set **File ▸ Settings ▸ Locale = Israel** so
+   Sheets itself parses `d/m/y` natively and hands the app a real `Date` object.
+2. **Code robustness (this PR):** the ONE shared parser `maintDateOnly` (in the `MIRROR:maintenance` block,
+   drift-guarded, reused by both maintenance and compliance) now accepts (a) a real **Date** object — trusted
+   as-is; (b) an **ISO** `yyyy-mm-dd` string; and (c) an Israeli **DAY-FIRST** text date `d/m/y` or `d.m.y`
+   (`12/7/2026`, `12.7.26`, `12/07/2026`) — **always day-first, never month-first**, 2-digit year → `20xx`.
+   An impossible date (`13/13/2026`, `31/2/2026`) → `''`, so the caller skips + logs it (never a guessed
+   date). The day-first branch is the safety net for cells stored as text; with locale = Israel, branch (a)
+   handles it.
+
+**Display:** an audit of every `fmtDate` (management, dashboard, reports) confirmed they *already* render
+**dd/mm/yyyy** from the normalized ISO value — no change needed; the bug was purely on the parse side.
+
+**Tests:** the shared parser gains Israeli day-first cases (`12/7/2026` → 12 Jul, `12.7.26` → 12 Jul,
+`31/12/2026` valid, `13/13/2026` & `31/2/2026` → skip) plus Date-passthrough / ISO regression; a compliance
+test drives a day-first `expires_at` end-to-end through `parseComplianceRow` (parse + skip-and-log the
+impossible one). Every existing date-dependent suite stays green; mirror-drift covers the parser. Full
+`node --test` suite green (412).
+
+> **After this merge:** no `setupSheet()` re-run and no data migration. Set the **spreadsheet locale to
+> Israel** (File ▸ Settings ▸ Locale) so new entries parse natively; the code change already recovers
+> existing text-typed `d/m/y` cells on the next read.
+
 ## [Unreleased] — rename — compliance display name "עמידה ברגולציה" → "עמידה באמות מידה"
 
 Display-text-only rename of the compliance tracker's user-facing Hebrew name from **"עמידה ברגולציה"**

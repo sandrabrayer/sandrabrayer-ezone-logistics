@@ -36,15 +36,31 @@ function maintActive(v) {
   return String(v == null ? '' : v).replace(/^\s+|\s+$/g, '').toUpperCase() === 'TRUE';
 }
 
-// Any date-ish cell → 'YYYY-MM-DD', or '' when blank / unparseable. Handles a Date object (Apps Script
-// reads a date cell as one) and an ISO/date string; the time portion is dropped.
+// Any date-ish cell → 'YYYY-MM-DD', or '' when blank / unparseable. Handles (a) a real Date object —
+// Apps Script hands one back for a cell the sheet already parsed (e.g. spreadsheet locale = Israel),
+// trusted as-is; (b) an ISO string yyyy-mm-dd (optionally with a time suffix); and (c) an Israeli
+// DAY-FIRST text date d/m/y or d.m.y (12/7/2026, 12.7.26, 12/07/2026) — ALWAYS day-first, NEVER
+// month-first; a 2-digit year is 20xx. An impossible date (13/13/2026, 31/2/2026) → '' (the caller
+// skips + logs). The day-first branch is the safety net for cells stored as TEXT; with the spreadsheet
+// locale set to Israel, Sheets already returns a Date object and branch (a) trusts it.
 function maintDateOnly(v) {
   if (v == null) return '';
   if (typeof v === 'object' && typeof v.getFullYear === 'function' && isFinite(v.getTime())) {
     return v.getFullYear() + '-' + maintPad2(v.getMonth() + 1) + '-' + maintPad2(v.getDate());
   }
-  var m = String(v).replace(/^\s+|\s+$/g, '').match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+  var s = String(v).replace(/^\s+|\s+$/g, '');
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+  var dmy = s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2}|\d{4})$/);
+  if (dmy) {
+    var day = Number(dmy[1]), mon = Number(dmy[2]), yr = Number(dmy[3]);
+    if (dmy[3].length === 2) yr += 2000;
+    if (mon < 1 || mon > 12 || day < 1 || day > 31) return '';
+    var dt = new Date(Date.UTC(yr, mon - 1, day));
+    if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() !== mon - 1 || dt.getUTCDate() !== day) return '';
+    return yr + '-' + maintPad2(mon) + '-' + maintPad2(day);
+  }
+  return '';
 }
 
 // 'YYYY-MM-DD' → UTC epoch ms at midnight, or null when unparseable.
