@@ -114,6 +114,23 @@ test('parseComplianceRow: malformed rows skipped + logged (missing id/item, blan
   assert.equal(log.out.length, 5, 'each malformed row logs exactly once');
 });
 
+test('parseComplianceRow: an Israeli DAY-FIRST expires_at (Sheet-filled text) parses day-first', () => {
+  // Olga types 12/7/2026 in the cell = 12 July; a cell stored as text reaches us as that string.
+  const p = parseComplianceRow(
+    { id: 'C1', house: 'all', item: 'רישיון עסק', expires_at: '12/7/2026', active: 'TRUE' }, ID_TO_NAME, DEF, logger());
+  assert.equal(p.expires, '2026-07-12');
+  const p2 = parseComplianceRow(
+    { id: 'C2', house: 'all', item: 'ביטוח', expires_at: '31.12.26', active: 'TRUE' }, ID_TO_NAME, DEF, logger());
+  assert.equal(p2.expires, '2026-12-31');
+});
+
+test('parseComplianceRow: an impossible day-first expires_at (13/13/2026) is skipped + logged', () => {
+  const log = logger();
+  assert.equal(parseComplianceRow(
+    { id: 'C1', house: 'all', item: 'x', expires_at: '13/13/2026', active: 'TRUE' }, ID_TO_NAME, DEF, log), null);
+  assert.equal(log.out.length, 1);
+});
+
 // ---- request shaping ----
 
 test('complianceRequestInput: EXPIRED → urgency דחוף; carries compliance_id + system author + tagged description', () => {

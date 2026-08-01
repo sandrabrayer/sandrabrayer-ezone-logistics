@@ -56,6 +56,21 @@ test('maintDateOnly normalizes ISO/date strings and Date objects; blank/junk →
   assert.equal(maintDateOnly('not a date'), '');
 });
 
+test('maintDateOnly parses Israeli DAY-FIRST text dates (d/m/y, d.m.y), never month-first', () => {
+  // 12/7/2026 is 12 July (day-first) — NOT 7 December (US month-first).
+  assert.equal(maintDateOnly('12/7/2026'), '2026-07-12');
+  assert.equal(maintDateOnly('12.7.2026'), '2026-07-12');
+  assert.equal(maintDateOnly('12.7.26'), '2026-07-12');       // 2-digit year → 20xx
+  assert.equal(maintDateOnly('12/07/26'), '2026-07-12');
+  assert.equal(maintDateOnly('1/2/2026'), '2026-02-01');      // 1 Feb, day-first
+  assert.equal(maintDateOnly('31/12/2026'), '2026-12-31');    // valid end-of-year
+  assert.equal(maintDateOnly(' 12/7/2026 '), '2026-07-12');   // trimmed
+  // Impossible dates → '' (caller skips + logs).
+  assert.equal(maintDateOnly('13/13/2026'), '');              // month 13
+  assert.equal(maintDateOnly('31/2/2026'), '');               // Feb has no 31st
+  assert.equal(maintDateOnly('0/7/2026'), '');                // day 0
+});
+
 test('addMonthsToDate adds months and clamps the day to the target month length', () => {
   assert.equal(addMonthsToDate('2026-01-15', 6), '2026-07-15');
   assert.equal(addMonthsToDate('2026-01-31', 1), '2026-02-28');   // clamp Feb
