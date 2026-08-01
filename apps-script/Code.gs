@@ -545,7 +545,7 @@ function buildNewRequest_(input) {
     // Preventive maintenance (תחזוקה מונעת). Blank for a user-filed request; set by
     // createMaintenanceRequest_ for a generated one.
     plan_id: '',
-    // Compliance (עמידה ברגולציה). Blank for a user-filed request; set by createComplianceRequest_.
+    // Compliance (עמידה באמות מידה). Blank for a user-filed request; set by createComplianceRequest_.
     compliance_id: '',
   };
 }
@@ -1353,10 +1353,10 @@ function complianceRequestInput(target) {
     house: target.houseName,
     category: 'תיקון',
     urgency: target.expired ? 'דחוף' : 'רגיל',
-    description: 'חידוש: ' + target.item + ' — ' + target.houseName + ' (עמידה ברגולציה)',
+    description: 'חידוש: ' + target.item + ' — ' + target.houseName + ' (עמידה באמות מידה)',
     location_in_house: '',
     estimated_cost: '',
-    created_by: 'מערכת - רגולציה',
+    created_by: 'מערכת - אמות מידה',
     compliance_id: target.complianceId
   };
 }
@@ -1511,7 +1511,7 @@ function runMaintenanceScan() {
     var plan = planGenerationPlan(readObjects_('MaintenancePlan'), requests, openIds, maps, today, log);
     for (var i = 0; i < plan.toCreate.length; i++) createMaintenanceRequest_(plan.toCreate[i]);
 
-    // Compliance (עמידה ברגולציה) — same dedup snapshot of requests; a maintenance request just created
+    // Compliance (עמידה באמות מידה) — same dedup snapshot of requests; a maintenance request just created
     // carries plan_id (not compliance_id) so it never affects this pass.
     var comp = complianceGenerationPlan(readObjects_('Compliance'), requests, openIds, maps,
       complianceDefaultReminder_(), today, log);
@@ -1564,7 +1564,7 @@ function readMaintenanceAdherence_() {
     function (m) { Logger.log(m); });
 }
 
-// ===== Compliance (עמידה ברגולציה) — Apps-Script wiring around the MIRROR:compliance block =====
+// ===== Compliance (עמידה באמות מידה) — Apps-Script wiring around the MIRROR:compliance block =====
 
 // The seeded default reminder window (days). Used ONLY as the fallback when compliance_reminder_days is
 // missing/malformed — it is the documented seed value, not a silent invented default.
@@ -1590,8 +1590,8 @@ function createComplianceRequest_(target) {
   row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
   row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
   appendRequest(row);
-  writeAuditEntry(row.id, '', row.status, 'מערכת - רגולציה',
-    'נוצר מעמידה ברגולציה (compliance ' + target.complianceId + ')');
+  writeAuditEntry(row.id, '', row.status, 'מערכת - אמות מידה',
+    'נוצר מעמידה באמות מידה (compliance ' + target.complianceId + ')');
   return row.id;
 }
 

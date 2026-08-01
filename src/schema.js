@@ -38,7 +38,7 @@ export const HEADERS = {
     'blocked_at',          // ISO when the block was set
     // ---- Preventive maintenance (תחזוקה מונעת) — APPENDED at the end (never reorder earlier columns) ----
     'plan_id',             // MaintenancePlan.id that generated this request; blank for normal requests.
-    // ---- Compliance (עמידה ברגולציה) — APPENDED at the end (never reorder earlier columns) ----
+    // ---- Compliance (עמידה באמות מידה) — APPENDED at the end (never reorder earlier columns) ----
     'compliance_id',       // Compliance.id that generated this renewal request; blank for normal requests.
   ],
 
@@ -132,7 +132,7 @@ export const HEADERS = {
   // The only cell the system writes back is `last_done`, when a generated request reaches הושלם.
   MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
 
-  // Compliance tracker (עמידה ברגולציה) — one row per certificate/license/inspection with an expiry.
+  // Compliance tracker (עמידה באמות מידה) — one row per certificate/license/inspection with an expiry.
   // Olga fills rows directly in the Sheet (no entry UI this increment). Created empty + idempotently by
   // setupSheet(); columns are append-only. `house` is a CANONICAL id (HOUSE-IDS.md) OR the literal 'all'
   // (every OPEN house). `item` is the Hebrew name (e.g. רישיון עסק). `expires_at` is a date (YYYY-MM-DD).

@@ -293,13 +293,13 @@
         if (mnt.skipped) html += `<p class="sub">${mnt.skipped} שורות תוכנית לא תקינות דולגו (בדוק id/משימה/תדירות/בית בגיליון MaintenancePlan).</p>`;
       }
 
-      // Compliance (עמידה ברגולציה) — computed server-side from the Compliance sheet. Per house,
+      // Compliance (עמידה באמות מידה) — computed server-side from the Compliance sheet. Per house,
       // worst-first: expired first, then soonest-to-expire, with a doc link when present. A house with
-      // no compliance row shows "לא הוגדרו פריטי רגולציה" (never a fabricated 0). status is derived.
+      // no compliance row shows "לא הוגדרו פריטי אמות מידה" (never a fabricated 0). status is derived.
       const cmp = m.compliance;
-      html += '<h2>עמידה ברגולציה</h2>';
+      html += '<h2>עמידה באמות מידה</h2>';
       if (!cmp || !cmp.houses) {
-        html += '<div class="unavail"><div class="t">עמידה ברגולציה — לא זמין</div><div class="r">אין נתוני רגולציה</div></div>';
+        html += '<div class="unavail"><div class="t">עמידה באמות מידה — לא זמין</div><div class="r">אין נתוני אמות מידה</div></div>';
       } else if (!cmp.houses.length) {
         html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים פעילים</div></div>';
       } else {
@@ -307,7 +307,7 @@
           const badges = `${h.expiredCount ? ` <span class="pill red">${h.expiredCount} פג תוקף</span>` : ''}${h.expiringCount ? ` <span class="pill amber">${h.expiringCount} פג בקרוב</span>` : ''}`;
           let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${badges}</h3>`;
           if (!h.defined) {
-            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרו פריטי רגולציה לבית זה.</div></div>';
+            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרו פריטי אמות מידה לבית זה.</div></div>';
             return block;
           }
           block += '<table><thead><tr><th>פריט</th><th>תוקף עד</th><th>ימים לתפוגה</th><th>סטטוס</th><th>מסמך</th></tr></thead><tbody>';
@@ -321,7 +321,7 @@
           block += '</tbody></table>';
           return block;
         }).join('');
-        if (cmp.skipped) html += `<p class="sub">${cmp.skipped} שורות רגולציה לא תקינות דולגו (בדוק id/פריט/תאריך תוקף/בית בגיליון Compliance).</p>`;
+        if (cmp.skipped) html += `<p class="sub">${cmp.skipped} שורות אמות מידה לא תקינות דולגו (בדוק id/פריט/תאריך תוקף/בית בגיליון Compliance).</p>`;
       }
 
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';

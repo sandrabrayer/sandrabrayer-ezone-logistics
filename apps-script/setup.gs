@@ -23,7 +23,7 @@ var HEADERS = {
     // Preventive maintenance (תחזוקה מונעת) — plan_id APPENDED at the end (existing sheets gain it
     // via the append branch in setupSheet()). Blank for normal requests.
     'plan_id',
-    // Compliance (עמידה ברגולציה) — compliance_id APPENDED at the end (existing sheets gain it via the
+    // Compliance (עמידה באמות מידה) — compliance_id APPENDED at the end (existing sheets gain it via the
     // append branch in setupSheet()). Blank for normal requests.
     'compliance_id',
   ],
@@ -67,7 +67,7 @@ var HEADERS = {
   // frequency_months = positive int; last_done = date (blank = never → due now); active = TRUE/FALSE.
   // next_due / overdue are DERIVED, never stored. Append-only. Only last_done is written back (on הושלם).
   MaintenancePlan: ['id', 'house', 'task', 'frequency_months', 'last_done', 'active', 'notes'],
-  // Compliance (עמידה ברגולציה) — one row per certificate/license/inspection with an expiry; Olga fills
+  // Compliance (עמידה באמות מידה) — one row per certificate/license/inspection with an expiry; Olga fills
   // rows in the Sheet (no entry UI). Created empty by setupSheet(). house = canonical id (HOUSE-IDS.md)
   // OR 'all'. item = Hebrew name; expires_at = date; reminder_days = int (blank = Config default); doc_url
   // optional; active = TRUE/FALSE. days_to_expiry / status are DERIVED, never stored. Append-only. Nothing

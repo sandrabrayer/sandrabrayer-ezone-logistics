@@ -1,4 +1,4 @@
-// test/compliance.test.js — the compliance tracker (עמידה ברגולציה) pure logic. Exercises status
+// test/compliance.test.js — the compliance tracker (עמידה באמות מידה) pure logic. Exercises status
 // derivation (valid / expiring / expired incl. the boundaries at exactly reminder_days and at 0),
 // per-row reminder_days override, malformed/blank expires_at handling, duplicate-prevention, renewal
 // request shaping (compliance_id + urgency דחוף/רגיל), inactive/malformed skipping, 'all' expansion,
@@ -121,8 +121,8 @@ test('complianceRequestInput: EXPIRED → urgency דחוף; carries compliance_i
   assert.equal(input.category, 'תיקון');
   assert.equal(input.urgency, 'דחוף');
   assert.equal(input.house, 'קיסריה עפרוני');
-  assert.equal(input.description, 'חידוש: רישיון עסק — קיסריה עפרוני (עמידה ברגולציה)');
-  assert.equal(input.created_by, 'מערכת - רגולציה');
+  assert.equal(input.description, 'חידוש: רישיון עסק — קיסריה עפרוני (עמידה באמות מידה)');
+  assert.equal(input.created_by, 'מערכת - אמות מידה');
   assert.equal(input.compliance_id, 'C1');
 });
 
