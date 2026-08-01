@@ -86,6 +86,13 @@ test('compliance.js MIRROR:compliance matches apps-script/Code.gs (compliance tr
   assert.equal(a, b);
 });
 
+test('events.js MIRROR:events matches apps-script/Code.gs (exceptional-events register)', () => {
+  const a = normalize(readBlock('src/events.js', 'events'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'events'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 // ---- schema.js (Node) ⇄ apps-script/setup.gs seeds must not drift (extended inc. 33 for units/par) ----
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
@@ -168,4 +175,16 @@ test('Compliance header + Requests compliance_id + config mirror between schema.
   // compliance_reminder_days is seeded on both sides (the SEED_CONFIG deep-equal below also covers it).
   assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'compliance_reminder_days'));
   assert.ok(SEED_CONFIG.some((o) => o.key === 'compliance_reminder_days'));
+});
+
+test('Events header + event_types config mirror between schema.js and setup.gs (exceptional-events register)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.Events, SCHEMA_HEADERS.Events);
+  assert.deepEqual(SCHEMA_HEADERS.Events, [
+    'id', 'created_at', 'created_by', 'house', 'occurred_at', 'event_type', 'severity',
+    'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
+    'status', 'closed_at', 'notes',
+  ]);
+  assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'event_types'));
+  assert.ok(SEED_CONFIG.some((o) => o.key === 'event_types'));
 });

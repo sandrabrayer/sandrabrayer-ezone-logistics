@@ -198,6 +198,29 @@ test('the /management data (incl. budget) is exec-only: field_ops / coordinator 
   assert.equal((await postAction('managementData', maint)).status, 403);
 });
 
+test('exceptional events: reporting is closed to maintenance; editing is exec-only (server-side 403)', async () => {
+  const roy = (await login('רועי', 'roy-password')).body.token;   // field_ops
+  const olga = (await login('אולגה', 'olga-password')).body.token; // ops_manager
+  const coord = (await login('שירה', APP_PIN)).body.token;        // coordinator
+  const maint = (await login('רמי', APP_PIN)).body.token;         // maintenance
+
+  // createEvent: maintenance is refused at the gateway; everyone else is forwarded (fake upstream → 200).
+  assert.equal((await postAction('createEvent', maint)).status, 403);
+  assert.equal((await postAction('createEvent', coord)).status, 200);
+  assert.equal((await postAction('createEvent', roy)).status, 200);
+  assert.equal((await postAction('createEvent', olga)).status, 200);
+
+  // updateEvent (edit/close): exec-only — field_ops, coordinator, maintenance all 403; ops_manager 200.
+  assert.equal((await postAction('updateEvent', roy)).status, 403);
+  assert.equal((await postAction('updateEvent', coord)).status, 403);
+  assert.equal((await postAction('updateEvent', maint)).status, 403);
+  assert.equal((await postAction('updateEvent', olga)).status, 200);
+
+  // The events LIST read is manager-tier (like inspections): coordinator 403, manager 200.
+  assert.equal((await getData('events', coord)).status, 403);
+  assert.equal((await getData('events', olga)).status, 200);
+});
+
 test('tier B is refused manager-only reads (inspections) → 403; a manager gets them', async () => {
   const coord = (await login('שירה', APP_PIN)).body.token;
   assert.equal((await getData('inspections', coord)).status, 403);

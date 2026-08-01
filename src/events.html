@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EZone לוגיסטיקה — אירועים חריגים</title>
+  <style>
+    :root { --bg:#15171c; --bg2:#1b1e24; --card:#1f232b; --card-line:#333a45; --ink:#eef1f5;
+      --muted:#8b93a0; --accent:#2dd4bf; --accent-2:#5eead4; --red:#e0584a; --amber:#e0a23a; --radius:14px; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--bg); font-family:'Heebo',"Segoe UI",system-ui,Arial,sans-serif; line-height:1.55; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--card-line); background:linear-gradient(180deg,var(--bg2),transparent); }
+    .brand { font-weight:800; }
+    .nav { display:flex; gap:6px; flex-wrap:wrap; }
+    .nav a { font-size:.92rem; font-weight:700; color:#c8cdd6; text-decoration:none; padding:7px 13px; border-radius:999px; border:1px solid transparent; }
+    .nav a:hover { color:var(--ink); border-color:var(--card-line); }
+    .nav a.active { color:#14171c; background:linear-gradient(120deg,#14b8a6,#2dd4bf,#5eead4); }
+    .wrap { max-width:900px; margin:0 auto; padding:22px 18px 64px; }
+    h1 { font-size:1.5rem; font-weight:800; margin:6px 0 2px; color:#fff; }
+    h2 { font-size:1.1rem; margin:24px 0 10px; }
+    .sub { color:#b8bfc9; margin:0 0 16px; font-size:.95rem; }
+    .card { background:var(--card); border:1px solid var(--card-line); border-radius:var(--radius); padding:16px; margin-bottom:14px; }
+    label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+    input, select, textarea { width:100%; min-height:40px; font-size:16px; border-radius:8px; padding:8px; background:#171b22; color:var(--ink); border:1px solid var(--card-line); }
+    textarea { min-height:64px; resize:vertical; }
+    button { min-height:44px; font-size:16px; font-weight:700; border:0; border-radius:8px; background:var(--accent); color:#04150f; cursor:pointer; padding:0 18px; }
+    button:disabled { opacity:.6; cursor:default; }
+    table { width:100%; border-collapse:collapse; font-size:.9rem; background:var(--card); border:1px solid var(--card-line); border-radius:var(--radius); overflow:hidden; }
+    th, td { text-align:right; padding:8px 10px; border-bottom:1px solid var(--card-line); vertical-align:top; }
+    th { color:var(--accent-2); font-weight:700; }
+    .pill { font-size:.72rem; font-weight:800; padding:2px 9px; border-radius:999px; }
+    .pill.red { background:#3a1512; color:#ff8a80; } .pill.amber { background:#4a3410; color:var(--amber); }
+    .pill.ok { background:#06251f; color:var(--accent-2); }
+    .msg { margin-top:10px; min-height:1.1em; font-weight:700; }
+    .msg.ok { color:var(--accent-2); } .msg.err { color:#ff8a80; }
+    .na { color:var(--muted); font-style:italic; }
+    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .deny { border:1px solid var(--red); color:#ff8a80; border-radius:var(--radius); padding:24px; text-align:center; font-weight:700; }
+    @media (max-width:640px){ .row2{grid-template-columns:1fr;} table{display:block; overflow-x:auto;} }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <div class="brand">לוגיסטיקה</div>
+  </div>
+  <div class="wrap">
+    <h1>אירועים חריגים</h1>
+    <p class="sub">רישום אירוע חריג מהשטח, הפקת לקחים ומעקב אחר אירועים חוזרים. שדות תפעוליים בלבד — אין להזין תוכן קליני/רפואי.</p>
+    <div id="out"><p class="na">טוען…</p></div>
+  </div>
+
+  <script>
+    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
+    // Canonical house id ↔ name (HOUSE-IDS.md). The form submits the NAME (server resolves the id);
+    // the list read returns the canonical id, mapped back here for display.
+    const NAME_BY_ID = {
+      'ramot-hashavim':'רמות השבים','raanana-asher':'רעננה אשר','pardes':'רעננה הפרדס',
+      'caesarea-ofroni':'קיסריה עפרוני','caesarea-rehab':'קיסריה ריהאב','sde-eliezer':'שדה אליעזר',
+    };
+    const SEVERITIES = ['נמוך','בינוני','גבוה'];
+    const STATUSES = ['פתוח','בטיפול','נסגר'];
+    const esc = (s) => String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmtDate = (v) => { const m=String(v||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m?`${m[3]}/${m[2]}/${m[1]}`:(v?esc(v):'—'); };
+    const role = () => String(window.__ROLE__||'');
+    const canManage = () => role()==='ops_manager'||role()==='ceo';
+    const isManagerTier = () => ['field_ops','ops_manager','ceo'].indexOf(role())!==-1;
+
+    async function api(action, method, payload) {
+      const opt = method==='POST'
+        ? { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({action, payload}) }
+        : {};
+      const res = await fetch(method==='POST' ? EXEC_URL : EXEC_URL + '?action=' + encodeURIComponent(action), opt);
+      if (res.status===403) return { ok:false, forbidden:true };
+      return res.json();
+    }
+
+    let TYPES = ['אחר'], HOUSES = [];
+
+    async function boot() {
+      if (role()==='maintenance') {
+        document.getElementById('out').innerHTML = '<div class="deny">רישום אירועים חריגים אינו זמין לתפקיד תחזוקה.</div>';
+        return;
+      }
+      // event_types from Config (fallback אחר only); houses feed for the dropdown.
+      try {
+        const cfg = await api('config','GET');
+        if (cfg && cfg.ok && Array.isArray(cfg.data)) {
+          const row = cfg.data.find((c)=>c.key==='event_types');
+          const parsed = String(row&&row.value||'').split('|').map((s)=>s.trim()).filter(Boolean);
+          TYPES = parsed.length ? parsed : ['אחר'];
+        }
+      } catch(e){}
+      try {
+        const h = await api('houses','GET');
+        if (h && h.ok && Array.isArray(h.data)) HOUSES = h.data.map((x)=>x.name);
+      } catch(e){}
+      render();
+      if (isManagerTier()) loadList();
+    }
+
+    function render() {
+      const typeOpts = TYPES.map((t)=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+      const houseOpts = HOUSES.map((n)=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+      const sevOpts = SEVERITIES.map((s)=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+      let html = `<h2>רישום אירוע</h2><div class="card">
+        <div class="row2">
+          <div><label>בית</label><select id="f_house"><option value="" disabled selected>בחר/י בית…</option>${houseOpts}</select></div>
+          <div><label>תאריך האירוע</label><input id="f_occurred" type="date" /></div>
+        </div>
+        <div class="row2">
+          <div><label>סוג אירוע</label><select id="f_type">${typeOpts}</select></div>
+          <div><label>חומרה</label><select id="f_sev">${sevOpts}</select></div>
+        </div>
+        <label>תיאור</label><textarea id="f_desc" placeholder="מה קרה (תפעולי בלבד)"></textarea>
+        <label>פעולה מיידית</label><textarea id="f_imm" placeholder="מה נעשה מיד"></textarea>
+        <div style="margin-top:12px"><button id="f_btn" onclick="submitEvent()">רישום אירוע</button></div>
+        <div id="f_msg" class="msg"></div>
+      </div>
+      <h2>אירועים במעקב</h2><div id="list"><p class="na">${isManagerTier()?'טוען…':'רשימת האירועים זמינה למנהלים.'}</p></div>`;
+      document.getElementById('out').innerHTML = html;
+    }
+
+    async function submitEvent() {
+      const msg = document.getElementById('f_msg'); const btn = document.getElementById('f_btn');
+      const payload = {
+        house: document.getElementById('f_house').value,
+        occurred_at: document.getElementById('f_occurred').value,
+        event_type: document.getElementById('f_type').value,
+        severity: document.getElementById('f_sev').value,
+        description: document.getElementById('f_desc').value.trim(),
+        immediate_action: document.getElementById('f_imm').value.trim(),
+      };
+      msg.className='msg'; msg.textContent='';
+      if (!payload.house) { msg.className='msg err'; msg.textContent='יש לבחור בית.'; return; }
+      if (!payload.occurred_at) { msg.className='msg err'; msg.textContent='יש לבחור תאריך.'; return; }
+      if (!payload.description) { msg.className='msg err'; msg.textContent='יש להזין תיאור.'; return; }
+      btn.disabled=true; btn.textContent='שולח…';
+      try {
+        const j = await api('createEvent','POST',payload);
+        if (j.forbidden) { msg.className='msg err'; msg.textContent='אין הרשאה לרשום אירוע לבית זה.'; }
+        else if (!j.ok) { msg.className='msg err'; msg.textContent=j.error||'שגיאה ברישום.'; }
+        else {
+          msg.className='msg ok'; msg.textContent='האירוע נרשם.';
+          document.getElementById('f_desc').value=''; document.getElementById('f_imm').value='';
+          if (isManagerTier()) loadList();
+        }
+      } catch(e){ msg.className='msg err'; msg.textContent='שגיאת רשת.'; }
+      btn.disabled=false; btn.textContent='רישום אירוע';
+    }
+
+    async function loadList() {
+      const box = document.getElementById('list'); if (!box) return;
+      const j = await api('events','GET');
+      if (j.forbidden) { box.innerHTML = '<p class="na">רשימת האירועים זמינה למנהלים.</p>'; return; }
+      if (!j.ok || !Array.isArray(j.data)) { box.innerHTML = '<p class="na">לא ניתן לטעון אירועים.</p>'; return; }
+      const rows = j.data.slice().sort((a,b)=>String(b.occurred_at||'').localeCompare(String(a.occurred_at||'')));
+      if (!rows.length) { box.innerHTML = '<p class="na">אין אירועים רשומים.</p>'; return; }
+      let html = '<table><thead><tr><th>תאריך</th><th>בית</th><th>סוג</th><th>חומרה</th><th>סטטוס</th><th>תיאור</th><th>לקחים</th></tr></thead><tbody>';
+      html += rows.map((r)=>{
+        const sev = r.severity==='גבוה'?'red':(r.severity==='בינוני'?'amber':'ok');
+        const st = r.status==='נסגר'?'ok':(r.status==='בטיפול'?'amber':'red');
+        const lessons = String(r.lessons||'').trim() ? esc(r.lessons) : '<span class="na">חסר</span>';
+        let row = `<tr><td>${fmtDate(r.occurred_at)}</td><td>${esc(NAME_BY_ID[r.house]||r.house)}</td><td>${esc(r.event_type)}</td>`
+          + `<td><span class="pill ${sev}">${esc(r.severity||'—')}</span></td><td><span class="pill ${st}">${esc(r.status||'פתוח')}</span></td>`
+          + `<td>${esc(r.description)}</td><td>${lessons}</td></tr>`;
+        if (canManage()) row += manageRow(r);
+        return row;
+      }).join('');
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }
+
+    // ops_manager / ceo inline edit-close form (root_cause, lessons, corrective link, status).
+    function manageRow(r) {
+      const stOpts = STATUSES.map((s)=>`<option value="${esc(s)}"${s===(r.status||'פתוח')?' selected':''}>${esc(s)}</option>`).join('');
+      return `<tr><td colspan="7" style="background:#171b22">
+        <div class="row2">
+          <div><label>שורש הבעיה</label><textarea id="rc_${esc(r.id)}">${esc(r.root_cause||'')}</textarea></div>
+          <div><label>הפקת לקחים</label><textarea id="ls_${esc(r.id)}">${esc(r.lessons||'')}</textarea></div>
+        </div>
+        <div class="row2">
+          <div><label>קישור דרישה מתקנת (מזהה)</label><input id="cr_${esc(r.id)}" value="${esc(r.corrective_request_id||'')}" placeholder="REQ-…" /></div>
+          <div><label>סטטוס</label><select id="st_${esc(r.id)}">${stOpts}</select></div>
+        </div>
+        <div style="margin-top:10px"><button onclick="saveEvent('${esc(r.id)}')">שמירה / סגירה</button> <span id="m_${esc(r.id)}" class="msg" style="display:inline-block"></span></div>
+      </td></tr>`;
+    }
+
+    async function saveEvent(id) {
+      const g = (p)=>document.getElementById(p+'_'+id);
+      const m = document.getElementById('m_'+id);
+      const payload = {
+        id, root_cause: g('rc').value.trim(), lessons: g('ls').value.trim(),
+        corrective_request_id: g('cr').value.trim(), status: g('st').value,
+      };
+      m.className='msg'; m.textContent='שומר…';
+      try {
+        const j = await api('updateEvent','POST',payload);
+        if (j.forbidden) { m.className='msg err'; m.textContent='אין הרשאה.'; }
+        else if (!j.ok) { m.className='msg err'; m.textContent=j.error||'שגיאה.'; }
+        else { m.className='msg ok'; m.textContent='נשמר.'; loadList(); }
+      } catch(e){ m.className='msg err'; m.textContent='שגיאת רשת.'; }
+    }
+    window.submitEvent = submitEvent; window.saveEvent = saveEvent;
+
+    boot();
+  </script>
+</body>
+</html>

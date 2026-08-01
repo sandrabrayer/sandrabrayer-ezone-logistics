@@ -149,7 +149,7 @@
       // and passed through as-is; the browser only renders them.
       return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
         preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null,
-        maintenance: d.maintenance || null, compliance: d.compliance || null };
+        maintenance: d.maintenance || null, compliance: d.compliance || null, events: d.events || null };
     }
 
     // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget
@@ -322,6 +322,50 @@
           return block;
         }).join('');
         if (cmp.skipped) html += `<p class="sub">${cmp.skipped} שורות אמות מידה לא תקינות דולגו (בדוק id/פריט/תאריך תוקף/בית בגיליון Compliance).</p>`;
+      }
+
+      // Exceptional events (אירועים חריגים) — computed server-side from the Events register. Open events
+      // worst-first per house, recurrence (same type+house ≥2 in 90 days), monthly trend, missing lessons.
+      // A house with no open events shows "אין אירועים" — a TRUE zero (the register is always available).
+      const evt = m.events;
+      html += '<h2>אירועים חריגים</h2>';
+      if (!evt || !evt.available) {
+        html += '<div class="unavail"><div class="t">אירועים חריגים — לא זמין</div><div class="r">אין נתוני אירועים</div></div>';
+      } else {
+        html += '<div class="grid" style="margin-bottom:10px">';
+        html += kpi(evt.openCount || 0, 'אירועים פתוחים', (evt.openCount ? 'amber' : 'ok'));
+        html += kpi((evt.recurrence || []).length, 'דפוסים חוזרים', ((evt.recurrence || []).length ? 'red' : 'ok'), (evt.recurrence || []).length > 0);
+        html += kpi(evt.missingLessonsCount || 0, 'ללא הפקת לקחים', (evt.missingLessonsCount ? 'amber' : 'ok'));
+        html += '</div>';
+
+        // Recurrence — the JD success metric (ירידה באירועים חוזרים).
+        if ((evt.recurrence || []).length) {
+          html += '<h3 style="margin:12px 0 6px">אירועים חוזרים (אותו סוג + בית, 90 יום)</h3><table><thead><tr><th>בית</th><th>סוג</th><th>מופעים</th></tr></thead><tbody>';
+          html += evt.recurrence.map((r) => `<tr><td>${esc(r.houseName || r.house)}</td><td>${esc(r.type)}</td><td><span class="pill red">${r.count}</span></td></tr>`).join('');
+          html += '</tbody></table>';
+        }
+
+        // Per-house open events, worst-first; a house with none → "אין אירועים" (true zero).
+        html += (evt.houses || []).map((h) => {
+          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${h.openCount ? ` <span class="pill amber">${h.openCount} פתוחים</span>` : ''}</h3>`;
+          if (!h.hasEvents) { block += '<div class="kpi"><div class="n na">אין אירועים</div></div>'; return block; }
+          block += '<table><thead><tr><th>תאריך</th><th>סוג</th><th>חומרה</th><th>סטטוס</th><th>תיאור</th><th>לקחים</th></tr></thead><tbody>';
+          block += h.events.map((e) => {
+            const sev = e.severity === 'גבוה' ? 'red' : (e.severity === 'בינוני' ? 'amber' : 'ok');
+            const lessons = e.missingLessons ? '<span class="pill amber">חסר</span>' : '✓';
+            return `<tr><td>${fmtDate(e.occurred)}</td><td>${esc(e.type)}</td><td><span class="pill ${sev}">${esc(e.severity || '—')}</span></td><td>${esc(e.status)}</td><td>${esc(e.description)}</td><td>${lessons}</td></tr>`;
+          }).join('');
+          block += '</tbody></table>';
+          return block;
+        }).join('');
+
+        // Monthly trend (last 6 months).
+        if ((evt.trend || []).length) {
+          html += '<h3 style="margin:14px 0 6px">מגמה חודשית (6 חודשים)</h3><table><thead><tr><th>חודש</th><th>אירועים</th></tr></thead><tbody>';
+          html += evt.trend.map((t) => `<tr><td>${esc(t.month)}</td><td>${t.count}</td></tr>`).join('');
+          html += '</tbody></table>';
+        }
+        if (evt.skipped) html += `<p class="sub">${evt.skipped} שורות אירועים לא תקינות דולגו (בדוק id/בית/תאריך בגיליון Events).</p>`;
       }
 
       html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';

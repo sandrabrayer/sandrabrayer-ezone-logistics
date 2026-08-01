@@ -8,10 +8,18 @@ import {
 
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
-    'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'Houses', 'InspectionFindings',
-    'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan', 'Requests',
-    'Technicians', 'Users',
+    'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'Events', 'Houses',
+    'InspectionFindings', 'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan',
+    'Requests', 'Technicians', 'Users',
   ].sort());
+});
+
+test('Events sheet has the append-only exceptional-events columns', () => {
+  assert.deepEqual(HEADERS.Events, [
+    'id', 'created_at', 'created_by', 'house', 'occurred_at', 'event_type', 'severity',
+    'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
+    'status', 'closed_at', 'notes',
+  ]);
 });
 
 test('Requests sheet has all 30 columns; compliance_id appended last (compliance tracker)', () => {
@@ -94,6 +102,9 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
   // compliance_reminder_days (compliance tracker) — default reminder window, seeded 30.
   assert.ok(keys.includes('compliance_reminder_days'));
   assert.equal(SEED_CONFIG.find((c) => c.key === 'compliance_reminder_days').value, '30');
+  // event_types (exceptional-events register) — the allowed categories spec.
+  assert.ok(keys.includes('event_types'));
+  assert.equal(SEED_CONFIG.find((c) => c.key === 'event_types').value, 'בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר');
   // Foreign digest ids (read-only consumption): kitchen seeded with the known id, coordinators blank.
   assert.equal(SEED_CONFIG.find((c) => c.key === 'kitchen_digest_id').value, '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE');
   assert.equal(SEED_CONFIG.find((c) => c.key === 'coordinators_digest_id').value, '');
