@@ -73,6 +73,16 @@ var HEADERS = {
   // optional; active = TRUE/FALSE. days_to_expiry / status are DERIVED, never stored. Append-only. Nothing
   // is written back on completion — Olga updates expires_at from the new certificate by hand.
   Compliance: ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active'],
+  // Exceptional-events register (אירועים חריגים) — reported from the FIELD via the /events UI (not a
+  // fill-in-Sheet module). Created empty by setupSheet(). created_by = session identity (never client);
+  // house = canonical id; occurred_at = date; event_type from Config event_types; severity נמוך/בינוני/גבוה;
+  // status פתוח/בטיפול/נסגר; corrective_request_id optionally links a Request. Operational fields ONLY —
+  // never clinical content. Append-only. Recurrence/trend are DERIVED for /management, never stored.
+  Events: [
+    'id', 'created_at', 'created_by', 'house', 'occurred_at', 'event_type', 'severity',
+    'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
+    'status', 'closed_at', 'notes',
+  ],
 };
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
@@ -107,6 +117,9 @@ var SEED_CONFIG = [
   // generating a renewal request, when a Compliance row leaves reminder_days blank. Upserted by key. A
   // malformed value is logged and falls back to this seeded default (30) — never a silent number beyond it.
   ['compliance_reminder_days', '30'],
+  // event_types (exceptional-events register) — pipe-separated allowed categories, tunable in the Sheet
+  // with no deploy. Upserted by key. Malformed/blank → the entry form falls back to אחר only (logged).
+  ['event_types', 'בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר'],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites

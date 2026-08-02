@@ -3,6 +3,51 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — exceptional-events register (אירועים חריגים) with a field entry UI + /management analysis
+
+Olga's JD requires מעקב אחר אירועים חריגים, הפקת לקחים ויישום פעולות מתקנות, and her success metric is a
+drop in RECURRING exceptional events. This adds a register with a **field entry UI** (unlike the
+fill-in-Sheet modules) and a /management analysis panel.
+
+**New `Events` sheet** (`id, created_at, created_by, house, occurred_at, event_type, severity,
+description, immediate_action, root_cause, lessons, corrective_request_id, status, closed_at, notes`),
+created empty + idempotently by `setupSheet()`. `created_by` is the **session identity** (never
+client-supplied); `house` is a canonical id; `event_type` comes from the new Config key **`event_types`**
+(seeded `בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר`, parseable like `sla_days` — malformed → the form falls
+back to אחר only, logged). Operational fields ONLY — never any clinical/medical record content.
+
+**Entry UI at `/events`** — a report form (house, occurred_at, type, severity, description,
+immediate_action). The auth shim injects an "אירועים חריגים" nav link for every role that may report
+(everyone except maintenance). Managers additionally see the register list; ops_manager/ceo get inline
+edit/close.
+
+**Permissions (server-side AND Code.gs):** CREATE is allowed for coordinator (**own house only**),
+field_ops, ops_manager, ceo — **maintenance cannot** (gateway 403 + Code.gs `forbidden_`). EDIT/close
+(root_cause, lessons, corrective_request_id, status) is **ops_manager + ceo only**. Closing REQUIRES
+root_cause AND lessons (rejected server-side otherwise). A linked corrective Request id is validated to
+exist (no auto-creation this increment). Every create/edit/close is written to AuditLog with actor +
+timestamp. `occurred_at` is parsed **day-first** via the shared parser.
+
+**/management panel (canManage-gated):** open events worst-first (severity, then age); **recurrence** —
+same event_type + house 2+ times in a trailing 90 days flagged חוזר with its count (the JD success
+metric); monthly trend over the last 6 months; events missing lessons highlighted. A house with no open
+events shows **"אין אירועים" — a TRUE zero** (the register is always available, distinct from
+data-unavailable). No events data enters any digest.
+
+**Mirror + tests:** the pure logic lives in `src/events.js` behind a `MIRROR:events` fence duplicated
+verbatim in `apps-script/Code.gs` (drift-guarded); it reuses `houseInScope` (roles.js) and
+`maintDateOnly`/`maintDaysBetween` (maintenance.js). New `test/events.test.js` covers create permission
+per role incl. coordinator own-house-only + maintenance-blocked, created_by-from-token, close requires
+root_cause+lessons, corrective-link validation, event_types fallback, recurrence at exactly 2 in 90 days
+(not at 1, not at 91 apart), day-first occurred_at, and panel zero-vs-unavailable. `test/staff-tiers.test.js`
+adds the server-side 403 gates; `test/nav-events.test.js` drives the injected nav link; schema +
+mirror-drift extended for `Events` and `event_types`. Full `node --test` suite green (436).
+
+> **After this merge:** re-run **`setupSheet()`** once (creates the `Events` sheet and adds the
+> `event_types` Config row — existing rows untouched). No trigger. The entry UI lives at **`/events`**
+> (nav link auto-appears for all roles except maintenance). Tune the category list by editing the
+> `event_types` Config cell — no deploy.
+
 ## [Unreleased] — bug fix — Israeli day-first date parsing for Sheet-filled dates
 
 **Problem:** Olga fills dates in the Sheets in the Israeli convention **day/month/year** (e.g. `12/7/2026`

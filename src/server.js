@@ -119,7 +119,22 @@ const CLIENT_SHIM = `<script>(function(){
     }
     if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
   }
-  if(_boot){mountSignOut();mountMgmtNav();}
+  // /events nav link — the exceptional-events register entry page. Shown to every role that MAY report
+  // an event (everyone except maintenance). Display-only; the server + Code.gs enforce create/edit rules.
+  function canReportRole(){var r=String(window.__ROLE__||'');return r!==''&&r!=='maintenance';}
+  function mountEventsNav(){
+    function m(){
+      if(!canReportRole())return;
+      var nav=document.querySelector('.nav'); if(!nav)return;
+      if(nav.querySelector('a[href="/events"]'))return; // already present (don't duplicate)
+      var a=document.createElement('a'); a.setAttribute('href','/events'); a.textContent='אירועים חריגים';
+      a.id='ezone-events-nav';
+      if(String(location.pathname||'').indexOf('/events')===0)a.className='active';
+      nav.appendChild(a);
+    }
+    if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
+  }
+  if(_boot){mountSignOut();mountMgmtNav();mountEventsNav();}
   function doLogin(){return new Promise(function(resolve){
     function mount(){
       var ov=el('div','position:fixed;inset:0;z-index:99999;background:#071410;display:flex;align-items:center;justify-content:center;direction:rtl;font-family:system-ui,Arial,sans-serif');
@@ -139,7 +154,7 @@ const CLIENT_SHIM = `<script>(function(){
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountMgmtNav();resolve();}
+          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountMgmtNav();mountEventsNav();resolve();}
           else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
         }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
@@ -187,6 +202,7 @@ const HTML_ROUTES = {
   '/reports': 'reports.html', '/reports.html': 'reports.html',
   '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
   '/management': 'management.html', '/management.html': 'management.html',
+  '/events': 'events.html', '/events.html': 'events.html',
 };
 
 function notFound(res) {
@@ -334,6 +350,9 @@ const ALLOWED_QUERY_KEYS = new Set(['action', 'house', 'month', 'week_start', 'i
 // Reads only tier-A managers may perform. Tier B (coordinator/maintenance) get 403 on these.
 const MANAGER_ONLY_READS = new Set([
   'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts',
+  // The events LIST (for the /events review/edit view) is manager-tier; coordinators report via the
+  // form (createEvent) but don't read the register. Edit/close is exec-only, gated on the write path.
+  'events',
 ]);
 // Reads open to everyone (needed by the request form). 'requests' is scope-filtered below.
 // 'houses'/'config' are non-sensitive; 'users' is manager-only + pin_hash-stripped.
@@ -400,6 +419,15 @@ async function handleAction(req, res) {
   // /management is exec-only (ops_manager + ceo). Enforced here (server-side) AND independently in
   // Code.gs — field_ops and every tier-B role get 403 with no data read.
   if (body.action === 'managementData' && !canManage(actor.role)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+  // Exceptional-events register (אירועים חריגים). Reporting is closed to maintenance; editing/closing an
+  // event is exec-only. Enforced here (server-side) AND independently in Code.gs (which also enforces the
+  // coordinator own-house-only scope on create). A blocked role gets 403 with no upstream call.
+  if (body.action === 'createEvent' && actor.role === ROLE.MAINTENANCE) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+  if (body.action === 'updateEvent' && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   const upstreamBody = JSON.stringify({ action: body.action, payload: body.payload || {}, token: auth.token });

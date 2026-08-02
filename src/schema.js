@@ -141,6 +141,20 @@ export const HEADERS = {
   // 'TRUE'/'FALSE'. days_to_expiry / status are DERIVED, never stored. NOTHING is written back on
   // completion — the new expiry lives on the new certificate, so Olga updates expires_at by hand.
   Compliance: ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active'],
+
+  // Exceptional-events register (אירועים חריגים) — one row per reported event. Unlike the fill-in-Sheet
+  // modules, events are reported from the FIELD via the /events entry UI. Created empty + idempotently by
+  // setupSheet(); columns are append-only. `created_by` is the SESSION identity (never client-supplied).
+  // `house` is a CANONICAL id (HOUSE-IDS.md). `occurred_at` is a date. `event_type` is from the
+  // Config-driven `event_types` list; `severity` is נמוך/בינוני/גבוה; `status` is פתוח/בטיפול/נסגר.
+  // `corrective_request_id` optionally links an existing Request (no auto-creation). root_cause / lessons
+  // are filled on follow-up; closing (status נסגר) REQUIRES both. Operational fields ONLY — never any
+  // clinical/medical record content. Recurrence / trend are DERIVED for /management, never stored.
+  Events: [
+    'id', 'created_at', 'created_by', 'house', 'occurred_at', 'event_type', 'severity',
+    'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
+    'status', 'closed_at', 'notes',
+  ],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -251,6 +265,10 @@ export const SEED_CONFIG = [
   // Read like sla_days (tunable in the Sheet, no deploy). A malformed value is logged and falls back to
   // this seeded default (30) — never a silent number beyond the seed.
   { key: 'compliance_reminder_days', value: '30' },
+  // event_types (exceptional-events register) — a pipe-separated list of the allowed event categories,
+  // tunable in the Sheet with NO deploy. A malformed/blank spec is logged and the entry form falls back
+  // to אחר only — never a silently wrong category set.
+  { key: 'event_types', value: 'בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר' },
 ];
 
 // ---- Roles + user seed (increment 30) ----
