@@ -3,6 +3,39 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — /management reads the coordinators TrainingCompliance digest (READ-ONLY)
+
+Replaces the static "עמידה בתוכנית הדרכה — לא זמין" card on `/management` with a **live, read-only** panel
+driven by the coordinators-published digest (a **separate** spreadsheet, tab `TrainingCompliance`). Built
+exactly like the kitchen food-shortages consumption (`MIRROR:digestconsume`): a pure, drift-guarded shaper
+plus a thin cached read in `Code.gs`. This app is a **read-only consumer** — it never writes into the
+coordinators' digest.
+
+**New Config key `training_digest_id`** — seeded by `setupSheet()` (upsert by key) with the digest id on
+BOTH sides (`src/schema.js` + `apps-script/setup.gs`, same position, drift-guarded). The id is **never
+hardcoded in the read path**; a **blank** value renders the panel "לא זמין". Grant the Logistics Apps
+Script account VIEWER access to that spreadsheet for the read to work.
+
+**New pure shaper `src/training-digest.js`** (`MIRROR:trainingdigest`, mirrored VERBATIM in `Code.gs`,
+asserted by `test/mirror-drift.test.js`). Headers are read **BY NAME** (`house, guideName, firstAidStatus,
+firstAidDate, instructorStatus, instructorDate, overallStatus`; `updatedAt` optional) — column order never
+matters. Per house: counts by `overallStatus`, compliance percent (`ok / total`), and guides listed
+**worst-first** (blocked → notRecorded → warn → ok) with which training is lacking (עזרה ראשונה / הדרכת
+מדריכים) and dates as **dd/mm/yyyy**. `notRecorded` is kept **distinct** and never counted as `ok` (a
+neutral gray pill in the UI, never green). Every canonical house gets an entry: a house **absent** from
+the digest shows "אין נתונים לבית זה" — **distinguished** from the whole digest being unavailable. House
+ids that don't map to `HOUSE-IDS.md` are **omitted, never guessed**.
+
+**Read path `readTrainingCompliance_()` in `Code.gs`** — inside the `canManage`-gated `managementData`
+handler (ops_manager + ceo; enforced server-side AND in `Code.gs`), cached ~5 min (`CacheService`).
+**Fail-visible:** no id / no access / missing tab / header mismatch → an explicit "לא זמין" card with the
+reason — never a silent empty state, never a fabricated 0, never crashing the rest of the screen.
+
+`training_adherence` is removed from `UNAVAILABLE_CAPABILITIES` (now a live panel), matching the
+food/budget/maintenance precedent. New `test/training-digest.test.js` covers by-name reads, notRecorded
+never counting as ok, worst-first ordering, absent-house vs digest-unavailable, header mismatch, and date
+formatting; `node --test` green.
+
 ## [Unreleased] — feature — exceptional-events register (אירועים חריגים) with a field entry UI + /management analysis
 
 Olga's JD requires מעקב אחר אירועים חריגים, הפקת לקחים ויישום פעולות מתקנות, and her success metric is a

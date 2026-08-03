@@ -115,16 +115,17 @@ test('buildManagementSummary bundles every panel and the unavailable-capabilitie
     { requests: REQUESTS, inspections: INSPECTIONS, findings: FINDINGS, houses: HOUSES, inventoryCounts: COUNTS }, NOW);
   assert.ok(m.requests && m.defectClosure && m.houseQuality && m.spend && m.preOpening);
   assert.equal(m.unavailable, UNAVAILABLE_CAPABILITIES);
-  // training, adoption, record-quality remain unavailable.
+  // adoption + record-quality remain unavailable.
   const keys = m.unavailable.map((u) => u.key);
-  for (const k of ['training_adherence', 'systems_adoption', 'record_quality']) {
+  for (const k of ['systems_adoption', 'record_quality']) {
     assert.ok(keys.includes(k), `missing unavailable capability: ${k}`);
   }
-  // food_quality (kitchen digest), budget_adherence (Budgets vs spend) and preventive_maintenance
-  // (MaintenancePlan sheet) are now LIVE panels.
+  // food_quality (kitchen digest), budget_adherence (Budgets vs spend), preventive_maintenance
+  // (MaintenancePlan sheet) and training_adherence (coordinators TrainingCompliance digest) are now LIVE.
   assert.ok(!keys.includes('food_quality'), 'food_quality is a live panel now');
   assert.ok(!keys.includes('budget_adherence'), 'budget_adherence is a live panel now');
   assert.ok(!keys.includes('preventive_maintenance'), 'preventive_maintenance is a live panel now');
+  assert.ok(!keys.includes('training_adherence'), 'training_adherence is a live panel now');
 });
 
 test('empty inputs never crash and never fabricate — counts are 0, rates are unavailable', () => {

@@ -40,6 +40,8 @@
     .pill { font-size: .74rem; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
     .pill.red { background: #3a1512; color: #ff8a80; } .pill.amber { background: #4a3410; color: var(--amber); }
     .pill.ok { background: #06251f; color: var(--accent-2); }
+    /* notRecorded — a deliberately NEUTRAL pill (never green/ok): a missing record must not read as fine. */
+    .pill.gray { background: #2a2f38; color: #aeb6c2; }
     .unavail { background: repeating-linear-gradient(135deg, #23262e, #23262e 8px, #20232b 8px, #20232b 16px); border: 1px dashed var(--card-line); border-radius: 12px; padding: 12px 14px; }
     .unavail .t { font-weight: 800; color: #cfd5de; }
     .unavail .r { color: var(--muted); font-size: .85rem; margin-top: 3px; }
@@ -149,13 +151,13 @@
       // and passed through as-is; the browser only renders them.
       return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
         preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null,
-        maintenance: d.maintenance || null, compliance: d.compliance || null, events: d.events || null };
+        maintenance: d.maintenance || null, compliance: d.compliance || null, events: d.events || null,
+        training: d.training || null };
     }
 
-    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget
-    // and preventive_maintenance are now LIVE panels below, so they are no longer listed here).
+    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget,
+    // preventive_maintenance and training_adherence are now LIVE panels below, so they are no longer here).
     const UNAVAILABLE = [
-      ['עמידה בתוכנית הדרכה', 'אין מקור נתוני הדרכת מדריכים.'],
       ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
       ['איכות הרשומה ועמידה בדרישות משרד הבריאות', 'בבעלות האפליקציות הקליניות; אינו בתחום הלוגיסטיקה.'],
     ];
@@ -230,6 +232,44 @@
       const co = m.coordinators;
       if (!co || !co.available) {
         html += `<div class="unavail" style="margin-top:8px"><div class="t">דייג׳סט רכזים — לא זמין</div><div class="r">${esc((co && co.reason) || 'אין דייג׳סט רכזים מתפרסם לקריאה')}</div></div>`;
+      }
+
+      // Training compliance (עמידה בתוכנית הדרכה) — READ-ONLY from the coordinators-published digest
+      // (tab TrainingCompliance). Unavailable (no id / no access / missing tab / header mismatch) renders
+      // as a "לא זמין" card with the reason (never as 0). Per house, worst-first guides (blocked, then
+      // notRecorded, then warn); notRecorded is a NEUTRAL pill, never green. A house absent from the digest
+      // shows "אין נתונים לבית זה" — distinct from the whole digest being unavailable.
+      const tr = m.training;
+      html += '<h2>עמידה בתוכנית הדרכה (דייג׳סט הרכזים — קריאה בלבד)</h2>';
+      if (!tr || !tr.available) {
+        html += `<div class="unavail"><div class="t">עמידה בתוכנית הדרכה — לא זמין</div><div class="r">${esc((tr && tr.reason) || 'אין מקור נתוני הדרכה')}</div></div>`;
+      } else if (!tr.houses || !tr.houses.length) {
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים במיפוי</div></div>';
+      } else {
+        const stName = { ok: 'תקין', warn: 'אזהרה', blocked: 'חסום', notRecorded: 'לא תועד' };
+        const stCls = { ok: 'ok', warn: 'amber', blocked: 'red', notRecorded: 'gray' };
+        const pill = (st) => `<span class="pill ${stCls[st] || 'gray'}">${esc(stName[st] || st || '—')}</span>`;
+        html += tr.houses.map((h) => {
+          if (!h.hasData) {
+            return `<h3 style="margin:14px 0 6px">${esc(h.house)}</h3><div class="unavail" style="margin-bottom:4px"><div class="r">אין נתונים לבית זה</div></div>`;
+          }
+          const pct = h.compliancePercent == null ? '—' : h.compliancePercent + '%';
+          const pctCls = h.compliancePercent == null ? 'na' : (h.compliancePercent >= 80 ? 'ok' : (h.compliancePercent >= 50 ? 'amber' : 'red'));
+          const badges = `${h.counts.blocked ? ` <span class="pill red">${h.counts.blocked} חסום</span>` : ''}${h.counts.notRecorded ? ` <span class="pill gray">${h.counts.notRecorded} לא תועד</span>` : ''}${h.counts.warn ? ` <span class="pill amber">${h.counts.warn} אזהרה</span>` : ''}`;
+          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${badges}</h3>`;
+          block += `<div class="grid" style="margin-bottom:8px"><div class="kpi"><div class="n ${pctCls}">${pct}</div><div class="l">עמידה (תקין מתוך ${h.total})</div></div>`;
+          block += `<div class="kpi"><div class="n ok">${h.counts.ok}</div><div class="l">תקין</div></div>`;
+          block += `<div class="kpi"><div class="n">${h.total}</div><div class="l">מדריכים</div></div></div>`;
+          block += '<table><thead><tr><th>מדריך</th><th>סטטוס כללי</th><th>חסר</th><th>עזרה ראשונה</th><th>הדרכת מדריכים</th></tr></thead><tbody>';
+          block += h.guides.map((g) => {
+            const lacking = (g.lacking && g.lacking.length) ? g.lacking.map(esc).join('، ') : '<span class="na">—</span>';
+            const fa = `${pill(g.firstAidStatus)}${g.firstAidDate ? ' ' + esc(g.firstAidDate) : ''}`;
+            const ins = `${pill(g.instructorStatus)}${g.instructorDate ? ' ' + esc(g.instructorDate) : ''}`;
+            return `<tr><td>${esc(g.guideName) || '<span class="na">—</span>'}</td><td>${pill(g.overallStatus)}</td><td>${lacking}</td><td>${fa}</td><td>${ins}</td></tr>`;
+          }).join('');
+          block += '</tbody></table>';
+          return block;
+        }).join('');
       }
 
       // Budget adherence (עמידה בתקציב) — computed server-side per selected month. Financial data;
