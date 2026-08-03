@@ -857,6 +857,113 @@ function foodShortagesPanel(ctx, idToName) {
 }
 // === MIRROR:digestconsume END ===
 
+// === MIRROR:trainingdigest START ===
+// Exact TrainingCompliance headers (contract v2), read BY NAME so column order never matters. All are
+// required for the panel EXCEPT updatedAt (producer metadata) — a missing required header → unavailable.
+var TRAINING_REQUIRED_HEADERS = ['house', 'guideName', 'firstAidStatus', 'firstAidDate', 'instructorStatus', 'instructorDate', 'overallStatus'];
+
+// Worst-first rank for guide ordering: blocked, then notRecorded, then warn, then ok; unknown sorts last.
+function trainingStatusRank(status) {
+  var s = String(status == null ? '' : status);
+  if (s === 'blocked') return 0;
+  if (s === 'notRecorded') return 1;
+  if (s === 'warn') return 2;
+  if (s === 'ok') return 3;
+  return 4;
+}
+
+// A raw date cell → dd/mm/yyyy for display, or '' when blank/unparseable (never a wrong date). Accepts a
+// leading YYYY-MM-DD (optionally with a time suffix) — the digest publishes ISO-style dates.
+function trainingFmtDate(v) {
+  var s = String(v == null ? '' : v).replace(/^\s+|\s+$/g, '');
+  if (s === '') return '';
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : s;
+}
+
+// True only when EVERY required header key is present on the (first) row object.
+function trainingHasHeaders(row, headers) {
+  for (var i = 0; i < headers.length; i++) {
+    if (!row || !Object.prototype.hasOwnProperty.call(row, headers[i])) return false;
+  }
+  return true;
+}
+
+// Shape TrainingCompliance rows → { available, reason?, houses:[...] }. Every canonical house in idToName
+// gets an entry (so an absent house surfaces, never invisible): hasData:true with real numbers when the
+// digest has rows for it, else hasData:false ("אין נתונים לבית זה"). Rows whose house id is not canonical
+// are OMITTED (never guessed). rows empty → available with all houses hasData:false (NOT an error). A
+// missing required header on a non-empty digest → available:false (we will not fabricate a shape or a 0).
+function summarizeTrainingCompliance(rows, idToName) {
+  var map = idToName || {};
+  var byId = {};
+  var ids = [];
+  for (var cid in map) {
+    if (Object.prototype.hasOwnProperty.call(map, cid)) {
+      byId[cid] = { id: cid, house: map[cid], hasData: false, total: 0,
+        counts: { ok: 0, warn: 0, blocked: 0, notRecorded: 0 }, compliancePercent: null, guides: [] };
+      ids.push(cid);
+    }
+  }
+  if (rows && rows.length) {
+    if (!trainingHasHeaders(rows[0], TRAINING_REQUIRED_HEADERS)) {
+      return { available: false, reason: 'כותרות TrainingCompliance אינן תואמות את החוזה' };
+    }
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var id = String(row['house'] == null ? '' : row['house']).replace(/^\s+|\s+$/g, '');
+      if (!id || !Object.prototype.hasOwnProperty.call(byId, id)) continue; // unmapped house → omit
+      var h = byId[id];
+      h.hasData = true;
+      var overall = String(row['overallStatus'] == null ? '' : row['overallStatus']).replace(/^\s+|\s+$/g, '');
+      var firstAid = String(row['firstAidStatus'] == null ? '' : row['firstAidStatus']).replace(/^\s+|\s+$/g, '');
+      var instructor = String(row['instructorStatus'] == null ? '' : row['instructorStatus']).replace(/^\s+|\s+$/g, '');
+      if (Object.prototype.hasOwnProperty.call(h.counts, overall)) h.counts[overall]++;
+      h.total++;
+      var lacking = [];
+      if (firstAid !== 'ok') lacking.push('עזרה ראשונה');
+      if (instructor !== 'ok') lacking.push('הדרכת מדריכים');
+      h.guides.push({
+        guideName: String(row['guideName'] == null ? '' : row['guideName']).replace(/^\s+|\s+$/g, ''),
+        overallStatus: overall,
+        firstAidStatus: firstAid,
+        firstAidDate: trainingFmtDate(row['firstAidDate']),
+        instructorStatus: instructor,
+        instructorDate: trainingFmtDate(row['instructorDate']),
+        lacking: lacking,
+      });
+    }
+  }
+  ids.sort(function (a, b) { var x = byId[a].house, y = byId[b].house; return x < y ? -1 : x > y ? 1 : 0; });
+  var out = [];
+  for (var i = 0; i < ids.length; i++) {
+    var e = byId[ids[i]];
+    if (e.hasData) {
+      e.compliancePercent = e.total ? Math.round((e.counts.ok / e.total) * 100) : null;
+      e.guides.sort(function (a, b) {
+        var ra = trainingStatusRank(a.overallStatus), rb = trainingStatusRank(b.overallStatus);
+        if (ra !== rb) return ra - rb;
+        return a.guideName < b.guideName ? -1 : a.guideName > b.guideName ? 1 : 0;
+      });
+    }
+    out.push(e);
+  }
+  return { available: true, houses: out };
+}
+
+// Turn a read context into a panel. Keeps every "unavailable" reason in ONE pure place so the Code.gs
+// side only does the SpreadsheetApp read and hands the outcome here. Blank id → "לא זמין" (not an error);
+// no access / missing tab → an explicit read-error reason. NEVER a silent empty state, never a 0.
+//   ctx: { configured, readError, missingTab, rows }
+function trainingCompliancePanel(ctx, idToName) {
+  var c = ctx || {};
+  if (!c.configured) return { available: false, reason: 'לא הוגדר מזהה דייג׳סט רכזים (Config: training_digest_id)' };
+  if (c.readError) return { available: false, reason: 'שגיאת קריאה מדייג׳סט הרכזים — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' };
+  if (c.missingTab) return { available: false, reason: 'הטאב TrainingCompliance לא נמצא בדייג׳סט הרכזים' };
+  return summarizeTrainingCompliance(c.rows || [], idToName);
+}
+// === MIRROR:trainingdigest END ===
+
 // Read an arbitrary (possibly FOREIGN, read-only) sheet into header-keyed objects. By-name reads only.
 function objectsFromSheet_(sheet) {
   var range = sheet.getDataRange().getValues();
@@ -913,6 +1020,33 @@ function readCoordinatorsShortages_() {
   var id = String(getConfig('coordinators_digest_id') || '').replace(/^\s+|\s+$/g, '');
   if (!id) return { available: false, reason: 'אין דייג׳סט רכזים מתפרסם לקריאה (Config: coordinators_digest_id ריק)' };
   return { available: false, reason: 'קריאת דייג׳סט רכזים טרם מומשה (מבנה טאב לא מוגדר)' };
+}
+
+// READ-ONLY consumption of the coordinators-published digest (tab TrainingCompliance). Cached ~5 min so
+// the screen doesn't hammer the foreign sheet. Any failure (no id, no access, missing tab, header
+// mismatch) yields an "unavailable" panel — never a crash, never a fabricated 0. The digest id lives in
+// Config (never hardcoded here); a blank id renders "לא זמין". Never writes anything into the digest.
+function readTrainingCompliance_() {
+  var CK = 'mgmt_training_compliance_v1';
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache) { var hit = cache.get(CK); if (hit) { try { return JSON.parse(hit); } catch (e2) {} } }
+
+  var id = String(getConfig('training_digest_id') || '').replace(/^\s+|\s+$/g, '');
+  var ctx = { configured: id !== '' };
+  if (ctx.configured) {
+    try {
+      var ss = SpreadsheetApp.openById(id);
+      var sheet = ss.getSheetByName('TrainingCompliance');
+      if (!sheet) ctx.missingTab = true;
+      else ctx.rows = objectsFromSheet_(sheet);
+    } catch (e) {
+      ctx.readError = true;
+    }
+  }
+  var panel = trainingCompliancePanel(ctx, canonicalHouseIdToName_());
+  if (cache) { try { cache.put(CK, JSON.stringify(panel), 300); } catch (e3) {} }
+  return panel;
 }
 
 // === MIRROR:budget START ===
@@ -1957,8 +2091,9 @@ function readBudgetAdherence_(period, requests) {
 // ===== /management (increment 37) — exec network-management view for ops_manager + ceo =====
 // Role-gated HERE (not UI-only): a request from any other role — including field_ops — is refused
 // 403 before any data is read. Served as a POST so the token identity is verified (doGet is not
-// identity-checked). Reads Logistics-owned sheets, PLUS the ezone-kitchen digest READ-ONLY (never
-// written) for the food-shortages panel. It writes nothing to any app. Budget/actual figures are
+// identity-checked). Reads Logistics-owned sheets, PLUS the ezone-kitchen digest and the
+// coordinators-published digest (TrainingCompliance) READ-ONLY (never written). It writes nothing to any
+// app. Budget/actual figures are
 // returned here (financial) but are NEVER written to any digest.
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
@@ -1974,6 +2109,7 @@ function handleManagementData_(p, actor) {
       inventoryCounts: readObjects_('InventoryCounts'),
       kitchen: readKitchenShortages_(),
       coordinators: readCoordinatorsShortages_(),
+      training: readTrainingCompliance_(),
       budget: readBudgetAdherence_(p && p.period, requests),
       maintenance: readMaintenanceAdherence_(),
       compliance: readComplianceAdherence_(),

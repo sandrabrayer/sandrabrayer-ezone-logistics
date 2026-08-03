@@ -260,6 +260,10 @@ export const SEED_CONFIG = [
   // is blank — no coordinators-PUBLISHED digest exists to read (this app only PUBLISHES one for them).
   { key: 'kitchen_digest_id', value: '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE' },
   { key: 'coordinators_digest_id', value: '' },
+  // training_digest_id seeds the coordinators-PUBLISHED digest (tab TrainingCompliance) that the
+  // /management "עמידה בתוכנית הדרכה" panel reads READ-ONLY. Grant the Logistics Apps Script account
+  // VIEWER access to that spreadsheet for the read to work; a BLANK value renders the panel "לא זמין".
+  { key: 'training_digest_id', value: '1RgLLrvymIhRh0sN6jOuCcgr5VT8hQL8wofhjUUt1CCI' },
   // compliance_reminder_days (compliance tracker) — how many days before a certificate/license expiry
   // to start warning + generating a renewal request, when a Compliance row leaves reminder_days blank.
   // Read like sla_days (tunable in the Sheet, no deploy). A malformed value is logged and falls back to

@@ -65,6 +65,13 @@ test('digest-consume.js MIRROR:digestconsume matches apps-script/Code.gs (kitche
   assert.equal(a, b);
 });
 
+test('training-digest.js MIRROR:trainingdigest matches apps-script/Code.gs (coordinators training digest read)', () => {
+  const a = normalize(readBlock('src/training-digest.js', 'trainingdigest'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'trainingdigest'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 test('budget.js MIRROR:budget matches apps-script/Code.gs (budget adherence)', () => {
   const a = normalize(readBlock('src/budget.js', 'budget'));
   const b = normalize(readBlock('apps-script/Code.gs', 'budget'));

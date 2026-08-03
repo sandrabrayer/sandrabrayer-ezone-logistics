@@ -113,6 +113,9 @@ var SEED_CONFIG = [
   // Grant the Logistics Apps Script account VIEWER access to the kitchen spreadsheet for the read to work.
   ['kitchen_digest_id', '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE'],
   ['coordinators_digest_id', ''],
+  // training_digest_id — the coordinators-PUBLISHED digest (tab TrainingCompliance) read READ-ONLY by the
+  // /management "עמידה בתוכנית הדרכה" panel. Upserted by key. Blank = panel "לא זמין". Grant VIEWER access.
+  ['training_digest_id', '1RgLLrvymIhRh0sN6jOuCcgr5VT8hQL8wofhjUUt1CCI'],
   // compliance_reminder_days (compliance tracker) — days before a certificate expiry to start warning +
   // generating a renewal request, when a Compliance row leaves reminder_days blank. Upserted by key. A
   // malformed value is logged and falls back to this seeded default (30) — never a silent number beyond it.
