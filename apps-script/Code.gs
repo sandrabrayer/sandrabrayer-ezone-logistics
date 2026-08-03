@@ -463,6 +463,18 @@ function doPost(e) {
   var actor = verifyToken_(getSessionSecret_(), (body && body.token) || '');
   if (!actor) return jsonOut_({ ok: false, error: 'Unauthorized' });
 
+  // Backstop: ANY uncaught error in a handler is logged (Apps Script execution log) and returned as a
+  // JSON error, never a non-JSON crash page. A non-JSON response breaks the client's res.json() and blanks
+  // the screen with a generic error; a JSON {ok:false} lets the client show a clean, specific message.
+  try {
+    return dispatchAction_(body, actor);
+  } catch (err) {
+    Logger.log('doPost handler error for action "' + (body && body.action) + '": ' + (err && err.stack ? err.stack : err));
+    return jsonOut_({ ok: false, error: 'Server error' });
+  }
+}
+
+function dispatchAction_(body, actor) {
   switch (body.action) {
     case 'createRequest': return handleCreateRequest_(body.payload || {}, actor);
     case 'approve':       return handleApprove_(body.payload || {}, actor);
@@ -995,7 +1007,8 @@ function readKitchenShortages_() {
   var CK = 'mgmt_kitchen_food_v1';
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  if (cache) { var hit = cache.get(CK); if (hit) { try { return JSON.parse(hit); } catch (e2) {} } }
+  // Guard BOTH the cache read and the parse — a flaky CacheService.get() must never escape this reader.
+  if (cache) { try { var hit = cache.get(CK); if (hit) return JSON.parse(hit); } catch (e2) {} }
 
   var id = String(getConfig('kitchen_digest_id') || '').replace(/^\s+|\s+$/g, '');
   var ctx = { configured: id !== '' };
@@ -1030,7 +1043,8 @@ function readTrainingCompliance_() {
   var CK = 'mgmt_training_compliance_v1';
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  if (cache) { var hit = cache.get(CK); if (hit) { try { return JSON.parse(hit); } catch (e2) {} } }
+  // Guard BOTH the cache read and the parse — a flaky CacheService.get() must never escape this reader.
+  if (cache) { try { var hit = cache.get(CK); if (hit) return JSON.parse(hit); } catch (e2) {} }
 
   var id = String(getConfig('training_digest_id') || '').replace(/^\s+|\s+$/g, '');
   var ctx = { configured: id !== '' };
@@ -2095,8 +2109,25 @@ function readBudgetAdherence_(period, requests) {
 // coordinators-published digest (TrainingCompliance) READ-ONLY (never written). It writes nothing to any
 // app. Budget/actual figures are
 // returned here (financial) but are NEVER written to any digest.
+// Run ONE panel producer in isolation. Any throw is logged (so it surfaces in the Apps Script execution
+// log with a stack) and degraded to `fallback` — an explicit "unavailable" panel or null — so a single
+// panel failing can NEVER blank the whole /management screen. Added after a training-digest read could
+// throw OUTSIDE its own try/catch (e.g. a CacheService error, a Config read, or the id→name map), which
+// propagated out of the entire managementData response as a non-JSON crash → the client's res.json()
+// failed → the whole screen showed the generic "שגיאה בטעינה" instead of just the one panel.
+function safePanel_(label, produce, fallback) {
+  try {
+    return produce();
+  } catch (e) {
+    Logger.log('managementData panel "' + label + '" failed: ' + (e && e.stack ? e.stack : e));
+    return fallback;
+  }
+}
+
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
+  // Core Logistics reads (the screen's baseline dataset). Each foreign/derived PANEL below is wrapped in
+  // safePanel_ so one panel's failure degrades to its own "unavailable" state, never the whole response.
   var requests = getRequests();
   return jsonOut_({
     ok: true,
@@ -2107,13 +2138,16 @@ function handleManagementData_(p, actor) {
       houses: getHouses(),
       inventoryItems: readObjects_('InventoryItems'),
       inventoryCounts: readObjects_('InventoryCounts'),
-      kitchen: readKitchenShortages_(),
-      coordinators: readCoordinatorsShortages_(),
-      training: readTrainingCompliance_(),
-      budget: readBudgetAdherence_(p && p.period, requests),
-      maintenance: readMaintenanceAdherence_(),
-      compliance: readComplianceAdherence_(),
-      events: readEventsAnalysis_(),
+      // available:false panels (html checks `.available`) fall back to an explicit read-error card.
+      kitchen: safePanel_('kitchen', readKitchenShortages_, { available: false, reason: 'שגיאת קריאה מדייג׳סט המטבח — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
+      coordinators: safePanel_('coordinators', readCoordinatorsShortages_, { available: false, reason: 'שגיאת קריאה בדייג׳סט הרכזים' }),
+      training: safePanel_('training', readTrainingCompliance_, { available: false, reason: 'שגיאת קריאה מדייג׳סט הרכזים — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
+      // budget/maintenance/compliance/events panels (html checks for a truthy object with rows) fall back
+      // to null, which their render treats as an explicit "לא זמין" card.
+      budget: safePanel_('budget', function () { return readBudgetAdherence_(p && p.period, requests); }, null),
+      maintenance: safePanel_('maintenance', readMaintenanceAdherence_, null),
+      compliance: safePanel_('compliance', readComplianceAdherence_, null),
+      events: safePanel_('events', readEventsAnalysis_, null),
     },
   });
 }

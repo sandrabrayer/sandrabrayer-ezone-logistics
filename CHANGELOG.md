@@ -3,6 +3,43 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix — /management no longer blanks when a single panel read throws (training-digest fallout)
+
+**Symptom.** After the training-digest consumption shipped and the `training_digest_id` Config row was
+added by hand, `/management` failed **entirely** with the generic "שגיאה בטעינה. רענן/י ונסה/י שוב." — the
+whole `managementData` call errored, not just the training panel.
+
+**Root cause.** `handleManagementData_` aggregated **nine** reads with **zero fault isolation**, and
+`doPost` had **no top-level catch**. `readTrainingCompliance_`'s `try/catch` wrapped only the
+`SpreadsheetApp` read — *not* the `CacheService` calls, the `getConfig`, the id→name map, or the pure
+shaper. Any throw from those escaped the reader, escaped the handler, and `doPost` returned a **non-JSON**
+error page → the client's `res.json()` threw → the client's `catch` blanked the **entire** screen. A
+no-access `openById` was already caught (panel degrades correctly); the killer was a throw *outside* that
+inner `try`. Reproduced end-to-end by loading the real `.gs` files in a sandbox and driving the full
+handler (`test/management-handler.test.js`), not just the pure shaper.
+
+**Fix.**
+- New `safePanel_(label, produce, fallback)` in `Code.gs` wraps **every** foreign/derived panel read
+  (kitchen, coordinators, training, budget, maintenance, compliance, events). A throw is **logged** (so it
+  surfaces in the Apps Script execution log with a stack) and degraded to that panel's own "unavailable"
+  fallback — `{ available:false, reason }` for the digest panels, `null` for budget/maintenance/
+  compliance/events (matching each panel's render check). One panel failing can **never** blank the screen.
+- Hardened `readTrainingCompliance_` **and** `readKitchenShortages_` so the cache read (`cache.get` + parse)
+  is inside `try/catch` — a flaky `CacheService` can't escape the reader.
+- `doPost` now runs the action dispatch inside a top-level `try/catch` (extracted `dispatchAction_`):
+  any uncaught handler error is logged and returned as JSON `{ ok:false, error:'Server error' }` — never a
+  non-JSON crash that breaks the client's `res.json()`.
+
+**Reading the real error.** With `safePanel_` in place, the actual thrown error for a failing panel is
+written to the Apps Script execution log — Apps Script editor → **Executions**, open the `doPost` run for
+the `managementData` call and read the `managementData panel "…" failed: <stack>` line.
+
+New `test/management-handler.test.js` fixtures the full handler in a sandbox: `safePanel_` semantics, the
+live-bug reproduction (a throw outside the inner try → `ok:true`, training degraded, other panels intact),
+`safePanel_` isolating a panel with no inner guard (events), the happy path, and the `canManage` gate. It
+**fails against the pre-fix handler and passes after**. No mirrored logic block changed (the pure training
+shaper is untouched); `node --test` green.
+
 ## [Unreleased] — feature — /management reads the coordinators TrainingCompliance digest (READ-ONLY)
 
 Replaces the static "עמידה בתוכנית הדרכה — לא זמין" card on `/management` with a **live, read-only** panel
