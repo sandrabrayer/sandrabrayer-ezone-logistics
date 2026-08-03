@@ -3,6 +3,44 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — perf — cache stable reference sheets (Config/Houses/Users) to cut redundant full-sheet reads
+
+**Symptom.** Pages loaded slowly, `/management` worst. In Apps Script every `getDataRange().getValues()`
+is a round-trip to the Sheets backend, so the number of full-sheet reads per request is the dominant cost.
+
+**Measured before (instrumented sandbox driving the real `Code.gs`):**
+- `managementData` — **17** sheet reads per request; **Houses read 4×** (direct + maintenance +
+  compliance + events, each via `openHouseIds_`) and **Config read 4×** (`getConfig` re-reads the whole
+  Config sheet — kitchen/coordinators/training ids + `compliance_reminder_days`). Warm (digest panels
+  cached): 15.
+- Dashboard load — 5 parallel GETs, and `houses`+`config` are re-read on **every** page load (dashboard,
+  inspection, inventory, reports, workorders all fetch `houses`).
+
+**Root cause.** `getConfig`→`getAllConfig`→`readObjects_('Config')` re-read the entire Config sheet on
+every call, and `getHouses`/`getUsers` re-read their sheets on every call, with no memoization or caching.
+
+**Fix — a reference-data cache for the STABLE sheets only (Config, Houses, Users).** These are edited by
+hand or by `setupSheet()`/`setUserPin()`, never by the per-request write handlers. `readReference_(name)`
+layers (1) a **per-execution memo** — dedupes repeated reads inside one request, zero staleness since one
+`doPost` is one execution — over (2) **CacheService** with a short **120 s TTL** — dedupes reads across
+requests. Every writer of a reference sheet (`setUserPin`, `setupSheet`) calls `invalidateReference_(name)`
+so a write is visible on the next read; a hand edit propagates within the TTL. `getHouses`/`getUsers`/
+`getAllConfig` now go through it. Requests/Inspections/Events/Budgets/Inventory are **deliberately not
+cached** — they change constantly and must read live, so write→read freshness for the core workflow is
+unchanged. PR #58's `safePanel_` isolation is untouched (a flaky `CacheService.get` still can't escape a
+reader — `readReference_` catches it and falls back to a live read).
+
+**Measured after:**
+- `managementData` — **17 → 11** reads cold (Houses 4→1, Config 4→1 via the memo), **15 → 9** warm
+  (Houses + Config served entirely from CacheService).
+- Dashboard — repeat loads **5 → 3** reads; `houses`/`config` are free on every warm page load app-wide.
+
+Data-freshness note: values on Config/Houses/Users now propagate within ≤120 s of a hand edit (was
+immediate). Enforcement/scoping LOGIC is unchanged — the same checks run, against reference data at most
+120 s old. New `test/reference-cache.test.js` fixtures the real `.gs` files and locks the memo dedupe,
+cross-request cache hit, **write→next-read-fresh invalidation**, per-sheet eviction, and that Requests is
+never cached. Service worker already serves static assets cache-first (unchanged). `node --test` green.
+
 ## [Unreleased] — fix — /management no longer blanks when a single panel read throws (training-digest fallout)
 
 **Symptom.** After the training-digest consumption shipped and the `training_digest_id` Config row was
