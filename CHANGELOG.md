@@ -3,44 +3,6 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
-## [Unreleased] — perf (round 2) — one aggregated call per page + Node micro-cache (kill the request fan-out)
-
-**Symptom.** Initial load AND every tab switch hung on a loading state for a long time.
-
-**What dominated — request fan-out.** Each page fired several parallel GETs (dashboard 5: requests +
-config + houses + findings + inspections; workorders 4; reports/inventory 3; inspection/events 2), and
-**every** GET is a separate browser→Node→Apps Script `/exec` round-trip carrying a **302 redirect hop** +
-Apps Script cold-start (~1-3 s fixed each). Worse, **Apps Script serializes concurrent executions per
-script**, so the "parallel" GETs actually queue — a dashboard load paid that fixed cost ~5 times in a row.
-The fix is FEWER calls, not lighter ones. (Node→Apps Script keep-alive was already on: Node's built-in
-fetch/undici pools connections by default.)
-
-**Fix (no change to enforcement, scoping, role visibility, write freshness — Users stays live).**
-- **`pageData` — one aggregated read per page.** `GET /api/data?action=pageData&page=<p>` returns that
-  page's whole dataset. It enforces the **same** per-action role gate (`canRead`) and the **same** requests
-  scope-filter as the individual reads, then fetches everything in ONE Apps Script call via a new `bundle`
-  action (reads N sheets in one execution). `users` is **never** bundleable. Dashboard/workorders/reports/
-  inventory/inspection now do ONE round-trip instead of 5/4/3/3/2. The individual endpoints still work.
-- **Node micro-cache (~120 s TTL) for houses/config/technicians ONLY** — never users (auth roster, live
-  per #60), never requests (write→read freshness). Tab switches skip the Apps Script hop for stable data;
-  the bundle then only fetches the volatile sheets. A hand edit propagates within the TTL.
-- Skipped the optimistic "render last-known sessionStorage data while fresh loads" item: it risks briefly
-  showing stale role-scoped data and complicates correctness, and the single bundle + micro-cache already
-  make warm loads fast — so per the brief, not done.
-
-**Measured (upstream round-trips per page — the ~2 s-each driver; instrumented mock upstream in
-`test/pagedata.test.js`).** Per page load: **dashboard 5→1, workorders 4→1, reports 3→1, inventory 3→1,
-inspection 2→1.** Warm tab switch: houses/config served from the Node micro-cache, so the bundle drops
-them (e.g. inventory warm fetches only inventoryItems+inventoryCounts) and index/events (houses/config)
-hit **0** Apps Script round-trips within the TTL. At ~2 s per round-trip that is roughly dashboard
-~8-10 s → ~2 s cold, and near-instant on warm tab switches.
-
-`safePanel_` isolation, all 403 gates, and the coordinator own-house scope are unchanged. New
-`test/pagedata.test.js` (aggregate 401/400/403 matrix, scoping parity, round-trip counts, cache never
-serves users/requests, TTL invalidation) and `test/bundle.test.js` (Apps Script multi-read, users never
-bundleable). Real-Chromium smoke test confirms all five converted pages render with no errors. `node
---test` green.
-
 ## [Unreleased] — fix — role-visibility branch rebased onto the login fix; login page hardened + guarded
 
 **Symptom.** After the role-based visibility work, the login page appeared dead — clicking כניסה did

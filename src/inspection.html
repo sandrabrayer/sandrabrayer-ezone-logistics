@@ -169,14 +169,14 @@
       const pc = document.getElementById('patient_count');
       for (let i = 0; i <= 40; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = String(i); pc.appendChild(o); }
       try {
-        // ONE aggregated call for the whole page (perf round-2); same role gate + scoping server-side.
-        const j = await fetch(EXEC_URL + '?action=pageData&page=inspection').then(r => r.json());
-        if (!j.ok) throw new Error(j.error || 'load failed');
-        const d = j.data || {};
+        const [houseRes, clRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=checklist').then(r => r.json()),
+        ]);
         const hs = document.getElementById('house');
         hs.innerHTML = '<option value="" disabled selected>בחר/י בית…</option>';
-        (d.houses || []).forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; hs.appendChild(o); });
-        checklist = (d.checklist || []).filter(c => String(c.active).toUpperCase() === 'TRUE');
+        (houseRes.data || []).forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; hs.appendChild(o); });
+        checklist = (clRes.data || []).filter(c => String(c.active).toUpperCase() === 'TRUE');
         renderDomains();
       } catch (e) { showMsg('err', 'שגיאה בטעינה. רענן/י ונסה/י שוב.'); }
     }

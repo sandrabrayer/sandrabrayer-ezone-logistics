@@ -264,20 +264,25 @@
 
     async function load() {
       try {
-        // ONE aggregated call for the whole page (perf round-2). Server enforces the SAME role gate +
-        // scoping as the individual reads; config comes back as its key→value object.
-        const j = await fetch(EXEC_URL + '?action=pageData&page=dashboard').then(r => r.json());
-        if (!j.ok) throw new Error(j.error || 'load failed');
-        const d = j.data || {};
-        allRequests = d.requests || [];
-        allFindings = d.findings || [];
-        allInspections = d.inspections || [];
-        if (d.config && d.config.approval_threshold != null) {
-          threshold = Number(d.config.approval_threshold);
+        const [reqRes, cfgRes, houseRes, findRes, insRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+          fetch(EXEC_URL + '?action=config').then(r => r.json()),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
+        allRequests = reqRes.data || [];
+        allFindings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        allInspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
+        if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
+          threshold = Number(cfgRes.data.approval_threshold);
         }
-        allHouses = d.houses || [];
-        const sel = document.getElementById('filterHouse');
-        allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+        if (houseRes.ok) {
+          allHouses = houseRes.data || [];
+          const sel = document.getElementById('filterHouse');
+          allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+        }
         render();
       } catch (e) {
         board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';
