@@ -215,6 +215,14 @@
       <button class="submit" id="submitBtn">שליחת דרישה</button>
       <div class="msg" id="msg"></div>
     </div>
+
+    <!-- Coordinator-only: their own house's request status. Populated by loadMyStatus() when the session
+         role is coordinator (the server scope-filters the requests read to their house). Hidden for
+         everyone else, who reach status via /workorders (משימות). -->
+    <section id="myStatus" style="display:none;margin-top:22px">
+      <h2 style="font-size:1.1rem;margin:0 0 10px">סטטוס הדרישות שלי</h2>
+      <div id="myStatusBody" class="card"><p class="empty">טוען…</p></div>
+    </section>
   </div>
 
   <script>
@@ -316,9 +324,41 @@
       document.getElementById('location_in_house').value = '';
     }
 
+    // Coordinator's own-house request status, shown ONLY on this page (their only landing page). The
+    // server scope-filters the `requests` read to their house; other roles reach status via /workorders.
+    const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    async function loadMyStatus() {
+      if (String(window.__ROLE__ || '') !== 'coordinator') return; // only the coordinator model
+      const sec = document.getElementById('myStatus');
+      const body = document.getElementById('myStatusBody');
+      sec.style.display = '';
+      try {
+        const res = await fetch(EXEC_URL + '?action=requests');
+        if (res.status === 403) { body.innerHTML = '<p class="empty">אין הרשאה לצפייה בסטטוס.</p>'; return; }
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'load failed');
+        const rows = (json.data || []).slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+        if (!rows.length) { body.innerHTML = '<p class="empty">אין דרישות פתוחות לבית שלך.</p>'; return; }
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:.92rem"><thead><tr>'
+          + '<th style="text-align:right;padding:6px">תיאור</th><th style="text-align:right;padding:6px">דחיפות</th>'
+          + '<th style="text-align:right;padding:6px">סטטוס</th><th style="text-align:right;padding:6px">נפתחה</th></tr></thead><tbody>';
+        html += rows.slice(0, 30).map((r) => '<tr>'
+          + '<td style="padding:6px">' + escHtml(r.description || r.id) + '</td>'
+          + '<td style="padding:6px">' + escHtml(r.urgency || '') + '</td>'
+          + '<td style="padding:6px">' + escHtml(r.status || '') + '</td>'
+          + '<td style="padding:6px">' + escHtml(String(r.created_at || '').slice(0, 10)) + '</td></tr>').join('');
+        html += '</tbody></table>';
+        body.innerHTML = html;
+      } catch (e) {
+        body.innerHTML = '<p class="empty">לא ניתן לטעון סטטוס. רענן/י ונסה/י שוב.</p>';
+      }
+    }
+
     document.getElementById('created_by').addEventListener('change', onSubmitterChange);
     btn.addEventListener('click', submit);
-    loadHouses();
+    // loadHouses() triggers the login flow on a fresh session; chaining ensures window.__ROLE__ is set
+    // (post-login) before loadMyStatus() decides whether to show the coordinator status section.
+    loadHouses().then(loadMyStatus);
   </script>
   <script>
     // PWA: register the service worker so the app is installable to the home
