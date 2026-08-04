@@ -115,7 +115,13 @@ function getConfig(key) {
 function getHouses() { return readReference_('Houses'); }
 function getTechnicians() { return readObjects_('Technicians'); }
 function getRequests() { return readObjects_('Requests'); }
-function getUsers() { return readReference_('Users'); }
+// Users is read LIVE, NEVER through readReference_. It is the AUTHENTICATION source of truth (the Node
+// login layer verifies each password against Users.pin_hash) and it carries a SECRET (pin_hash). Caching
+// it cross-request would (a) let a valid login be rejected against a stale roster for up to the cache TTL
+// after any Users edit — a just-set/hand-edited PIN, an active toggle — and (b) write pin_hash into the
+// shared script cache. Users is not a perf hot path (login is rare; managementData never reads it), so a
+// live read costs nothing here. Config/Houses stay cached — they hold no secret and tolerate short staleness.
+function getUsers() { return readObjects_('Users'); }
 
 // Proof the Node login layer presents to read the roster WITH pin_hash (server-to-server). Mirrors
 // src/auth.js rosterProof: HMAC(SESSION_SECRET, 'roster:users'). '' when the secret is unset.
