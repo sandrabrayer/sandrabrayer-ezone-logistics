@@ -3,6 +3,35 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — perf (round 2, safe reapply) — pageData aggregation + Node micro-cache, deploy-window-proof
+
+Reintroduces the #62 performance work (one aggregated `pageData` call per page + a Node micro-cache for
+houses/config/technicians) that was reverted for breaking production, WITH the root cause fixed and a
+graceful fallback so it can never happen again.
+
+**Root cause of the #62 breakage (a deploy-order race — not a logic bug; all 520 tests passed).** Railway
+deploys the Node frontend and clasp deploys `apps-script/**` **independently**, and Railway is faster. #62
+made every manager page call a NEW Apps Script `bundle` action, so during the window where new Node was
+live but the old Apps Script (no `bundle`) still served, `bundle` returned `{ok:false,'Unknown or missing
+action'}` and `handlePageData` turned that into a hard **502** — every manager page hung. The unit tests
+mocked the upstream (the mock always knew `bundle`), so they never exercised "old Apps Script doesn't have
+bundle." **Login itself never broke** (it reads the roster via `doGet('users')`, which every Apps Script
+version knows) — but the app's pages were down, so it was reverted. Reproduced here (new Node + a mock old
+Apps Script → the exact 502).
+
+**Fix — graceful fallback (deploy order now irrelevant).** When `bundle` is unavailable (unknown action /
+upstream error), Node **automatically falls back to the individual reads** (`fetchActionsIndividually`,
+the proven pre-#62 path) and returns the same aggregated shape. A mixed-version window degrades to N reads
+(works, just slower) instead of 502; a genuine upstream outage still surfaces as 502. The **login path
+depends on no new code** — `handleLogin`/`fetchAppsScriptData('users')` are untouched and never call
+`bundle`/`pageData` (locked by a test).
+
+Everything else from #62 is unchanged and re-verified: same `canRead` gate + requests scope-filter as the
+individual reads, Node micro-cache never caches users or requests, `users` never bundleable, per-page
+round-trips 5/4/3/3/2 → 1 (cold), stable data from cache on warm tab switches. New tests: deploy-window
+fallback (200 not 502), fallback still role-gates, real outage still 502, login independent of bundle.
+`node --test` green.
+
 ## [Unreleased] — ci — permanent guards so login can never silently break again (post-deploy smoke + CI on every PR)
 
 Three login regressions (#59, #61-branch, #62) all passed `node --test` yet broke in production, because
