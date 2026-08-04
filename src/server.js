@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { signToken, verifyToken, checkPin, verifyPin, rosterProof } from './auth.js';
 import { ROLE, isManagerRole, houseInScope, canManage } from './roles.js';
+import { canRead, canWriteAction, canOpenPage, navByRole } from './access.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +63,9 @@ const CLIENT_SHIM = `<script>(function(){
   window.__EXEC_URL__='/api/exec'; window.__STAFF_TOKEN__='';
   try{sessionStorage.setItem('ezone_staff_token','1');}catch(e){}
   var NAMES=${JSON.stringify(LOGIN_NAMES)};
+  // Role → ordered nav links the role may open (from src/access.js — single source of truth, no drift).
+  // Display only; the server + Code.gs data gates are the authority.
+  var NAV_BY_ROLE=${JSON.stringify(navByRole())};
   // Session persistence (bug fix): the token is kept in localStorage so ONE login is valid across
   // every page AND every tab until it expires — navigating no longer re-prompts. localStorage is
   // shared across tabs (sessionStorage is not) and survives full-page navigations. The stored value
@@ -103,38 +107,30 @@ const CLIENT_SHIM = `<script>(function(){
     }
     if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
   }
-  // /management nav link — DISPLAY-ONLY convenience, shown only to exec roles (ops_manager / ceo). The
-  // server + Code.gs 403 gate stay the authority; this just reveals the link so execs can find the
-  // screen. Injected into every page's .nav by the shim, so no per-page edits are needed.
-  function isExecRole(){var r=String(window.__ROLE__||'');return r==='ops_manager'||r==='ceo';}
-  function mountMgmtNav(){
+  // Role-based nav — render ONLY the links the session role may open (from NAV_BY_ROLE), and REDIRECT
+  // away from a page the role may not open. Both layers are DISPLAY/UX only: the server + Code.gs data
+  // gates are the security authority (a coordinator who bypasses this still gets 403 on every disallowed
+  // action). The static per-page .nav markup is replaced wholesale so every page shows exactly the
+  // permitted set — no per-page edits, and a restricted role never briefly sees links it can't open.
+  function norm(p){p=String(p||'/');var q=p.indexOf('?');if(q!==-1)p=p.slice(0,q);if(p==='/index.html'||p==='/index')return '/';p=p.replace(/\\.html$/,'');return p===''?'/':p;}
+  function navLinks(){var r=String(window.__ROLE__||'');return NAV_BY_ROLE[r]||[{href:'/',label:'דרישה חדשה'}];}
+  function allowedHere(){var here=norm(location.pathname);return navLinks().some(function(l){return l.href===here;});}
+  function mountNav(){
     function m(){
-      if(!isExecRole())return;
+      var links=navLinks(),here=norm(location.pathname);
+      // A role that may not open THIS page is bounced to the request form (server data would 403 anyway).
+      if(!allowedHere()){try{location.replace('/');}catch(e){}return;}
       var nav=document.querySelector('.nav'); if(!nav)return;
-      if(nav.querySelector('a[href="/management"]'))return; // already present (don't duplicate)
-      var a=document.createElement('a'); a.setAttribute('href','/management'); a.textContent='ניהול תפעולי רשת';
-      a.id='ezone-mgmt-nav';
-      if(String(location.pathname||'').indexOf('/management')===0)a.className='active';
-      nav.appendChild(a);
+      nav.innerHTML='';
+      links.forEach(function(l){
+        var a=document.createElement('a');a.setAttribute('href',l.href);a.textContent=l.label;
+        if(norm(l.href)===here)a.className='active';
+        nav.appendChild(a);
+      });
     }
     if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
   }
-  // /events nav link — the exceptional-events register entry page. Shown to every role that MAY report
-  // an event (everyone except maintenance). Display-only; the server + Code.gs enforce create/edit rules.
-  function canReportRole(){var r=String(window.__ROLE__||'');return r!==''&&r!=='maintenance';}
-  function mountEventsNav(){
-    function m(){
-      if(!canReportRole())return;
-      var nav=document.querySelector('.nav'); if(!nav)return;
-      if(nav.querySelector('a[href="/events"]'))return; // already present (don't duplicate)
-      var a=document.createElement('a'); a.setAttribute('href','/events'); a.textContent='אירועים חריגים';
-      a.id='ezone-events-nav';
-      if(String(location.pathname||'').indexOf('/events')===0)a.className='active';
-      nav.appendChild(a);
-    }
-    if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
-  }
-  if(_boot){mountSignOut();mountMgmtNav();mountEventsNav();}
+  if(_boot){mountSignOut();mountNav();}
   function doLogin(){return new Promise(function(resolve){
     function mount(){
       var ov=el('div','position:fixed;inset:0;z-index:99999;background:#071410;display:flex;align-items:center;justify-content:center;direction:rtl;font-family:system-ui,Arial,sans-serif');
@@ -154,7 +150,7 @@ const CLIENT_SHIM = `<script>(function(){
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountMgmtNav();mountEventsNav();resolve();}
+          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountNav();resolve();}
           else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
         }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
@@ -347,15 +343,10 @@ async function handleLogin(req, res) {
 
 // Read proxy — Bearer-gated + role/scope-enforced. Forwards an allowlisted set of query keys.
 const ALLOWED_QUERY_KEYS = new Set(['action', 'house', 'month', 'week_start', 'id']);
-// Reads only tier-A managers may perform. Tier B (coordinator/maintenance) get 403 on these.
-const MANAGER_ONLY_READS = new Set([
-  'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts',
-  // The events LIST (for the /events review/edit view) is manager-tier; coordinators report via the
-  // form (createEvent) but don't read the register. Edit/close is exec-only, gated on the write path.
-  'events',
-]);
-// Reads open to everyone (needed by the request form). 'requests' is scope-filtered below.
-// 'houses'/'config' are non-sensitive; 'users' is manager-only + pin_hash-stripped.
+// Per-role read visibility lives in src/access.js canRead(): houses/config/requests are open to every
+// role (requests scope-filtered below); users + the manager-only reads (technicians, checklist,
+// inspections, findings, inventoryItems, inventoryCounts, events) are manager-tier. This is the
+// session-aware server-side read gate — the Apps Script doGet carries no identity, so it lives here.
 
 async function handleData(req, res, url) {
   const auth = authFromRequest(req);
@@ -364,8 +355,8 @@ async function handleData(req, res, url) {
   const action = url.searchParams.get('action') || '';
   const manager = isManagerRole(actor.role);
 
-  // Tier B is refused the manager-only reads outright (dashboard/reports/inventory/inspections data).
-  if (!manager && MANAGER_ONLY_READS.has(action)) {
+  // Role-based read gate (src/access.js). A role that may not read this action gets 403 — no upstream call.
+  if (!canRead(actor.role, action)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
 
@@ -415,6 +406,12 @@ async function handleAction(req, res) {
   const body = await readJsonBody(req, 65536);
   if (!body || typeof body.action !== 'string') {
     return sendJson(res, 400, { ok: false, error: 'missing action' });
+  }
+  // Role-based write gate (src/access.js, mirrored in Code.gs). Tier B is limited to createRequest
+  // (+ createEvent for coordinators); every other write is refused here with no upstream call. Manager
+  // roles pass and are then subject to the precise per-action checks below + in each Code.gs handler.
+  if (!canWriteAction(actor.role, body.action)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   // /management is exec-only (ops_manager + ceo). Enforced here (server-side) AND independently in
   // Code.gs — field_ops and every tier-B role get 403 with no data read.

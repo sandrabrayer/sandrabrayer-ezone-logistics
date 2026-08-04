@@ -312,6 +312,23 @@ function houseInScope(role, scope, houseName, houseCluster) {
 }
 // === MIRROR:roles END ===
 
+// === MIRROR:access START ===
+// The write-action gate, enforced server-side (Node) AND in apps-script/Code.gs (doPost). Self-contained
+// (role string literals only) so the two copies stay identical. Manager-tier roles pass this early gate
+// and are then subject to the PRECISE per-action gate inside each handler (canManage for managementData /
+// updateEvent, chain-B canApprove, canDispatch, canBlock, isManagement_ for delete, …) — unchanged.
+// Tier-B roles are limited to exactly what they can do today via the app: a coordinator may file a
+// request and report an event; maintenance may file a request. Every other write is refused.
+var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
+
+function canWriteAction(role, action) {
+  if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
+  if (role === 'coordinator') return action === 'createRequest' || action === 'createEvent';
+  if (role === 'maintenance') return action === 'createRequest';
+  return false;
+}
+// === MIRROR:access END ===
+
 // === MIRROR:approval START ===
 var URGENCY_EMERGENCY = 'חירום';
 
@@ -518,6 +535,10 @@ function doPost(e) {
 }
 
 function dispatchAction_(body, actor) {
+  // Role-based write gate (mirror of src/access.js canWriteAction), enforced here INDEPENDENTLY of the
+  // Node proxy so a direct /exec POST from a tier-B role is refused. Manager roles pass and hit each
+  // handler's precise gate (canManage / canApprove / canDispatch / canBlock / isManagement_) unchanged.
+  if (!canWriteAction(actor.role, body.action)) return forbidden_();
   switch (body.action) {
     case 'createRequest': return handleCreateRequest_(body.payload || {}, actor);
     case 'approve':       return handleApprove_(body.payload || {}, actor);

@@ -65,6 +65,13 @@ test('digest-consume.js MIRROR:digestconsume matches apps-script/Code.gs (kitche
   assert.equal(a, b);
 });
 
+test('access.js MIRROR:access matches apps-script/Code.gs (role-based write-action gate)', () => {
+  const a = normalize(readBlock('src/access.js', 'access'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'access'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 test('training-digest.js MIRROR:trainingdigest matches apps-script/Code.gs (coordinators training digest read)', () => {
   const a = normalize(readBlock('src/training-digest.js', 'trainingdigest'));
   const b = normalize(readBlock('apps-script/Code.gs', 'trainingdigest'));

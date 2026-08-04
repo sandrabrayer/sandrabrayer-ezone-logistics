@@ -29,6 +29,44 @@ no secret and tolerate short staleness; SESSION_SECRET is a Script Property, una
 works, a `pin_hash` set after an earlier read is seen on the next login (the regression — fails against the
 pre-fix handler), the public read still strips `pin_hash`, and `pin_hash` is never written to the shared
 cache. `test/reference-cache.test.js` updated to assert Users is live. `node --test` green.
+## [Unreleased] — feature — role-based page + data-action visibility (owner's required model)
+
+Each role now sees and can reach only what the owner's model permits — enforced server-side (data gate)
+AND in Code.gs (write gate), never UI-only, with the nav rendering only the links a role may open.
+
+**Model.** coordinator → ONLY the new-request form (`/`) + their own house's request status (shown ON `/`)
++ event entry (`/events`); NO dashboard/inventory/reports/בקרה/משימות/management. maintenance → unchanged.
+field_ops → everything EXCEPT `/management`. ops_manager + ceo → everything, including `/management`.
+
+**New `src/access.js`** — the single source of truth:
+- `canWriteAction(role, action)` — the write gate, in a `MIRROR:access` block duplicated verbatim in
+  `Code.gs` (drift-guarded). Tier B is limited to `createRequest` (+ `createEvent` for coordinators);
+  manager roles pass this early gate and are then subject to each handler's precise gate (canManage,
+  canApprove, canDispatch, canBlock, isManagement_) — unchanged. This ALSO **closes a real gap**: several
+  write handlers (`createInspection`, `addFinding`, `confirmFinding`, `submitInventory`, `editRequest`)
+  had no server-side role check and were protected UI-only; tier B is now refused them server-side.
+- `canRead(role, action)` — the read gate: houses/config/requests open to all (requests scope-filtered);
+  users + the manager-only reads are manager-tier. (Reads are gated at the session-aware Node proxy; the
+  Apps Script doGet carries no identity.)
+- `navByRole()` / `canOpenPage(role, path)` — drive the nav shim.
+
+**Enforcement layers.**
+1. `src/server.js` — `/api/data` uses `canRead`; `/api/action` uses `canWriteAction` (early) then the
+   existing exec checks (`managementData`/`updateEvent` stay exec-only; field_ops still 403 on both).
+2. `apps-script/Code.gs` — `dispatchAction_` runs `canWriteAction` before dispatch, independently of the
+   proxy, so a direct `/exec` POST from a tier-B role is refused. All existing handler gates untouched.
+3. Nav shim — rebuilds `.nav` from `NAV_BY_ROLE` (injected from `navByRole()`, no drift) to show only the
+   permitted links, and **redirects** a role away from a page it may not open. Display/UX only.
+
+**`/` (index.html)** gains a coordinator-only "סטטוס הדרישות שלי" section — their own house's requests +
+status (the server scope-filters the read); hidden for everyone else, who reach status via `/workorders`.
+
+Not weakened: canManage, canBlock, the events create/edit rules, and the coordinator own-house scope all
+still run. New tests: `test/access.test.js` (role × page and role × action matrix + nav ⇔ page-access),
+`test/access-server.test.js` (the same matrix at the HTTP layer — 403 vs gate-passed — incl.
+managementData/updateEvent staying exec-only and the closed ungated-write gap), `MIRROR:access` drift
+guard, and `nav-events`/`nav-management` updated to the unified role-based nav (with a redirect test).
+`node --test` green.
 
 ## [Unreleased] — perf — cache stable reference sheets (Config/Houses/Users) to cut redundant full-sheet reads
 
