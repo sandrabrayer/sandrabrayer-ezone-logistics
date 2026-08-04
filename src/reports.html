@@ -140,14 +140,13 @@
 
     async function load() {
       try {
-        const [insRes, findRes, houseRes] = await Promise.all([
-          fetch(EXEC_URL + '?action=inspections').then(r => r.json()),
-          fetch(EXEC_URL + '?action=findings').then(r => r.json()),
-          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
-        ]);
-        inspections = (insRes.data || []).slice().reverse(); // newest first
-        findings = findRes.data || [];
-        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
+        // ONE aggregated call for the whole page (perf round-2); same role gate + scoping server-side.
+        const j = await fetch(EXEC_URL + '?action=pageData&page=reports').then(r => r.json());
+        if (!j.ok) throw new Error(j.error || 'load failed');
+        const d = j.data || {};
+        inspections = (d.inspections || []).slice().reverse(); // newest first
+        findings = d.findings || [];
+        houses = d.houses || [];
         houses.forEach(h => { houseLead[h.name] = h.technician || '—'; });
         renderList();
       } catch (e) {
