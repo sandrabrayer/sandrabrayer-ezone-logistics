@@ -496,10 +496,44 @@ function doGet(e) {
     case 'inventoryItems':  result = readObjects_('InventoryItems'); break;
     case 'inventoryCounts': result = readObjects_('InventoryCounts'); break;
     case 'events':      result = readObjects_('Events'); break;
+    // bundle (perf round-2): read MANY sheets in ONE execution → one Node→Apps Script round-trip (one 302
+    // + one cold-start) for a page's whole initial load, instead of N. The Node proxy calls this with a
+    // controlled `sheets` list and applies the SAME role gate + requests scope-filter it applies to the
+    // individual reads. 'users' is deliberately NOT bundleable (it carries pin_hash + needs the roster
+    // proof) — this returns raw read-sheets exactly like the individual doGet actions, and Node scopes.
+    case 'bundle':      result = bundleRead_(e); break;
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
   }
   return jsonOut_({ ok: true, data: result });
+}
+
+// The sheets a bundle may return — the individual read actions MINUS 'users'. A name not in this map is
+// silently skipped (never an arbitrary sheet read). houses/config go through the reference cache (#59).
+var BUNDLE_READERS_ = {
+  houses: getHouses,
+  technicians: getTechnicians,
+  requests: getRequests,
+  config: getAllConfig,
+  checklist: function () { return readObjects_('ChecklistItems'); },
+  inspections: function () { return readObjects_('Inspections'); },
+  findings: function () { return readObjects_('InspectionFindings'); },
+  inventoryItems: function () { return readObjects_('InventoryItems'); },
+  inventoryCounts: function () { return readObjects_('InventoryCounts'); },
+  events: function () { return readObjects_('Events'); },
+};
+
+function bundleRead_(e) {
+  var raw = String((e && e.parameter && e.parameter.sheets) || '');
+  var names = raw.split(',');
+  var out = {};
+  for (var i = 0; i < names.length; i++) {
+    var n = names[i].replace(/^\s+|\s+$/g, '');
+    if (n && Object.prototype.hasOwnProperty.call(BUNDLE_READERS_, n) && !Object.prototype.hasOwnProperty.call(out, n)) {
+      out[n] = BUNDLE_READERS_[n]();
+    }
+  }
+  return out;
 }
 
 // Controlled vocabularies (mirror of src/schema.js + src/request.js).
