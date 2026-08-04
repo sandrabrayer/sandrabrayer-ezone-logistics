@@ -155,14 +155,16 @@
 
     async function load() {
       try {
-        // ONE aggregated call for the whole page (perf round-2); same role gate + scoping server-side.
-        const j = await fetch(EXEC_URL + '?action=pageData&page=workorders').then(r => r.json());
-        if (!j.ok) throw new Error(j.error || 'load failed');
-        const d = j.data || {};
-        requests = d.requests || [];
-        findings = d.findings || [];
-        inspections = d.inspections || [];
-        houses = d.houses || [];
+        const [reqRes, findRes, insRes, houseRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+          fetch(EXEC_URL + '?action=findings').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=inspections').then(r => r.json()).catch(() => ({ ok: false })),
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        requests = (reqRes.data || []);
+        findings = (findRes && findRes.ok) ? (findRes.data || []) : [];
+        inspections = (insRes && insRes.ok) ? (insRes.data || []) : [];
+        houses = (houseRes && houseRes.ok) ? (houseRes.data || []) : [];
         renderTabs();
         render();
       } catch (e) {

@@ -186,13 +186,14 @@
 
     async function load() {
       try {
-        // ONE aggregated call for the whole page (perf round-2); same role gate + scoping server-side.
-        const j = await fetch(EXEC_URL + '?action=pageData&page=inventory').then(r => r.json());
-        if (!j.ok) throw new Error(j.error || 'load failed');
-        const d = j.data || {};
-        houses = d.houses || [];
-        catalog = d.inventoryItems || [];
-        counts = d.inventoryCounts || [];
+        const [houseRes, itemRes, countRes] = await Promise.all([
+          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
+          fetch(EXEC_URL + '?action=inventoryItems').then(r => r.json()),
+          fetch(EXEC_URL + '?action=inventoryCounts').then(r => r.json()).catch(() => ({ ok: false })),
+        ]);
+        houses = (houseRes.data || []);
+        catalog = (itemRes.data || []);
+        counts = (countRes && countRes.ok) ? (countRes.data || []) : [];
         initControls();
         renderTabs();
         render();
