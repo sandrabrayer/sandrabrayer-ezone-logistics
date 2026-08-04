@@ -289,6 +289,93 @@ async function fetchAppsScriptData(action, extra) {
   }
 }
 
+// ---- Node micro-cache for STABLE reference reads (perf round-2) ----
+// houses/config/technicians change rarely and are fetched on nearly every page load. Cache them in
+// process memory (~120 s TTL) so tab switches skip the Node→Apps Script hop (one 302 + Apps Script
+// cold-start each). NEVER cache users (auth roster, must stay live per the #60 fix) or requests (change
+// constantly — write→read freshness). A hand edit to Houses/Config propagates within the TTL. (Node's
+// built-in fetch/undici already keeps Node→Apps Script connections alive by default, so no Agent change.)
+const NODE_CACHEABLE = new Set(['houses', 'config', 'technicians']);
+const NODE_CACHE_TTL_MS = 120000;
+const nodeCache = new Map(); // action -> { value, exp }
+
+function nodeCacheGet(action) {
+  const e = nodeCache.get(action);
+  if (e && e.exp > Date.now()) return e.value;
+  if (e) nodeCache.delete(action);
+  return null;
+}
+function nodeCachePut(action, value) {
+  if (!NODE_CACHEABLE.has(action)) return; // hard guard: never users/requests/etc.
+  nodeCache.set(action, { value, exp: Date.now() + NODE_CACHE_TTL_MS });
+}
+function _resetNodeCache() { nodeCache.clear(); }
+
+// Fetch several read-sheets from Apps Script in ONE round-trip via the `bundle` action. Returns a map
+// { action: rows[] } or null on failure. This is the single Node→Apps Script call behind pageData.
+async function fetchBundle(actions) {
+  if (!EXEC_URL || !actions.length) return {};
+  const qs = new URLSearchParams({ action: 'bundle', sheets: actions.join(',') });
+  try {
+    const r = await fetch(`${EXEC_URL}?${qs.toString()}`, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
+    const j = await r.json();
+    return (j && j.ok && j.data && typeof j.data === 'object') ? j.data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// The read-actions each page needs for its initial render. pageData collapses these into ONE browser
+// call and ONE Apps Script call. The SAME per-action role gate (canRead) + requests scope-filter as the
+// individual reads are applied below — enforcement/scoping is identical, just aggregated.
+const PAGE_ACTIONS = {
+  dashboard: ['requests', 'config', 'houses', 'findings', 'inspections'],
+  workorders: ['requests', 'findings', 'inspections', 'houses'],
+  reports: ['findings', 'houses', 'inspections'],
+  inventory: ['houses', 'inventoryItems', 'inventoryCounts'],
+  inspection: ['houses', 'checklist'],
+  events: ['config', 'houses'],
+};
+
+// One aggregated read for a page: Bearer-gated, role-gated per action (identical to handleData), stable
+// sheets served from the Node micro-cache, the rest fetched in ONE bundle call, requests scope-filtered
+// for tier B exactly as the individual `requests` read. Never returns users.
+async function handlePageData(res, actor, page) {
+  const actions = PAGE_ACTIONS[page];
+  if (!actions) return sendJson(res, 400, { ok: false, error: 'unknown page' });
+  // Same read gate as the individual endpoints — a role that may not read one of the page's actions is
+  // refused the whole aggregate (matches: it could not load that page's data individually either).
+  for (const a of actions) {
+    if (!canRead(actor.role, a)) return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+  const data = {};
+  const toFetch = [];
+  for (const a of actions) {
+    const cached = NODE_CACHEABLE.has(a) ? nodeCacheGet(a) : null;
+    if (cached) data[a] = cached; else toFetch.push(a);
+  }
+  if (toFetch.length) {
+    const bundle = await fetchBundle(toFetch);
+    if (!bundle) return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+    for (const a of toFetch) {
+      data[a] = Array.isArray(bundle[a]) ? bundle[a] : (bundle[a] || (a === 'config' ? {} : []));
+      nodeCachePut(a, data[a]); // no-op unless a is cacheable
+    }
+  }
+  // Scope requests for tier B exactly as handleData does (managers get the unfiltered list).
+  if (Array.isArray(data.requests) && !isManagerRole(actor.role)) {
+    if (actor.role !== ROLE.COORDINATOR && actor.role !== ROLE.MAINTENANCE) {
+      return sendJson(res, 403, { ok: false, error: 'forbidden' });
+    }
+    const houses = data.houses || nodeCacheGet('houses') || (await fetchAppsScriptData('houses')) || [];
+    const clusterOf = {};
+    for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
+    data.requests = data.requests.filter((r) =>
+      houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
+  }
+  return sendJson(res, 200, { ok: true, data });
+}
+
 // Verify the Bearer token; returns the decoded actor { name, role, scope, ... } and the raw token,
 // or null.
 function authFromRequest(req) {
@@ -357,9 +444,22 @@ async function handleData(req, res, url) {
   const action = url.searchParams.get('action') || '';
   const manager = isManagerRole(actor.role);
 
+  // Aggregated per-page read (perf round-2): ONE call for a page's whole dataset. Role-gated + scoped
+  // identically to the individual reads (inside handlePageData).
+  if (action === 'pageData') {
+    return handlePageData(res, actor, url.searchParams.get('page') || '');
+  }
+
   // Role-based read gate (src/access.js). A role that may not read this action gets 403 — no upstream call.
   if (!canRead(actor.role, action)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+
+  // Stable reference reads (houses/config/technicians) are served from the Node micro-cache so tab
+  // switches skip the Apps Script hop. Never users/requests (not in NODE_CACHEABLE).
+  if (NODE_CACHEABLE.has(action)) {
+    const hit = nodeCacheGet(action);
+    if (hit !== null) return sendJson(res, 200, { ok: true, data: hit });
   }
 
   const qs = new URLSearchParams();
@@ -373,6 +473,11 @@ async function handleData(req, res, url) {
     payload = await upstream.json();
   } catch (err) {
     return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+  }
+
+  // Populate the micro-cache for stable reads on a successful upstream response.
+  if (NODE_CACHEABLE.has(action) && payload && payload.ok && 'data' in payload) {
+    nodeCachePut(action, payload.data);
   }
 
   // Post-process per action for scope/secret hygiene.
@@ -536,3 +641,5 @@ export { loginAttempts as _loginAttempts };
 export { HTML_ROUTES as _HTML_ROUTES };
 // Exported so a test can run the shim in a sandbox and exercise the sign-out flow (clear + reload).
 export { CLIENT_SHIM as _CLIENT_SHIM };
+// Exported so tests can reset the Node micro-cache between cases (deterministic cache/TTL assertions).
+export { _resetNodeCache, PAGE_ACTIONS as _PAGE_ACTIONS };
