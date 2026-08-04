@@ -1,0 +1,35 @@
+name: Tests
+
+# Runs the full unit suite (node --test test/*.test.js) on every PR and every push to main, so nothing
+# can merge or land red. This is the gate the three login regressions (#59, #61-branch, #62) needed:
+# a PR whose suite fails cannot be merged. The live smoke test (test/smoke-live.js) is separate and NOT
+# run here — it needs the deployed URL + secrets; run it by hand after each merge (see README).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # Zero-dependency project: nothing to install. Run the suite directly.
+      - name: Run unit tests
+        run: npm test

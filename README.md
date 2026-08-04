@@ -102,13 +102,33 @@ Secrets live only in Railway env vars / Apps Script Script Properties — never 
 
 ```bash
 npm install      # no runtime deps yet; installs nothing beyond what's listed
-npm test         # runs the node:test suite in test/
+npm test         # runs the node:test unit suite (test/*.test.js)
 ```
 
 > **Test runner note:** this scaffold uses Node's built-in `node:test` (zero dependencies).
-> When you open the Claude Code session, confirm what `sandrabrayer/ezone-outpatient` uses
-> (`cat package.json` → `scripts`/`devDependencies`). If Outpatient standardizes on another
-> runner, swap it here — only the imports and `npm test` script change, not the test logic.
+> `npm test` runs `node --test test/*.test.js`, so `test/smoke-live.js` (a live-URL script, not a
+> unit test) is deliberately excluded. CI (`.github/workflows/test.yml`) runs `npm test` on every
+> PR and every push to `main` — nothing merges or lands red.
+
+### Post-deploy smoke test (run after EVERY merge)
+
+Unit tests mock Apps Script, so they cannot catch a broken **live** chain (Node on Railway → Apps
+Script `/exec` 302 → Sheets) or a mixed-version deploy window. After each merge, hit the real app:
+
+```bash
+APP_URL=https://<your-deployed-app> node test/smoke-live.js
+```
+
+It checks: `GET /` returns 200 with the login shim; `POST /api/login` with a bogus user returns a
+proper JSON **401** (the whole Node→Apps Script auth path responds); and — when you also pass real
+credentials — one authenticated read succeeds end-to-end:
+
+```bash
+APP_URL=https://<your-deployed-app> SMOKE_USER='רועי' SMOKE_PIN='<password>' node test/smoke-live.js
+```
+
+Exit code is non-zero if any check fails, so it can gate a deploy. This is the guard for the login
+regressions (#59, #61-branch, #62) that all passed unit tests but broke in production.
 
 ## Apps Script deployment
 
