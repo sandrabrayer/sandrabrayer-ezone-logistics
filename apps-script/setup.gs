@@ -245,6 +245,12 @@ function setupSheet() {
   if (def && ss.getSheets().length > 1 && def.getLastRow() === 0) {
     ss.deleteSheet(def);
   }
+
+  // setupSheet() may have upserted Config/Houses/Users rows — drop their reference caches so the running
+  // deployment reads the fresh seeds immediately instead of waiting out the CacheService TTL.
+  invalidateReference_('Config');
+  invalidateReference_('Houses');
+  invalidateReference_('Users');
 }
 
 /** Append seed rows only when the sheet has just its header row (last row === 1). */
@@ -297,6 +303,7 @@ function setUserPin(name, plaintext) {
     if (String(data[r][nameCol]) === String(name)) {
       var stored = hashPin_(String(plaintext));   // salt generated inside; plaintext never kept
       sheet.getRange(r + 1, hashCol + 1).setValue(stored);
+      invalidateReference_('Users');   // drop the cached roster so the next read sees the new pin_hash
       Logger.log('pin_hash set for user "' + name + '" (' + PBKDF2_ITERS_ + ' iterations)');  // NO plaintext
       return true;
     }

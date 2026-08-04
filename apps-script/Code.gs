@@ -56,10 +56,47 @@ function readObjects_(name) {
   return out;
 }
 
+// ---- Reference-data cache (Config / Houses / Users) — perf ----
+// These sheets are STABLE: they are edited by hand or by setupSheet()/setUserPin(), NEVER by the per-
+// request write handlers (which write Requests/Inspections/Events/Inventory/AuditLog only). Yet they were
+// re-read many times — Config ~4x and Houses ~4x within a single /management request, and houses/config
+// are fetched by nearly every page load — so full-sheet reads dominated latency. Two layers remove that:
+//   - a per-EXECUTION memo dedupes repeated reads inside one request. Zero staleness risk: one doPost is
+//     one execution, so the memo starts empty on the next request.
+//   - CacheService (short TTL) dedupes reads ACROSS requests. A hand edit becomes visible within the TTL;
+//     any code that writes one of these sheets calls invalidateReference_ so the next read is fresh.
+// Requests/Inspections/Events/Budgets/etc. are deliberately NOT cached here — they change constantly and
+// must always read live, preserving write→read freshness for the core workflow.
+var REFERENCE_TTL_SECONDS_ = 120;
+var referenceMemo_ = {}; // per-execution; keyed by sheet name. Callers treat results as read-only.
+
+function readReference_(name) {
+  if (Object.prototype.hasOwnProperty.call(referenceMemo_, name)) return referenceMemo_[name];
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache) {
+    try {
+      var hit = cache.get('refsheet:' + name);
+      if (hit) { var cached = JSON.parse(hit); referenceMemo_[name] = cached; return cached; }
+    } catch (e2) {}
+  }
+  var rows = readObjects_(name);
+  referenceMemo_[name] = rows;
+  if (cache) { try { cache.put('refsheet:' + name, JSON.stringify(rows), REFERENCE_TTL_SECONDS_); } catch (e3) {} }
+  return rows;
+}
+
+// Drop a reference sheet from BOTH the per-execution memo and CacheService, so the next read is fresh.
+// Called by every writer of a reference sheet (setupSheet / setUserPin) — the explicit write→fresh path.
+function invalidateReference_(name) {
+  delete referenceMemo_[name];
+  try { var cache = CacheService.getScriptCache(); if (cache) cache.remove('refsheet:' + name); } catch (e) {}
+}
+
 // ---- Config ----
 
 function getAllConfig() {
-  var rows = readObjects_('Config');
+  var rows = readReference_('Config');
   var out = {};
   rows.forEach(function (row) {
     if (row.key === '' || row.key === null) return;
@@ -75,10 +112,10 @@ function getConfig(key) {
 
 // ---- Reads ----
 
-function getHouses() { return readObjects_('Houses'); }
+function getHouses() { return readReference_('Houses'); }
 function getTechnicians() { return readObjects_('Technicians'); }
 function getRequests() { return readObjects_('Requests'); }
-function getUsers() { return readObjects_('Users'); }
+function getUsers() { return readReference_('Users'); }
 
 // Proof the Node login layer presents to read the roster WITH pin_hash (server-to-server). Mirrors
 // src/auth.js rosterProof: HMAC(SESSION_SECRET, 'roster:users'). '' when the secret is unset.
