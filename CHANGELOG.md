@@ -3,6 +3,23 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — ci — permanent guards so login can never silently break again (post-deploy smoke + CI on every PR)
+
+Three login regressions (#59, #61-branch, #62) all passed `node --test` yet broke in production, because
+unit tests mock Apps Script and can't see the live chain or a mixed-version deploy window. Two guards:
+
+- **`test/smoke-live.js`** — a post-deploy smoke test against the REAL app (`APP_URL` env var), run by
+  hand after every merge (`APP_URL=… node test/smoke-live.js`; documented in the README). It verifies
+  `GET /` → 200 with the login shim, `POST /api/login` (bogus user) → a proper JSON **401** (the whole
+  Node→Apps Script auth path responds, not a crash/hang/HTML/5xx), and — when `SMOKE_USER`/`SMOKE_PIN`
+  are set — one authenticated read end-to-end. Non-zero exit on any failure so it can gate a deploy. It
+  is **not** a unit test: `npm test` now runs `node --test test/*.test.js`, excluding it.
+- **`.github/workflows/test.yml`** — runs `npm test` (the full unit suite) on every pull request and every
+  push to `main`, so nothing can merge or land red. (Previously only the Apps Script deploy + workflow-YAML
+  validation ran in CI; the unit suite ran nowhere.)
+
+No app code changed. `npm test` green.
+
 ## [Unreleased] — fix — role-visibility branch rebased onto the login fix; login page hardened + guarded
 
 **Symptom.** After the role-based visibility work, the login page appeared dead — clicking כניסה did
