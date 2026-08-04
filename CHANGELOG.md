@@ -3,6 +3,30 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix — role-visibility branch rebased onto the login fix; login page hardened + guarded
+
+**Symptom.** After the role-based visibility work, the login page appeared dead — clicking כניסה did
+nothing, silently.
+
+**Root cause.** The role-visibility branch was cut from `main` **before** the login-regression fix landed
+(the "auth roster read live" fix below). So that branch — and anything deployed from it — still carried the
+**cached `getUsers()`**, reintroducing the stale-roster login failure the fix had removed. The branch was a
+version behind, not a new shim bug: reproduced in real Chromium (`playwright-core` against the actual
+server) that the shim's login overlay itself binds, POSTs `/api/login`, saves the session and closes — for
+every role — so the client flow was sound; the failure came from the missing server-side fix.
+
+**Fix.** Rebased the role-visibility change onto current `main` so it now includes the login fix
+(`getUsers()` reads live). Additionally hardened the new nav redirect so it can **never** interfere with
+the login page: it only bounces a KNOWN, authenticated role off a page it may not open — a logged-out view
+(no role) and the request form `/` are never redirected, so the login overlay always owns the screen.
+
+**Verified.** In real Chromium, a fresh login on `/` succeeds for coordinator / maintenance / field_ops /
+ops_manager / ceo (overlay → POST `/api/login` → session saved → overlay closed, no page errors), and a
+coordinator entering on a disallowed page (`/dashboard`) logs in and lands cleanly on `/`. New
+`test/login-page.test.js` renders the ACTUAL served `/` (injected shim + index.html scripts) in a DOM
+sandbox with real-browser timing and asserts the login submit path works end-to-end for **every role**,
+plus that the redirect never fires on a logged-out view. `node --test` green.
+
 ## [Unreleased] — fix — login regression: the auth roster (Users) must be read live, never cached
 
 **Symptom (URGENT, live).** Valid users (e.g. אולגה with the correct password) were rejected at login with

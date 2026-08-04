@@ -117,12 +117,14 @@ const CLIENT_SHIM = `<script>(function(){
   function allowedHere(){var here=norm(location.pathname);return navLinks().some(function(l){return l.href===here;});}
   function mountNav(){
     function m(){
-      var links=navLinks(),here=norm(location.pathname);
-      // A role that may not open THIS page is bounced to the request form (server data would 403 anyway).
-      if(!allowedHere()){try{location.replace('/');}catch(e){}return;}
+      var role=String(window.__ROLE__||''),here=norm(location.pathname);
+      // Only bounce a KNOWN, authenticated role off a page it may not open. NEVER redirect a logged-out
+      // view (role==='' — the login overlay owns the screen) and never redirect the request form '/'
+      // itself. This guarantees the redirect logic can never fire on, or interfere with, the login page.
+      if(role && here!=='/' && !allowedHere()){try{location.replace('/');}catch(e){}return;}
       var nav=document.querySelector('.nav'); if(!nav)return;
       nav.innerHTML='';
-      links.forEach(function(l){
+      navLinks().forEach(function(l){
         var a=document.createElement('a');a.setAttribute('href',l.href);a.textContent=l.label;
         if(norm(l.href)===here)a.className='active';
         nav.appendChild(a);
