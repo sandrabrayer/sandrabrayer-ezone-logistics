@@ -95,20 +95,28 @@ test('WRITE → NEXT READ FRESH: invalidateReference_ drops memo + cache so stal
   assert.equal(d.reads.Houses, 2, 're-read the sheet exactly once after invalidation');
 });
 
-test('invalidation is per-sheet: invalidating Houses does not evict Config/Users', () => {
+test('invalidation is per-sheet: invalidating Houses does not evict Config', () => {
   const store = {};
   const d = makeDeployment(store);
   d.api.getConfig('approval_threshold');
-  d.api.getUsers();
   d.api.getHouses();
   d.api.invalidateReference_('Houses');
   const d2 = makeDeployment(store);
   d2.api.getConfig('approval_threshold'); // Config still cached
-  d2.api.getUsers();                       // Users still cached
   d2.api.getHouses();                      // Houses evicted → fresh read
   assert.equal(d2.reads.Config, undefined, 'Config survived the Houses invalidation');
-  assert.equal(d2.reads.Users, undefined, 'Users survived the Houses invalidation');
   assert.equal(d2.reads.Houses, 1, 'Houses was re-read');
+});
+
+test('Users is NOT reference-cached — the auth roster always reads live (login must never see a stale hash)', () => {
+  const store = {};
+  const first = makeDeployment(store);
+  first.api.getUsers();
+  assert.equal(first.reads.Users, 1);
+  const second = makeDeployment(store); // fresh execution, shared script cache
+  second.api.getUsers();
+  assert.equal(second.reads.Users, 1, 'Users re-read every request — never served from the reference cache');
+  assert.equal(Object.prototype.hasOwnProperty.call(store, 'refsheet:Users'), false, 'Users never written to the shared cache');
 });
 
 test('Requests is NOT reference-cached — it always reads live (write-freshness preserved)', () => {

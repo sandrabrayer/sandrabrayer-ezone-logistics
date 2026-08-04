@@ -3,6 +3,33 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix — login regression: the auth roster (Users) must be read live, never cached
+
+**Symptom (URGENT, live).** Valid users (e.g. אולגה with the correct password) were rejected at login with
+"שם או קוד שגויים". Started after the reference-cache perf merge (#59).
+
+**Root cause.** #59 routed `getUsers()` — the **authentication source of truth** — through the new
+cross-request reference cache (`readReference_`, CacheService, 120 s TTL). The Node login layer verifies
+each password against `Users.pin_hash` read via `doGet('users')`; with Users cached, a login was verified
+against a **stale roster**. Any Users edit — a freshly set/hand-edited `pin_hash`, an `active` toggle — was
+invisible for up to the TTL, so correct credentials failed. It also wrote `pin_hash` (a secret) into the
+shared script cache. Reproduced end-to-end (Node `handleLogin` roster-verify logic + the real `Code.gs`
+`doGet('users')`): with a hash set *after* an earlier roster read cached the empty one, a correct password
+was rejected.
+
+**Fix.** `getUsers()` reads **live** again (`readObjects_('Users')`), never through `readReference_`. Users
+is not a perf hot path — login is rare and `managementData` never reads it, so the #59 wins are untouched
+(they came from Config ×4 and Houses ×4 in `managementData`, both still cached). Removed the now-moot
+`invalidateReference_('Users')` calls from `setUserPin`/`setupSheet`. Config/Houses stay cached — they hold
+no secret and tolerate short staleness; SESSION_SECRET is a Script Property, unaffected either way.
+
+**Verified.** `managementData` 17→11 cold / 15→9 warm and dashboard 5→3 still hold. New
+`test/login-path.test.js` drives the FULL live path (Node `verifyPin`/`checkPin`/`rosterProof` + real
+`Code.gs` `doGet('users')`): a valid login succeeds, an invalid one still fails, the tier-B shared-PIN path
+works, a `pin_hash` set after an earlier read is seen on the next login (the regression — fails against the
+pre-fix handler), the public read still strips `pin_hash`, and `pin_hash` is never written to the shared
+cache. `test/reference-cache.test.js` updated to assert Users is live. `node --test` green.
+
 ## [Unreleased] — perf — cache stable reference sheets (Config/Houses/Users) to cut redundant full-sheet reads
 
 **Symptom.** Pages loaded slowly, `/management` worst. In Apps Script every `getDataRange().getValues()`
