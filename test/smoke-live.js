@@ -96,6 +96,21 @@ async function checkAuthedRead() {
   } catch (e) {
     fail(`authenticated read threw: ${e && e.message ? e.message : e}`);
   }
+
+  // The `bundle` action must be LIVE on Apps Script — otherwise every manager page silently falls back
+  // to N individual reads (slow tab switches, the exact production symptom). A degraded pageData means
+  // clasp CI did not publish the current Code.gs. Only a manager SMOKE_USER can aggregate the dashboard;
+  // a non-manager gets 403 and the check is skipped (not failed).
+  try {
+    const r = await req('/api/data?action=pageData&page=dashboard', { headers: { Authorization: `Bearer ${token}` } });
+    if (r.status === 403) { console.log('SKIP  pageData bundle check (SMOKE_USER is not a manager tier)'); return; }
+    const j = JSON.parse(await r.text());
+    if (r.status !== 200 || !j.ok) return fail(`pageData dashboard failed (status ${r.status}, body ${JSON.stringify(j).slice(0, 120)})`);
+    if (j.degraded) return fail('pageData is DEGRADED — the live Apps Script lacks the `bundle` action; clasp CI has not deployed the current Code.gs (tab switches will be slow). See DEPLOY.md.');
+    pass('pageData dashboard → 200 and NOT degraded (live Apps Script has the `bundle` action)');
+  } catch (e) {
+    fail(`pageData bundle check threw: ${e && e.message ? e.message : e}`);
+  }
 }
 
 (async () => {

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   urgencyRank, houseLeadMap, collectLeadItems, buildWeeklyOrder, weeklyOrderForLead,
   isExecutionLive, collectExecutionItems, EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER, EXEC_CHOICES,
-  ASSIGN_LEADS, defaultReferLead,
+  ASSIGN_LEADS, defaultReferLead, filterByLead, LEAD_FILTER_ALL,
 } from '../src/workorders.js';
 
 const HOUSES = [
@@ -142,4 +142,31 @@ test('defaultReferLead falls back to first option for unknown/blank house lead',
   assert.equal(defaultReferLead(''), 'רמי');
   assert.equal(defaultReferLead('מישהו אחר'), 'רמי');
   assert.equal(defaultReferLead(undefined), 'רמי');
+});
+
+// ── Per-lead filter on the open-tasks list (a maintenance lead sees only THEIR tasks). ──
+
+test('filterByLead: a lead sees only their own referred tasks', () => {
+  const rows = [
+    { id: 'a', assigned_to: 'רמי' },
+    { id: 'b', assigned_to: 'צחי' },
+    { id: 'c', assigned_to: 'רמי' },
+    { id: 'd', assigned_to: 'רועי' },
+  ];
+  assert.deepEqual(filterByLead(rows, 'רמי').map(r => r.id), ['a', 'c']);
+  assert.deepEqual(filterByLead(rows, 'צחי').map(r => r.id), ['b']);
+});
+
+test('filterByLead: the ALL sentinel (empty) returns every row unfiltered', () => {
+  const rows = [{ id: 'a', assigned_to: 'רמי' }, { id: 'b', assigned_to: 'צחי' }];
+  assert.equal(LEAD_FILTER_ALL, '');
+  assert.deepEqual(filterByLead(rows, LEAD_FILTER_ALL).map(r => r.id), ['a', 'b']);
+  assert.deepEqual(filterByLead(rows, '').map(r => r.id), ['a', 'b']);
+});
+
+test('filterByLead: no unassigned/mismatched rows leak into a lead view; safe on empty/nullish', () => {
+  const rows = [{ id: 'a', assigned_to: 'רמי' }, { id: 'b' }, null, { id: 'c', assigned_to: '' }];
+  assert.deepEqual(filterByLead(rows, 'רמי').map(r => r.id), ['a']);
+  assert.deepEqual(filterByLead(null, 'רמי'), []);
+  assert.deepEqual(filterByLead(undefined, ''), []);
 });

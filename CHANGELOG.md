@@ -3,6 +3,43 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — PR A: production bugs — approve/reject guard, observable (non-permanent) pageData fallback, per-lead task view
+
+**What.** Three production concerns on the dashboard / open-tasks flow, investigated read-only first, then
+guarded and fixed with tests for every behavior change.
+
+**1. Approval buttons (אישור / לא אושר) "do nothing" — investigation + regression guard.**
+The dashboard cards POST `{action:'approve'|'reject', payload}` to `window.__EXEC_URL__`; the injected auth
+shim rewrites that to `POST /api/action` with the session token as `Authorization: Bearer`, and `handleAction`
+resolves the actor from the token (never the body) and forwards `{action, payload, token}` to Apps Script.
+Reproducing the full chain in a headless DOM against the real gateway showed the **write path is sound** — the
+POST leaves the browser with the correct forwarded token — so the live symptom is a **stale Apps Script deploy**
+(see #2), not a client/gateway logic bug. Ruled out explicitly: the `bundle`→individual **fallback is
+read-only and never touches the POST path**; the service worker never intercepts non-GET; no eval errors; the
+Bearer header is attached on every write. Locked with a new end-to-end regression test so this can't silently
+break again.
+
+**2. Slow tab switches + intermittent errors — make the fallback OBSERVABLE and prove it isn't permanent.**
+Root cause: when the live Apps Script predates the `bundle` action (a deploy-order skew, or clasp CI not
+publishing the current `Code.gs`), every manager page falls back to N individual reads — slow, and silent.
+`handlePageData` now sets **`degraded: true`** on the 200 response (and warn-logs) whenever the fallback is
+taken, so the stale-deploy condition is visible instead of guessed. It is **not sticky** — the next request
+re-attempts `bundle` and the flag clears the moment the deploy lands. `test/smoke-live.js` now **fails** a
+post-deploy check when `pageData` is degraded — i.e. it verifies clasp actually deployed `bundle`.
+
+**3. "לאן עוברות המשימות של רמי" — a per-lead view on the open-tasks list.**
+Assigned tasks were visible on `/workorders` (העברה לביצוע / סטטוס ביצוע) but **mixed across all leads**, so a
+maintenance lead couldn't isolate their own. Added a minimal per-lead filter (רמי / צחי / רועי / **הכל**) —
+pure `filterByLead()` in `src/workorders.js`, mirrored inline in `workorders.html`, shown only on the two
+open-task tabs. No scope/role change; display-only.
+
+**New tests.** `test/dashboard-approve.test.js` (4): a manager's approve/reject reaches the fake upstream with
+the correct **forwarded token** (not the body placeholder), reason payload forwarded, unauthenticated → 401 &
+nothing forwarded, tier-B refused 403 before any upstream call. `test/pagedata.test.js` (+3): degraded flagged
+on fallback, absent on the happy path, and **cleared once bundle is live again** (fallback-not-permanent).
+`test/workorders.test.js` (+3): `filterByLead` per-lead isolation, the ALL sentinel, and nullish/mismatch
+safety. `node --test` green (562 tests). No new sheets; no secrets.
+
 ## [Unreleased] — fix (Bug 3) — login roster comes from the live `doGet('users')`, not a hardcoded copy
 
 **Symptoms.** The login picker could show a wrong/stale roster, and a valid user + the correct code was

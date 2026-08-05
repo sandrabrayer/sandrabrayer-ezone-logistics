@@ -59,6 +59,16 @@ export function collectExecutionItems({ requests }) {
   return items;
 }
 
+// Per-lead filter for the open-tasks list. A maintenance lead (רמי / צחי) needs to see ONLY the
+// tasks referred to them, not every lead's tasks mixed together. `lead` === '' (LEAD_FILTER_ALL) →
+// no filtering (הכל); otherwise keep only rows whose assigned_to matches exactly. Pure so the HTML
+// tabs (העברה לביצוע / סטטוס ביצוע) and a node:test both use the same rule.
+export const LEAD_FILTER_ALL = '';
+export function filterByLead(rows, lead) {
+  if (!lead) return (rows || []).slice();
+  return (rows || []).filter((r) => r && r.assigned_to === lead);
+}
+
 /** Numeric urgency rank; unknown/blank sorts last (after רגיל). Lower = more urgent. */
 export function urgencyRank(urgency) {
   return Object.prototype.hasOwnProperty.call(URGENCY_RANK, urgency) ? URGENCY_RANK[urgency] : 3;
