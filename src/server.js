@@ -57,12 +57,21 @@ const HEAD_INJECT =
 // legacy per-page staffGate() is neutralized by pre-setting its sessionStorage flag (a non-secret
 // '1', not the token). Names are not secret, so the login picker lists them; the server still
 // verifies name+PIN and resolves the role from the Users sheet.
-const LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי', 'שירה', 'יעקב', 'אורן', 'אביב'];
-const CLIENT_SHIM = `<script>(function(){
+// FALLBACK login-roster names only. The picker is normally built from the LIVE active roster
+// (getLoginNames → doGet('users')); this hardcoded list is used solely when that read is unavailable
+// (a deploy-order window or an upstream outage) so the login page can never present an empty picker.
+// It mirrors the seeded SEED_USERS (setup.gs); a guard test asserts the two stay in sync.
+const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי', 'שירה', 'יעקב', 'אורן', 'אביב'];
+// buildClientShim(names) → the injected <head> shim, with `names` as the login picker's roster. Built
+// per-request from the live active roster so the picker always reflects who can actually log in (a
+// renamed/added/deactivated user in the Users sheet is reflected within one micro-cache TTL) — no more
+// hardcoded roster drift where the dropdown lists a name that no longer matches a roster row.
+function buildClientShim(names) {
+  return `<script>(function(){
   var TOKEN=null,authPromise=null,origFetch=window.fetch.bind(window);
   window.__EXEC_URL__='/api/exec'; window.__STAFF_TOKEN__='';
   try{sessionStorage.setItem('ezone_staff_token','1');}catch(e){}
-  var NAMES=${JSON.stringify(LOGIN_NAMES)};
+  var NAMES=${JSON.stringify(names)};
   // Role → ordered nav links the role may open (from src/access.js — single source of truth, no drift).
   // Display only; the server + Code.gs data gates are the authority.
   var NAV_BY_ROLE=${JSON.stringify(navByRole())};
@@ -183,6 +192,10 @@ const CLIENT_SHIM = `<script>(function(){
     return origFetch(input,init);
   };
 })();</script>`;
+}
+
+// The default shim (fallback names), exported for the shim-behavior tests that run it in a sandbox.
+const CLIENT_SHIM = buildClientShim(DEFAULT_LOGIN_NAMES);
 
 const PUBLIC_ASSETS = {
   '/manifest.json':        { file: 'manifest.json',        type: 'application/manifest+json; charset=utf-8' },
@@ -268,8 +281,35 @@ function readJsonBody(req, limitBytes) {
   });
 }
 
-function isActive(u) {
-  return u.active === true || u.active === 'TRUE' || u.active === 'true' || u.active === 1 || u.active === '1';
+// Single active-user predicate — the ONE place that decides who is in the login roster. Used by BOTH
+// the login PICKER (server-injected name list) and the login VERIFICATION (handleLogin), so the two can
+// never disagree about who is active. Tolerant of how the Users.active cell reads back (boolean TRUE from
+// a checkbox, or the text 'TRUE'/'true'/'1' from a hand edit); trims stray whitespace on string values.
+function isActiveUser(u) {
+  if (!u) return false;
+  const a = u.active;
+  if (a === true || a === 1) return true;
+  const s = String(a == null ? '' : a).trim().toUpperCase();
+  return s === 'TRUE' || s === '1';
+}
+
+// The login-roster name list, derived from the LIVE users read — the single shared users-read path the
+// login picker and login verification both go through. Returns the ACTIVE users' names (trimmed, de-duped,
+// blanks dropped), in sheet order. On an empty/failed roster read the caller falls back to
+// DEFAULT_LOGIN_NAMES so the picker is never blank. Names are non-secret (the picker has always listed
+// them); pin_hash is never touched here.
+function loginRosterNames(users) {
+  if (!Array.isArray(users)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const u of users) {
+    if (!isActiveUser(u)) continue;
+    const name = String((u && u.name) == null ? '' : u.name).trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 // Read a data action from Apps Script (server-to-server). Returns the `data` array, or null on any
@@ -309,7 +349,24 @@ function nodeCachePut(action, value) {
   if (!NODE_CACHEABLE.has(action)) return; // hard guard: never users/requests/etc.
   nodeCache.set(action, { value, exp: Date.now() + NODE_CACHE_TTL_MS });
 }
-function _resetNodeCache() { nodeCache.clear(); }
+function _resetNodeCache() { nodeCache.clear(); loginNamesCache = null; }
+
+// ---- Login-picker roster names (server-injected into the shim) ----
+// The picker needs the roster BEFORE any login, so it can't go through the Bearer-gated /api/data users
+// read. We fetch the PUBLIC roster (no proof → pin_hash already stripped by Code.gs), keep only ACTIVE
+// names, and cache that NAME LIST briefly. This is safe to cache where the auth roster is not: it holds
+// no secret (names only), and login VERIFICATION still reads the roster LIVE with the proof (handleLogin)
+// — so a just-added user is verifiable immediately even if the picker lists them a TTL later. A blank/failed
+// read is NOT cached and falls back to DEFAULT_LOGIN_NAMES, so the picker is never empty and self-heals.
+let loginNamesCache = null; // { value: string[], exp: number } | null
+async function getLoginNames() {
+  if (loginNamesCache && loginNamesCache.exp > Date.now()) return loginNamesCache.value;
+  const users = await fetchAppsScriptData('users'); // public read (pin_hash stripped upstream)
+  const names = loginRosterNames(users);
+  if (!names.length) return DEFAULT_LOGIN_NAMES; // roster unavailable/empty → fallback, don't cache
+  loginNamesCache = { value: names, exp: Date.now() + NODE_CACHE_TTL_MS };
+  return names;
+}
 
 // Fetch several read-sheets from Apps Script in ONE round-trip via the `bundle` action. Returns a map
 // { action: rows[] } or null when bundle is unavailable (unknown action / upstream error). null triggers
@@ -423,7 +480,7 @@ async function handleLogin(req, res) {
   // this proof; public reads get them stripped).
   const users = await fetchAppsScriptData('users', { auth: rosterProof(SESSION_SECRET) });
   if (!users) { console.warn(`[login] roster unavailable for ${ip}`); return generic401(); }
-  const user = users.find((u) => String(u.name) === String(name) && isActive(u));
+  const user = users.find((u) => String(u.name) === String(name) && isActiveUser(u));
 
   let ok = false;
   if (user) {
@@ -621,7 +678,10 @@ export async function requestHandler(req, res) {
   const file = HTML_ROUTES[path];
   if (file) {
     let html = readFileSync(join(__dirname, file), 'utf8');
-    html = html.replace('</head>', HEAD_INJECT + CLIENT_SHIM + '</head>');
+    // Build the shim with the LIVE active-roster names (cached; falls back to DEFAULT_LOGIN_NAMES if the
+    // roster read is unavailable) so the login picker always matches who can actually log in.
+    const shim = buildClientShim(await getLoginNames());
+    html = html.replace('</head>', HEAD_INJECT + shim + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
@@ -662,3 +722,6 @@ export { HTML_ROUTES as _HTML_ROUTES };
 export { CLIENT_SHIM as _CLIENT_SHIM };
 // Exported so tests can reset the Node micro-cache between cases (deterministic cache/TTL assertions).
 export { _resetNodeCache, PAGE_ACTIONS as _PAGE_ACTIONS };
+// Exported for the login-roster tests: the shared active-user filter, the roster→names derivation, the
+// per-request shim builder, and the hardcoded fallback list (asserted in sync with the seed).
+export { isActiveUser, loginRosterNames, buildClientShim, getLoginNames, DEFAULT_LOGIN_NAMES as _DEFAULT_LOGIN_NAMES };
