@@ -3,6 +3,19 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — ci — automate the post-deploy live smoke test on every push to main
+
+Follow-up to the manual `test/smoke-live.js` guard: `.github/workflows/smoke-live.yml` now runs it
+automatically on **every push to `main`** (after a short, dispatch-overridable delay for Railway to finish
+deploying) and via manual **Run workflow** dispatch. It probes the REAL deployed app — the one thing unit
+tests can't (they mock Apps Script) — catching a broken live chain or a mixed-version deploy window
+without anyone remembering to run it by hand.
+
+Repository secrets (**Settings → Secrets and variables → Actions**): **`APP_URL`** (required — the deployed
+URL; the job fails loudly if unset so it can never silently pass), **`SMOKE_USER`** and **`SMOKE_PIN`**
+(optional — enable the end-to-end authenticated-read check; without them that one check is skipped). GitHub
+runners have open egress so they can reach Railway (the Claude Code sandbox cannot). No app code changed.
+
 ## [Unreleased] — perf (round 2, safe reapply) — pageData aggregation + Node micro-cache, deploy-window-proof
 
 Reintroduces the #62 performance work (one aggregated `pageData` call per page + a Node micro-cache for

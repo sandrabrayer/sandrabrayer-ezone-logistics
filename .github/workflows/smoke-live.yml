@@ -1,0 +1,62 @@
+name: Post-deploy smoke
+
+# Hits the REAL deployed app after each push to main (Railway auto-deploys on that push) and verifies the
+# live chain browser → Node → Apps Script /exec → Sheets responds: GET / → 200 with the login shim, POST
+# /api/login (bogus user) → JSON 401, and — when SMOKE_USER/SMOKE_PIN are set — one authenticated read.
+# This is the guard for the login regressions (#59, #61-branch, #62) that passed unit tests but broke live.
+#
+# Required secret: APP_URL (e.g. https://ezone-logistics.up.railway.app)
+# Optional secrets: SMOKE_USER, SMOKE_PIN (enable the end-to-end authenticated-read check)
+
+on:
+  push:
+    branches:
+      - main
+  # Manual re-run from the Actions tab; optionally override the pre-check delay.
+  workflow_dispatch:
+    inputs:
+      delay_seconds:
+        description: 'Seconds to wait for Railway to finish deploying before probing'
+        required: false
+        default: '90'
+
+# One smoke run at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: smoke-live
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify APP_URL secret is present (fail loudly if not)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::error::Missing secret APP_URL — set it to the deployed URL (e.g. https://ezone-logistics.up.railway.app) under Settings → Secrets and variables → Actions. See README → Post-deploy smoke test."
+            exit 1
+          fi
+
+      - name: Wait for Railway to deploy this push
+        # Railway builds+deploys the same commit independently; give it a head start so we probe the NEW
+        # version, not the old one. Override with the delay_seconds input on a manual dispatch.
+        run: sleep "${{ github.event.inputs.delay_seconds || '90' }}"
+
+      - name: Run live smoke test
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_PIN: ${{ secrets.SMOKE_PIN }}
+        run: node test/smoke-live.js
