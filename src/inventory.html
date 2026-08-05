@@ -114,15 +114,12 @@
     <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span class="brand-name">לוגיסטיקה</span></div>
   </div>
   <div class="wrap">
-    <h1>ספירת מלאי שבועית</h1>
-    <p class="sub">ספירה שבועית לכל בית (שבוע ישראלי, מתחיל בראשון), ע״י רכז/ת הבית: טואלטיקה (כולל נייר טואלט) וחומרי ניקוי. שליחה חוזרת לאותו שבוע מחליפה את הספירה המוצגת (ההיסטוריה נשמרת בגיליון). מזון מנוהל באפליקציית המטבח.</p>
-
-    <div class="lead-tabs" id="modeTabs"></div>
+    <h1>מלאי — מצב שבועי</h1>
+    <p class="sub">תצוגת מצב הספירה השבועית לכל בית (טואלטיקה + חומרי ניקוי). ספירת המלאי עברה לאפליקציית הרכזים — כאן מוצג המצב בלבד, ללא הזנת ספירה. נתוני הספירה השבועיים יגיעו בהמשך מדייג׳סט הרכזים. מזון מנוהל באפליקציית המטבח.</p>
 
     <div class="controls">
       <label>בית:</label><select id="houseSel"></select>
       <label>שבוע:</label><select id="weekSel"></select>
-      <label>נספר ע״י:</label><select id="counterSel"></select>
     </div>
 
     <div id="out"><p class="loading">טוען…</p></div>
@@ -141,10 +138,8 @@
     const WEEK_CHOICES = 12;               // how many recent Sundays to offer in the week picker
     // Quantity picker options — the SAME for every item (nothing per-row); "אחר" reveals a free input.
     const QTY_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 24, 30, 50];
-    const TAB_COUNT = 'ספירה', TAB_STATUS = 'מצב שבועי';
-    const TABS = [TAB_COUNT, TAB_STATUS];
+    const TAB_STATUS = 'מצב שבועי';
     let houses = [], catalog = [], counts = [];
-    let activeTab = TAB_COUNT;
 
     async function post(action, payload) {
       const res = await fetch(EXEC_URL, {
@@ -194,7 +189,6 @@
         catalog = d.inventoryItems || [];
         counts = d.inventoryCounts || [];
         initControls();
-        renderTabs();
         render();
       } catch (e) {
         document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
@@ -204,33 +198,14 @@
     function initControls() {
       const hs = document.getElementById('houseSel');
       hs.innerHTML = houses.map(h => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
-      hs.onchange = onHouseChange;
-      const cs = document.getElementById('counterSel');
-      cs.innerHTML = COUNTERS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      hs.onchange = render;
       const ws = document.getElementById('weekSel');
       const weeks = recentWeekStarts(WEEK_CHOICES);
       ws.innerHTML = weeks.map((w, i) =>
         `<option value="${esc(w)}">${fmtWeek(w)}${i === 0 ? ' (השבוע)' : ''}</option>`).join('');
       ws.value = weeks[0];               // default = current week (Sunday-based)
       ws.onchange = render;
-      onHouseChange();
     }
-
-    // Default the counter to the house's own COORDINATOR (overridable); רועי as the fallback.
-    function onHouseChange() {
-      const name = document.getElementById('houseSel').value;
-      const coord = HOUSE_COORDINATORS[name];
-      const who = coord && COUNTERS.indexOf(coord) !== -1 ? coord
-        : (COUNTERS.indexOf('רועי') !== -1 ? 'רועי' : COUNTERS[0]);
-      document.getElementById('counterSel').value = who;
-      render();
-    }
-
-    function renderTabs() {
-      document.getElementById('modeTabs').innerHTML = TABS.map(t =>
-        `<button class="lead-tab ${t === activeTab ? 'active' : ''}" onclick="pickTab('${t}')">${t}</button>`).join('');
-    }
-    window.pickTab = (t) => { activeTab = t; renderTabs(); render(); };
 
     // Active catalog ROWS grouped by category, preserving CATEGORIES order (mirror of groupCatalog,
     // but keeps the whole row so the unit picker can read allowed_units).
@@ -275,138 +250,10 @@
       return { count_id: winner.count_id, counted_by: winner.counted_by, counted_at: winner.counted_at, items };
     }
 
-    function render() {
-      if (activeTab === TAB_STATUS) return renderStatus();
-      return renderCountForm();
-    }
-
-    // ── Tab: ספירה — quantity per item, grouped by category; prefilled from the latest count. ──
-    function renderCountForm() {
-      const house = document.getElementById('houseSel').value;
-      const week = document.getElementById('weekSel').value;
-      const grouped = groupedCatalog();
-      const prev = latestCountFor(house, week);
-      const prevQty = {}, prevNote = {}, prevUnit = {};
-      if (prev) prev.items.forEach(it => {
-        prevQty[it.item] = it.quantity; prevNote[it.item] = it.notes || '';
-        prevUnit[it.item] = it.unit_label || '';
-      });
-
-      const blocks = CATEGORIES.map(cat => {
-        const items = grouped[cat] || [];
-        if (items.length === 0) return '';
-        const rows = items.map((row) => {
-          const name = row.item_text;
-          const id = cat + '::' + name;
-          const labels = unitLabels(row.allowed_units);
-          const pq = Object.prototype.hasOwnProperty.call(prevQty, name) ? prevQty[name] : '';
-          const pUnit = prevUnit[name] || '';
-          const note = prevNote[name] ? esc(prevNote[name]) : '';
-
-          // Unit dropdown from allowed_units (default = first). Omitted when the item is unitless.
-          const unitSel = labels.length
-            ? `<select class="unit-in" data-item="${esc(name)}">${labels.map((l, i) =>
-                `<option value="${esc(l)}"${(pUnit ? l === pUnit : i === 0) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
-            : '';
-
-          // Quantity picker: shared options + "אחר" → free input. Prefill selects the matching option,
-          // or "אחר" with the value revealed when the previous quantity isn't one of the presets.
-          const isPreset = pq !== '' && QTY_CHOICES.indexOf(Number(pq)) !== -1;
-          const qtyOpts = QTY_CHOICES.map(q =>
-            `<option value="${q}"${isPreset && Number(pq) === q ? ' selected' : ''}>${q}</option>`).join('');
-          const otherSel = (pq !== '' && !isPreset) ? ' selected' : '';
-          const qtySel = `<select class="qty-sel" data-item="${esc(name)}" onchange="onQtyChange(this)">
-              <option value=""${pq === '' ? ' selected' : ''} disabled>כמות</option>
-              ${qtyOpts}
-              <option value="__other__"${otherSel}>אחר…</option>
-            </select>`;
-          const otherInput = `<input class="qty-in qty-other" type="number" min="0" step="any" inputmode="decimal"
-                   placeholder="כמות" data-cat="${esc(cat)}" data-item="${esc(name)}"
-                   value="${otherSel ? esc(pq) : ''}" ${otherSel ? '' : 'hidden'} />`;
-
-          return `<div class="item-row" data-cat="${esc(cat)}" data-item="${esc(name)}">
-            <span class="item-name">${esc(name)}</span>
-            <span class="prev-qty">${pq !== '' ? 'נספר: ' + esc(pq) + (pUnit ? ' ' + esc(pUnit) : '') : ''}</span>
-            ${unitSel}
-            ${qtySel}
-            ${otherInput}
-            <input class="note-in" type="text" maxlength="200" placeholder="הערה (רשות)" data-note-for="${esc(id)}" value="${note}" />
-          </div>`;
-        }).join('');
-        return `<div class="cat-block"><div class="cat-name">${esc(cat)} <span class="count-badge">${items.length} פריטים</span></div>${rows}</div>`;
-      }).join('');
-
-      const meta = prev
-        ? `ספירה אחרונה לשבוע זה: ${esc(prev.counted_by)} · ${new Date(prev.counted_at).toLocaleDateString('he-IL')} — הערכים למטה ממולאים ממנה`
-        : 'טרם נשלחה ספירה לשבוע זה';
-      document.getElementById('out').innerHTML = `<div class="order-doc">
-        <h2>ספירת מלאי — ${esc(house)} · <span dir="ltr">${fmtWeek(week)}</span></h2>
-        <div class="head-meta">${meta}</div>
-        ${blocks || '<p>אין פריטים פעילים בקטלוג (גיליון InventoryItems)</p>'}
-        <div class="actions-bar">
-          <button class="btn go" id="submitBtn" onclick="submitCount(this)">שליחת ספירה</button>
-          <span class="save-flash" id="flash"></span>
-        </div>
-      </div>`;
-    }
-
-    // "אחר…" reveals the free numeric input; any preset hides it. Focus it so typing is immediate.
-    window.onQtyChange = (sel) => {
-      const other = sel.closest('.item-row').querySelector('.qty-other');
-      if (!other) return;
-      if (sel.value === '__other__') { other.hidden = false; other.focus(); }
-      else { other.hidden = true; }
-    };
-
-    window.submitCount = async (btn) => {
-      const house = document.getElementById('houseSel').value;
-      const week_start = document.getElementById('weekSel').value;
-      const counted_by = document.getElementById('counterSel').value;
-      const flash = document.getElementById('flash');
-      flash.className = 'save-flash'; flash.textContent = '';
-
-      // Collect only FILLED rows; client-side validation mirrors the server rule. The unit label is
-      // sent as picked — the SERVER derives and freezes the factor + quantity_base from the catalog.
-      const items = [];
-      let bad = null;
-      document.querySelectorAll('#out .item-row').forEach(rowEl => {
-        const cat = rowEl.dataset.cat, item = rowEl.dataset.item;
-        const qtySel = rowEl.querySelector('.qty-sel');
-        const otherEl = rowEl.querySelector('.qty-other');
-        let v = '';
-        if (qtySel && qtySel.value === '__other__') v = otherEl ? otherEl.value.trim() : '';
-        else if (qtySel) v = qtySel.value.trim();
-        if (v === '') return;                       // not filled → no row (preserved distinction)
-        const n = Number(v);
-        if (!isFinite(n) || n < 0) { bad = item; return; }
-        const unitEl = rowEl.querySelector('.unit-in');
-        const unit_label = unitEl ? unitEl.value : '';
-        const noteEl = rowEl.querySelector('.note-in');
-        items.push({ category: cat, item, quantity: n, unit_label, notes: noteEl ? noteEl.value.trim() : '' });
-      });
-      if (bad) { flash.className = 'save-flash err'; flash.textContent = 'כמות לא תקינה: ' + bad; return; }
-      if (items.length === 0) { flash.className = 'save-flash err'; flash.textContent = 'לא מולאה אף כמות'; return; }
-      if (!week_start) { flash.className = 'save-flash err'; flash.textContent = 'בחר/י שבוע'; return; }
-
-      btn.disabled = true; flash.textContent = 'שולח…';
-      try {
-        // Coordinator submit — the server derives month from week_start and the unit factor from the catalog.
-        const j = await post('submitInventory', { house, week_start, counted_by, items });
-        if (j && j.ok) {
-          flash.textContent = 'נשמר ✓ (' + j.items + ' פריטים)';
-          // reflect locally so the form/status refresh without a full reload
-          const counted_at = new Date().toISOString();
-          const month = monthFromWeek(week_start);
-          items.forEach(it => counts.push({ count_id: j.count_id, house, month, week_start,
-            counted_by, counted_at, category: it.category, item: it.item, quantity: it.quantity,
-            unit_label: it.unit_label, notes: it.notes }));
-          setTimeout(render, 900);
-        } else {
-          flash.className = 'save-flash err'; flash.textContent = (j && j.error) || 'שגיאה';
-        }
-      } catch (e) { flash.className = 'save-flash err'; flash.textContent = 'שגיאה בשליחה'; }
-      btn.disabled = false;
-    };
+    // PR B — non-food inventory COUNTING moved out of Logistics to the Coordinators app. This page is now
+    // read-only: it keeps the data VIEW (מצב שבועי — who counted, latest numbers) and no longer offers a
+    // count-entry form. Weekly non-food counts will arrive from the coordinators digest (see DIGEST-CONTRACT.md).
+    function render() { return renderStatus(); }
 
     // ── Tab: מצב שבועי — which houses were counted THIS WEEK vs טרם נספר, by whom, latest numbers. ──
     function renderStatus() {

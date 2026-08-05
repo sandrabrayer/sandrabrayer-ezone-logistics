@@ -83,7 +83,35 @@ var HEADERS = {
     'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
     'status', 'closed_at', 'notes',
   ],
+  // OpeningChecklist (PR B) — a LOGISTICS-owned pre-opening readiness checklist, one row per (house,
+  // item). Feeds the /management "מוכנות בתים לפתיחה" panel. Created EMPTY by setupSheet(); Logistics adds
+  // items per pre-opening house (הפרדס / שדה אליעזר) via the screen. done = TRUE/FALSE; date/by stamped when
+  // ticked. house = canonical display name. Append-only from the UI; id targets an in-place update/delete.
+  OpeningChecklist: ['id', 'house', 'item', 'done', 'date', 'by'],
+  // EmergencyReadiness (PR B) — a per-house emergency-preparedness checklist (generator/gas/water/first-aid/
+  // …). Feeds the /management "בקרת מוכנות לזמן חירום" panel. setupSheet() SEEDS a default item set per house
+  // (idempotent — only when empty); the list is editable from the screen (add / tick / delete). Same shape
+  // and semantics as OpeningChecklist.
+  EmergencyReadiness: ['id', 'house', 'item', 'done', 'date', 'by'],
 };
+
+// Default emergency-preparedness items seeded per house (editable from the screen afterwards).
+var DEFAULT_EMERGENCY_ITEMS = ['גנרטור', 'גז', 'מים', 'ערכת עזרה ראשונה', 'מטפי כיבוי אש', 'תאורת חירום'];
+
+// Build the EmergencyReadiness seed: one row per (house, default item), across every seeded house.
+// ids are stable + collision-free with runtime genId_ (which stamps a 14-digit time) — 'EMR-SEED-####'.
+function buildEmergencyReadinessSeed_() {
+  var rows = [];
+  var n = 0;
+  for (var h = 0; h < SEED_HOUSES.length; h++) {
+    var houseName = SEED_HOUSES[h][0];
+    for (var i = 0; i < DEFAULT_EMERGENCY_ITEMS.length; i++) {
+      n++;
+      rows.push(['EMR-SEED-' + String(n).padStart(4, '0'), houseName, DEFAULT_EMERGENCY_ITEMS[i], 'FALSE', '', '']);
+    }
+  }
+  return rows;
+}
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
 var SEED_HOUSES = [
@@ -233,6 +261,9 @@ function setupSheet() {
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
   seedIfEmpty_(ss.getSheetByName('InventoryItems'), SEED_INVENTORY_ITEMS);
+  // OpeningChecklist stays EMPTY (Logistics fills it per pre-opening house from the screen);
+  // EmergencyReadiness is seeded with the default item set per house. Both are seed-if-empty → idempotent.
+  seedIfEmpty_(ss.getSheetByName('EmergencyReadiness'), buildEmergencyReadinessSeed_());
 
   // Config + Users are upserted by key/name (NOT seed-if-empty) so re-running setupSheet() after
   // this increment ADDS the new ceo_ceiling key and the Users roster to already-populated sheets,

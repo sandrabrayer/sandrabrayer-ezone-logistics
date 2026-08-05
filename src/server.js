@@ -592,6 +592,10 @@ async function handleData(req, res, url) {
   return sendJson(res, 200, payload);
 }
 
+// Exec-only writes (ops_manager + ceo), beyond managementData/updateEvent: the /management readiness
+// checklists (opening / emergency) and the compliance-entry delete. Mirrored by canManage in Code.gs.
+const MANAGE_ONLY_ACTIONS = new Set(['addReadinessItem', 'updateReadinessItem', 'deleteReadinessItem', 'deleteCompliance']);
+
 // Write proxy — Bearer-gated. The actor is taken from the verified token (never the client body);
 // the token is forwarded so Code.gs verifies it independently and enforces the role rules.
 async function handleAction(req, res) {
@@ -620,6 +624,12 @@ async function handleAction(req, res) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   if (body.action === 'updateEvent' && !canManage(actor.role)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+  // /management readiness checklists + compliance delete are exec-only (ops_manager + ceo), same as
+  // managementData. Enforced here (server-side) AND independently in Code.gs. field_ops passes the tier
+  // gate above but is NOT an exec, so it gets 403 here with no upstream call.
+  if (MANAGE_ONLY_ACTIONS.has(body.action) && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   const upstreamBody = JSON.stringify({ action: body.action, payload: body.payload || {}, token: auth.token });

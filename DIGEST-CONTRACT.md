@@ -52,3 +52,37 @@ shortagesSummary — we never fabricate weekly data.
 
 INVARIANTS: no financial fields, ever. Columns are append-only — never reorder
 or remove. Consumers read by header name, not index.
+
+--- WHAT LOGISTICS CONSUMES (v2, read-only) ---
+
+Symmetric to the publish contract above: as of PR B, **non-food inventory counting moved OUT of
+Logistics to the Coordinators app** (food already lives in ezone-kitchen). Logistics therefore stops
+being the source for those numbers and instead **reads** them from the other apps' digests. This
+section is the FROZEN contract for that consumption. It is **specification only** — the read wiring is a
+later increment; nothing here reads a foreign sheet yet. It is v2-compatible: additive, and it changes
+none of the published tabs above.
+
+General consume rules (identical discipline to the publish side):
+- **Read WEEKLY**, on the same Sunday-based Israeli week (`weekStart` = YYYY-MM-DD, Sunday).
+- **Columns are read BY HEADER NAME, never by index** — a producer may append columns freely; order is
+  irrelevant; a missing REQUIRED header means the panel is unavailable, never a fabricated 0.
+- **House ids use the shared namespace** (HOUSE-IDS.md): ramot-hashavim · raanana-asher · pardes ·
+  caesarea-ofroni · caesarea-rehab · sde-eliezer. A row whose house id is **not** in that map is
+  **omitted, never guessed**.
+- **No financial fields are read, ever** — if a producer adds a cost/amount column, Logistics ignores it.
+- A digest that is unconfigured / unreadable / missing its tab is reported as unavailable with a reason —
+  never rendered as zero.
+
+Source A — **Coordinators digest: weekly non-food counts** (replaces the retired Logistics count form).
+  Read the coordinators-published tab of weekly non-food (toiletries + cleaning) counts per house+week.
+  REQUIRED headers (by name): `house` (shared id), `weekStart` (YYYY-MM-DD Sunday),
+  `status` ('בוצעה' / 'לא בוצעה'). OPTIONAL: `shortagesSummary` (scrubbed text; below-par items), a
+  producer `updatedAt`. Only the latest submission per house+week is used. Absent house+week → 'לא בוצעה'.
+  No quantities are interpreted as money; no financial column is read.
+
+Source B — **Kitchen digest: food shortages** (already partially specified by the kitchen contract).
+  Read the ezone-kitchen `FoodShortages` tab. House header read by name from the tolerated set
+  `house` / `house_id` / `houseId` / `houseID`; item header from `item` / `item_text` / `itemName` /
+  `product` / `name` (see `summarizeFoodShortages`). Each row is one shortage item for a house; unmapped
+  houses omitted. Missing the house OR item header entirely → unavailable (never a fabricated shape/0).
+  Read weekly, read-only, no financial fields.

@@ -3,6 +3,53 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — PR B: /management cleanup (Olga's screen) + inventory ownership move
+
+**Why.** The network-management screen had grown to include panels with no owned data source (kitchen /
+coordinators / training digest cards, a defect-closure rate, an exceptional-events analysis with a
+zero-filled monthly trend, and "no data source" placeholders). It read as busier and less trustworthy than
+the data behind it. This trims the screen to what Logistics actually owns, and moves non-food inventory
+counting to the app that now owns it.
+
+**/management — removed.** Gone entirely: `סגירת ליקויים במועד`, `אירועים חריגים` (incl. the
+`מגמה חודשית` trend), the kitchen `חוסרי מזון` **and** the coordinators `דייג׳סט רכזים` cards,
+`עמידה בתוכנית הדרכה`, and the `מדדים ללא מקור נתונים` block (`הטמעת מערכות`, `איכות הרשומה`). **No
+"לא זמין" placeholder panels remain** — a source that isn't wired simply isn't shown; it returns via its own
+increment. (The `/events` reporting page and the underlying pure functions are untouched — only the
+/management *panels* were unwired.)
+
+**/management — simplified / added.**
+- `רמת הבתים + אירועים חוזרים` → a single **recurring-defects list derived ONLY from Requests** (same house +
+  same category/description ≥2 within 90 days). No scores, no levels. (`recurringDefectsFromRequests`.)
+- `הוצאות לפי בית` → reframed as a single **`עמידה בתקציב`** panel: actual spend per house (Requests
+  `actual_cost`) vs the **existing** period-based `Budgets` sheet — kept as the single source of truth (no new
+  sheet, no new columns). A UI note says food spend will arrive later from the Kitchen digest (not wired now).
+- `מוכנות בתים לפתיחה` → fed from a new **Logistics-owned `OpeningChecklist`** sheet (id, house, item, done,
+  date, by). Created **empty** for the pre-opening houses (`הפרדס`, `שדה אליעזר`); editable from the screen.
+- **New `בקרת מוכנות לזמן חירום`** → a per-house emergency checklist from a new **`EmergencyReadiness`** sheet
+  (same shape), **seeded** with a default item set per house (generator / gas / water / first-aid / …), editable.
+- `עמידה באמות מידה` → each entry can now be **deleted (with confirm), audit-logged** before removal.
+
+**New sheets + writes.** `OpeningChecklist` + `EmergencyReadiness` added to `setupSheet()` (idempotent —
+OpeningChecklist empty, EmergencyReadiness seeded). New manager-only write actions (`addReadinessItem` /
+`updateReadinessItem` / `deleteReadinessItem` / `deleteCompliance`) are gated `canManage` at the Node gateway
+**and** independently in Code.gs; ticking stamps the actor from the verified token, never the client body.
+
+**Inventory ownership.** Non-food counting moved OUT of Logistics to the Coordinators app: the `ספירת מלאי`
+count-entry form is **removed** from `/inventory` (the weekly status VIEW stays, read-only).
+`DIGEST-CONTRACT.md` gains a v2-compatible **"what Logistics CONSUMES"** section (weekly non-food counts from
+coordinators; food shortages from kitchen — read weekly, by header name, no financial fields, unmapped houses
+omitted). **Contract text + form removal only — the read wiring is a later increment.**
+
+**⚠️ After merge:** `setupSheet()` must be **re-run once** (adds `OpeningChecklist` + `EmergencyReadiness`;
+idempotent — existing data untouched). Apps Script deploys via clasp CI (no manual paste).
+
+**Tests.** `management.test.js` rewritten (SLA, recurring-from-Requests, readiness summarizers);
+`management-handler.test.js` rewritten to the trimmed payload + `safePanel_` isolation + the new
+add/tick/delete/deleteCompliance handlers (real Code.gs in a sandbox, incl. audit row); new
+`management-writes.test.js` (exec-only gate at the gateway) and `inventory-view-only.test.js` (form removed,
+view kept). `node --test` green (**564 tests**). No secrets; explicit-path adds.
+
 ## [Unreleased] — PR A: production bugs — approve/reject guard, observable (non-permanent) pageData fallback, per-lead task view
 
 **What.** Three production concerns on the dashboard / open-tasks flow, investigated read-only first, then
