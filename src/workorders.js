@@ -64,6 +64,28 @@ export function urgencyRank(urgency) {
   return Object.prototype.hasOwnProperty.call(URGENCY_RANK, urgency) ? URGENCY_RANK[urgency] : 3;
 }
 
+// ── Per-lead view filter (bug: "לאן עוברות המשימות של רמי") ──────────────────────────────────────
+// After Roy refers a request in "העברה לביצוע", it lands on the open-tasks list assigned to a lead
+// (assigned_to = רמי / צחי / רועי). Without a per-lead view every lead's tasks are mixed together, so a
+// maintenance lead can't see "what's mine". This is the single pure filter both the העברה-לביצוע and the
+// סטטוס-ביצוע lists apply. LEAD_FILTER_ALL (blank) shows everything (the manager view); any specific lead
+// narrows to that lead's tasks by assigned_to. Kept dependency-free so node:test verifies it and
+// workorders.html mirrors it verbatim.
+export const LEAD_FILTER_ALL = '';
+
+/**
+ * Narrow a list of work items to a single lead's tasks, or return all for LEAD_FILTER_ALL.
+ * Matches on the item's assigned_to (the lead Roy referred it to). Non-array input → [].
+ * @param {Array<{assigned_to?:string}>} items  items from collectExecutionItems (carry assigned_to)
+ * @param {string} lead  a lead name (רמי / צחי / רועי) or LEAD_FILTER_ALL ('') for no filter
+ * @returns {Array} the filtered items (a new array; input is never mutated)
+ */
+export function filterItemsByLead(items, lead) {
+  if (!Array.isArray(items)) return [];
+  if (!lead) return items.slice();          // LEAD_FILTER_ALL → the full (manager) view
+  return items.filter((it) => it && it.assigned_to === lead);
+}
+
 /**
  * Map a house name → its maintenance lead, from the Houses rows.
  * @param {Array<{name:string, technician:string}>} houses

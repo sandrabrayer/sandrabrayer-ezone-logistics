@@ -3,6 +3,57 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix (PR A, production bugs) — approve/reject write path locked, pageData fallback proven not-permanent, per-lead task view
+
+Three production reports, investigated read-only first, then fixed/locked with tests.
+
+**1. "Approve / reject buttons do nothing."** *(what + why)* The report was that on the "ממתין לאישור"
+cards, **אישור** and **לא אושר** did nothing. Full trace of the write path — dashboard `post()` →
+in-`<head>` auth shim (`window.fetch` override) → `POST /api/action` (Bearer-gated) → Apps Script
+`doPost` — showed it is **correct in current `main`**: the shim forwards the write to `/api/action` with
+the actor's real Bearer token, and the gateway substitutes that **verified** token into the upstream body
+(never the client's placeholder `'1'`). A real-browser check (log in as Roy, click אישור on a pending
+card) confirmed the `approve` write reaches upstream. The historical dead-button symptom was the **#62
+deploy-window 502** that blanked every manager page (new Node calling `bundle` before clasp finished
+deploying it) — already fixed in **#65** by the graceful fallback — compounded by intermittent pageData
+failures (see below) that made a *successful* action look like nothing happened when the follow-up reload
+hiccupped. **No code defect remained to fix; the risk was silent regression**, so the path is now locked
+with a gateway regression test.
+  - New `test/dashboard-actions.test.js` (6 cases, real gateway + fake upstream, per `staff-tiers.test.js`):
+    approve **and** reject POST reach upstream with the right action + payload; the **actor's real token is
+    forwarded, not the body's `'1'`**; `ops_manager` can approve/reject too; unauthenticated / bad-token
+    writes are `401` and never reach upstream; tier-B (coordinator) is `403` at the gateway with no write.
+
+**2. "Tab navigation very slow + intermittent errors."** *(what + why)* Verified the three suspected
+causes. (a) **Micro-cache warming / cache key** — the cache is keyed **per action**, not per page, so
+`houses`/`config`/`technicians` warmed on one page are reused on every other (already covered + still
+green). (b) **Was the bundle→individual fallback taken permanently?** That was the #62 outage shape (old
+Apps Script had no `bundle` → every page fanned out to N reads). It is **not** the case now: the Deploy
+Apps Script workflow **succeeded on the #65 merge** that introduced `bundle`, so the live `/exec` serves
+it, and the happy path uses `bundle` **exclusively**. (c) **The intermittent error** is the `502` returned
+only when `bundle` **and every** individual read fail (a genuine upstream outage / Apps Script cold-start
+timeout), surfaced by the client as "שגיאה בטעינה". Remaining tab latency is the inherent Apps Script
+cold-start cost of always reading the **volatile** sheets (`requests`/`findings`/`inspections`) fresh —
+which by design are **never cached** (write→read freshness). No safe code change here; the not-permanent
+guarantee is now a **test**, so a regression that silently reverts to per-action reads is caught.
+  - New in `test/pagedata.test.js` (2 cases): with `bundle` live, **every** page loads in exactly **one**
+    bundle round-trip with **zero** individual-read fallback; and a warm tab switch stays on `bundle` for
+    the volatile sheets (never per-action).
+
+**3. "לאן עוברות המשימות של רמי?" — assigned tasks had no per-lead view.** *(what + why)* After Roy refers
+a request in **העברה לביצוע**, it lands on the open-tasks list `assigned_to` a lead (רמי / צחי / רועי), but
+the list mixed every lead together, so a maintenance lead could not see **their** tasks. Added a **minimal
+per-lead filter** (הכל / רמי / צחי / רועי) on the open-tasks list (the **העברה לביצוע** and **סטטוס ביצוע**
+tabs; not the external **בעלי מקצוע** tab). Pure, testable logic in `src/workorders.js`
+(`filterItemsByLead`, `LEAD_FILTER_ALL`); `src/workorders.html` mirrors it verbatim and shows the filter
+only on the two open-tasks tabs. RTL Hebrew UI, no new dependency.
+  - New in `test/workorders.test.js` (4 cases): a specific lead sees only their tasks; `LEAD_FILTER_ALL`
+    is the full manager view; it composes with `collectExecutionItems`; input is never mutated and
+    non-array input is tolerated.
+
+`node --test` green (564 tests). No secrets touched; no Apps Script change in this PR (so no `setupSheet()`
+re-run and no clasp deploy needed).
+
 ## [Unreleased] — fix (Bug 3) — login roster comes from the live `doGet('users')`, not a hardcoded copy
 
 **Symptoms.** The login picker could show a wrong/stale roster, and a valid user + the correct code was

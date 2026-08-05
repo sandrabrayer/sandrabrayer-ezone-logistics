@@ -123,6 +123,11 @@
     <p class="sub">העברה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
 
     <div class="lead-tabs" id="leadTabs"></div>
+    <div class="controls" id="leadFilterBar" style="display:none">
+      <span><label for="leadFilter">אחראי:</label>
+        <select id="leadFilter"></select>
+      </span>
+    </div>
     <div class="actions-bar">
       <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
     </div>
@@ -140,6 +145,18 @@
     const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
     let requests = [], findings = [], inspections = [], houses = [];
     let activeLead = REFER_TAB;
+
+    // Per-lead view filter ("לאן עוברות המשימות של רמי") — mirror of src/workorders.js filterItemsByLead.
+    // Blank = the manager view (all leads); a specific lead narrows the open-tasks list to their tasks.
+    const LEAD_FILTER_ALL = '';
+    let leadFilter = LEAD_FILTER_ALL;
+    function filterItemsByLead(items, lead) {
+      if (!Array.isArray(items)) return [];
+      if (!lead) return items.slice();
+      return items.filter(it => it && it.assigned_to === lead);
+    }
+    // The open-tasks tabs (העברה לביצוע / סטטוס ביצוע) carry a per-lead filter; בעלי מקצוע (external) does not.
+    const LEAD_FILTER_TABS = [REFER_TAB, EXEC_TAB];
 
     // Staff-authenticated POST. Token was verified in staffGate() and kept in window.__STAFF_TOKEN__.
     async function post(action, payload) {
@@ -163,6 +180,7 @@
         findings = d.findings || [];
         inspections = d.inspections || [];
         houses = d.houses || [];
+        initLeadFilter();
         renderTabs();
         render();
       } catch (e) {
@@ -173,8 +191,23 @@
     function renderTabs() {
       document.getElementById('leadTabs').innerHTML = TABS.map(l =>
         `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
+      syncLeadFilterBar();
     }
     window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
+
+    // The per-lead filter dropdown is built once (הכל + the three leads) and shown only on the two
+    // open-tasks tabs. Its value drives filterItemsByLead via liveReferred().
+    function initLeadFilter() {
+      const sel = document.getElementById('leadFilter');
+      const opts = [{ v: LEAD_FILTER_ALL, t: 'הכל' }].concat(LEADS.map(l => ({ v: l, t: l })));
+      sel.innerHTML = opts.map(o => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('');
+      sel.value = leadFilter;
+      sel.addEventListener('change', () => { leadFilter = sel.value; render(); });
+    }
+    function syncLeadFilterBar() {
+      const bar = document.getElementById('leadFilterBar');
+      bar.style.display = LEAD_FILTER_TABS.indexOf(activeLead) !== -1 ? 'flex' : 'none';
+    }
 
     function uPill(u) {
       const cls = u === 'חירום' ? 'emergency' : u === 'דחוף' ? 'urgent' : 'normal';
@@ -195,7 +228,8 @@
       return r.execution_status !== EXEC_DONE;
     }
     function liveReferred() {
-      return requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r))
+      const items = requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r));
+      return filterItemsByLead(items, leadFilter)  // per-lead view (הכל / רמי / צחי / רועי)
         .slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || String(a.house).localeCompare(String(b.house), 'he'));
     }
 

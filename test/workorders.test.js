@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   urgencyRank, houseLeadMap, collectLeadItems, buildWeeklyOrder, weeklyOrderForLead,
   isExecutionLive, collectExecutionItems, EXEC_DONE, EXEC_NOT_DONE, EXEC_OTHER, EXEC_CHOICES,
-  ASSIGN_LEADS, defaultReferLead,
+  ASSIGN_LEADS, defaultReferLead, filterItemsByLead, LEAD_FILTER_ALL,
 } from '../src/workorders.js';
 
 const HOUSES = [
@@ -142,4 +142,43 @@ test('defaultReferLead falls back to first option for unknown/blank house lead',
   assert.equal(defaultReferLead(''), 'רמי');
   assert.equal(defaultReferLead('מישהו אחר'), 'רמי');
   assert.equal(defaultReferLead(undefined), 'רמי');
+});
+
+// ── Per-lead view filter ("לאן עוברות המשימות של רמי") — narrows the open-tasks list to one lead. ──
+
+test('filterItemsByLead: a specific lead sees ONLY their own referred tasks', () => {
+  const items = [
+    { id: 'R1', assigned_to: 'רמי' },
+    { id: 'R2', assigned_to: 'צחי' },
+    { id: 'R3', assigned_to: 'רמי' },
+    { id: 'R4', assigned_to: 'רועי' },
+  ];
+  assert.deepEqual(filterItemsByLead(items, 'רמי').map((i) => i.id), ['R1', 'R3']);
+  assert.deepEqual(filterItemsByLead(items, 'צחי').map((i) => i.id), ['R2']);
+});
+
+test('filterItemsByLead: LEAD_FILTER_ALL ("") returns every task (the manager view)', () => {
+  const items = [{ id: 'R1', assigned_to: 'רמי' }, { id: 'R2', assigned_to: 'צחי' }];
+  assert.equal(LEAD_FILTER_ALL, '');
+  assert.deepEqual(filterItemsByLead(items, LEAD_FILTER_ALL).map((i) => i.id), ['R1', 'R2']);
+});
+
+test('filterItemsByLead: composes with collectExecutionItems so רמי sees his live tasks only', () => {
+  const requests = [
+    { id: 'R1', assigned_to: 'רמי', status: 'בביצוע', execution_status: '', house: 'רעננה', urgency: 'רגיל', description: 'ברז' },
+    { id: 'R2', assigned_to: 'צחי', status: 'בביצוע', execution_status: 'לא בוצע', house: 'ריהאב', urgency: 'דחוף', description: 'דלת' },
+    { id: 'R3', assigned_to: 'רמי', status: 'בביצוע', execution_status: 'בוצע', house: 'רעננה', urgency: 'רגיל', description: 'בוצע — נשמט' },
+  ];
+  const live = collectExecutionItems({ requests });
+  assert.deepEqual(filterItemsByLead(live, 'רמי').map((i) => i.id), ['R1']); // R3 done → already dropped
+  assert.deepEqual(filterItemsByLead(live, 'צחי').map((i) => i.id), ['R2']);
+});
+
+test('filterItemsByLead: never mutates its input, tolerates non-array', () => {
+  const items = [{ id: 'R1', assigned_to: 'רמי' }];
+  const all = filterItemsByLead(items, LEAD_FILTER_ALL);
+  all.push({ id: 'X' });
+  assert.equal(items.length, 1, 'input array is not mutated');
+  assert.deepEqual(filterItemsByLead(null, 'רמי'), []);
+  assert.deepEqual(filterItemsByLead(undefined, ''), []);
 });

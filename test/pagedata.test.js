@@ -91,6 +91,33 @@ test('LOGIN is independent of the new code: bogus login still returns JSON 401 e
   assert.ok(!hits.some((h) => h.action === 'bundle'), 'login must not touch the bundle action');
 });
 
+// ---- FALLBACK IS NOT PERMANENT: when bundle IS live, the individual-read path is never taken ----
+// The #62 outage was the individual fallback effectively becoming permanent (old Apps Script had no
+// bundle → every page fanned out to N reads). Now that clasp CI deploys `bundle`, the happy path must
+// use it EXCLUSIVELY. This asserts the fallback stays dormant whenever bundle answers — the inverse of
+// the DEPLOY-WINDOW tests above, so a regression that silently reverts to per-action reads is caught.
+
+test('FALLBACK-NOT-PERMANENT: bundle live → exactly one bundle call, ZERO individual reads (every page)', async () => {
+  for (const page of ['dashboard', 'workorders', 'reports', 'inventory', 'inspection', 'events']) {
+    resetNodeCache(); hits = []; upstreamMode = 'ok'; // cold cache so nothing masks a stray individual read
+    const r = await pageData(page, 'ceo');
+    assert.equal(r.status, 200, `${page} must load via bundle`);
+    assert.equal(countAction('bundle'), 1, `${page}: exactly one bundle round-trip`);
+    // Not one of the page's sheets is fetched as its own action — the fallback path stayed dormant.
+    const individual = hits.filter((h) => h.action && h.action !== 'bundle');
+    assert.deepEqual(individual, [], `${page}: no individual-read fallback when bundle is live (got ${JSON.stringify(individual)})`);
+  }
+});
+
+test('FALLBACK-NOT-PERMANENT: a warm tab switch stays on bundle for volatile sheets (never per-action)', async () => {
+  resetNodeCache(); hits = []; upstreamMode = 'ok';
+  await pageData('dashboard', 'ceo');   // warms houses/config
+  hits = [];
+  await pageData('workorders', 'ceo');  // volatile sheets (requests/findings/inspections) still via bundle
+  assert.equal(countAction('bundle'), 1, 'the tab switch is one bundle call');
+  assert.deepEqual(hits.filter((h) => h.action !== 'bundle'), [], 'no per-action fallback on a warm switch');
+});
+
 const tok = (role) => signToken(SECRET, 7, { name: role, role, scope: role === 'coordinator' ? 'רמות השבים' : '' });
 const pageData = (page, role, hdr) => fetch(`${base}/api/data?action=pageData&page=${page}`, { headers: hdr === null ? {} : { Authorization: `Bearer ${tok(role)}` } });
 const read = (action, role) => fetch(`${base}/api/data?action=${action}`, { headers: { Authorization: `Bearer ${tok(role)}` } });
