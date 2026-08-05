@@ -3,6 +3,40 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix (Bug 3) — login roster comes from the live `doGet('users')`, not a hardcoded copy
+
+**Symptoms.** The login picker could show a wrong/stale roster, and a valid user + the correct code was
+rejected with **"שם או קוד שגויים"**.
+
+**Root cause (one, shared).** The login picker was a **hardcoded name list** (`LOGIN_NAMES` in
+`src/server.js`) that duplicated the Users roster. It had to be hand-kept in sync with the sheet, so any
+roster edit — add / remove / **rename** / deactivate a user — made the dropdown **drift**: it could offer a
+name that no longer matched a `Users` row, and selecting it + the correct code failed the exact-name lookup
+in `handleLogin` → generic 401. The picker and the login **verifier** were reading two different sources of
+truth for "who can log in."
+
+**Fix — one shared users-read path, not per-screen.** The picker is now **derived from the live active
+roster** (`doGet('users')`) — the same read the verifier uses — so the two can never disagree:
+- `isActiveUser(u)` is the single "who is in the roster" predicate (tolerant of `TRUE`/`true`/`1`/boolean,
+  trims whitespace), used by **both** the picker and `handleLogin`.
+- `loginRosterNames(users)` derives the picker names from the roster: active-only, trimmed, de-duped.
+- The server injects those live names into each page's auth shim (`buildClientShim(names)`), cached briefly
+  (names-only, non-secret; TTL matches the micro-cache). Login **verification still reads the roster LIVE
+  with the proof** — unchanged — so a just-added/renamed user authenticates immediately.
+- **Fail-safe:** if the roster read is unavailable (deploy-window / upstream outage) the picker falls back
+  to `DEFAULT_LOGIN_NAMES` (the seeded list) so it is **never empty**; a guard test keeps that fallback in
+  sync with `setup.gs` `SEED_USERS`.
+
+**Invariants preserved.** `users` is still **never cached or bundled** as the auth roster (the picker caches
+only the derived *name list*, never `pin_hash`); `pin_hash` is still stripped from every public read; all
+tier-A/tier-B/scope rules are untouched.
+
+**New tests (`test/login-roster.test.js`, 28 cases).** The roster endpoint returns all active users and the
+picker lists exactly them; a deactivated user drops out and a new one appears (no drift); **login succeeds
+for every seeded user with the correct code** (tier-A personal password, tier-B `APP_PIN`); **login fails
+closed on the wrong code**, on an empty code, and for a deactivated user; the fallback list stays in sync
+with the seed. `node --test` green (552 tests).
+
 ## [Unreleased] — perf (round 2, safe reapply) — pageData aggregation + Node micro-cache, deploy-window-proof
 
 Reintroduces the #62 performance work (one aggregated `pageData` call per page + a Node micro-cache for
