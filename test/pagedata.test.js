@@ -73,6 +73,36 @@ test('DEPLOY WINDOW: the fallback still enforces role scoping (coordinator would
   assert.equal(hits.length, 0);
 });
 
+test('DEPLOY WINDOW: the fallback is OBSERVABLE — a degraded pageData is flagged (200 + degraded:true)', async () => {
+  upstreamMode = 'noBundle';
+  const r = await pageData('dashboard', 'ceo');
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.degraded, true, 'fallback must mark the response so a stale live deploy is detectable (smoke-live fails on it)');
+});
+
+test('HAPPY PATH is NOT flagged degraded — bundle worked, no degraded key on the response', async () => {
+  upstreamMode = 'ok';
+  const j = await (await pageData('dashboard', 'ceo')).json();
+  assert.equal(j.degraded, undefined, 'a normal bundled load carries no degraded marker');
+});
+
+test('FALLBACK IS NOT PERMANENT: once bundle is live again, the very next pageData uses it and clears degraded', async () => {
+  // Stale window: bundle missing → fallback + degraded flag.
+  upstreamMode = 'noBundle';
+  const stale = await (await pageData('dashboard', 'ceo')).json();
+  assert.equal(stale.degraded, true);
+  // clasp CI publishes the current Code.gs → bundle answers again. No sticky negative-cache: the next
+  // request re-attempts bundle and recovers on its own (this is the "not permanent" guarantee).
+  upstreamMode = 'ok';
+  resetNodeCache(); // simulate a fresh request window (drop any stable-read caching from the stale call)
+  hits = [];
+  const healed = await (await pageData('dashboard', 'ceo')).json();
+  assert.equal(healed.degraded, undefined, 'recovered — no longer degraded once bundle is back');
+  assert.equal(countAction('bundle'), 1, 're-attempted bundle (did not stay stuck on individual reads)');
+  assert.equal(countAction('requests'), 0, 'served from the single bundle round-trip again');
+});
+
 test('genuine upstream outage (bundle AND every individual read fail) still yields 502', async () => {
   upstreamMode = 'down';
   const r = await pageData('dashboard', 'ceo');

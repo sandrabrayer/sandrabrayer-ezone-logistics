@@ -123,6 +123,7 @@
     <p class="sub">העברה לביצוע (בחירת אחראי), עבודות בעלי מקצוע, ומעקב סטטוס ביצוע. משימה נשארת פתוחה עד שמסומנת "בוצע".</p>
 
     <div class="lead-tabs" id="leadTabs"></div>
+    <div class="lead-tabs" id="leadFilterChips"></div>
     <div class="actions-bar">
       <button class="btn go" onclick="window.print()">🖨 הדפסה / שמירה כ-PDF</button>
     </div>
@@ -140,6 +141,13 @@
     const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
     let requests = [], findings = [], inspections = [], houses = [];
     let activeLead = REFER_TAB;
+    // Per-lead filter for the open-tasks list, so a maintenance lead sees ONLY their own tasks
+    // (רמי / צחי) instead of every lead's mixed together. '' = הכל (no filter). Mirrors
+    // src/workorders.js filterByLead. Applied only on the refer + execution tabs (the external tab
+    // groups by trade, not lead).
+    const LEAD_FILTERS = ['', 'רמי', 'צחי', 'רועי'];
+    let leadFilter = '';
+    function leadLabel(l) { return l === '' ? 'הכל' : l; }
 
     // Staff-authenticated POST. Token was verified in staffGate() and kept in window.__STAFF_TOKEN__.
     async function post(action, payload) {
@@ -164,6 +172,7 @@
         inspections = d.inspections || [];
         houses = d.houses || [];
         renderTabs();
+        renderLeadFilter();
         render();
       } catch (e) {
         document.getElementById('out').innerHTML = '<p class="empty">שגיאה בטעינה. רענן/י ונסה/י שוב.</p>';
@@ -174,7 +183,19 @@
       document.getElementById('leadTabs').innerHTML = TABS.map(l =>
         `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
     }
-    window.pickLead = (l) => { activeLead = l; renderTabs(); render(); };
+    window.pickLead = (l) => { activeLead = l; renderTabs(); renderLeadFilter(); render(); };
+
+    // Per-lead filter chips (רמי / צחי / רועי / הכל). Shown only on the two open-task tabs; the
+    // בעלי מקצוע tab is grouped by trade so a lead filter is meaningless there.
+    function renderLeadFilter() {
+      const box = document.getElementById('leadFilterChips');
+      if (!box) return;
+      const show = activeLead === REFER_TAB || activeLead === EXEC_TAB;
+      if (!show) { box.innerHTML = ''; return; }
+      box.innerHTML = '<span style="align-self:center;color:var(--muted);font-size:.82rem;margin-inline-end:4px">אחראי:</span>'
+        + LEAD_FILTERS.map(l => `<button class="lead-tab ${l === leadFilter ? 'active' : ''}" onclick="pickLeadFilter('${esc(l)}')">${esc(leadLabel(l))}</button>`).join('');
+    }
+    window.pickLeadFilter = (l) => { leadFilter = l; renderLeadFilter(); render(); };
 
     function uPill(u) {
       const cls = u === 'חירום' ? 'emergency' : u === 'דחוף' ? 'urgent' : 'normal';
@@ -195,7 +216,8 @@
       return r.execution_status !== EXEC_DONE;
     }
     function liveReferred() {
-      return requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r))
+      return requests.filter(r => r && r.assigned_to && LEADS.indexOf(r.assigned_to) !== -1 && isLive(r)
+          && (!leadFilter || r.assigned_to === leadFilter))
         .slice().sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || String(a.house).localeCompare(String(b.house), 'he'));
     }
 

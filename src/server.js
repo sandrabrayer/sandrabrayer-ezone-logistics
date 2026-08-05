@@ -427,11 +427,21 @@ async function handlePageData(res, actor, page) {
     const cached = NODE_CACHEABLE.has(a) ? nodeCacheGet(a) : null;
     if (cached) data[a] = cached; else toFetch.push(a);
   }
+  // `degraded` is set when this request had to take the individual-read FALLBACK because the live Apps
+  // Script did not answer `bundle`. It is surfaced on the 200 response (and warn-logged) so a stale
+  // deployment is OBSERVABLE instead of silently making every tab switch N slow round-trips: the
+  // post-deploy smoke test fails on it, telling us clasp CI hasn't published the current Code.gs. It is
+  // NOT sticky — the next request re-attempts bundle, so the moment the deploy lands the flag clears.
+  let degraded = false;
   if (toFetch.length) {
     // ONE bundle round-trip; if bundle is unavailable (deploy-order window with an old Apps Script),
     // fall back automatically to the individual reads so a mixed-version deploy can never 502 the page.
     let bundle = await fetchBundle(toFetch);
-    if (!bundle) bundle = await fetchActionsIndividually(toFetch);
+    if (!bundle) {
+      degraded = true;
+      console.warn('[pageData] bundle unavailable — individual-read fallback taken (live Apps Script lacks `bundle`? check clasp CI deploy)');
+      bundle = await fetchActionsIndividually(toFetch);
+    }
     if (!bundle) return sendJson(res, 502, { ok: false, error: 'upstream_error' });
     for (const a of toFetch) {
       data[a] = Array.isArray(bundle[a]) ? bundle[a] : (bundle[a] || (a === 'config' ? {} : []));
@@ -449,7 +459,9 @@ async function handlePageData(res, actor, page) {
     data.requests = data.requests.filter((r) =>
       houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
   }
-  return sendJson(res, 200, { ok: true, data });
+  const out = { ok: true, data };
+  if (degraded) out.degraded = true; // only present when the fallback was taken — clients may ignore it
+  return sendJson(res, 200, out);
 }
 
 // Verify the Bearer token; returns the decoded actor { name, role, scope, ... } and the raw token,
