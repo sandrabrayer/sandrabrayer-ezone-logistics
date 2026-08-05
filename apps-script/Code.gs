@@ -593,6 +593,11 @@ function dispatchAction_(body, actor) {
     case 'deleteRequest':    return handleDeleteRequest_(body.payload || {}, actor);
     case 'editRequest':      return handleEditRequest_(body.payload || {}, actor);
     case 'submitInventory':  return handleSubmitInventory_(body.payload || {}, actor);
+    // PR B — /management readiness checklists + compliance delete (all manager-tier, gated in-handler).
+    case 'addReadinessItem':    return handleAddReadinessItem_(body.payload || {}, actor);
+    case 'updateReadinessItem': return handleUpdateReadinessItem_(body.payload || {}, actor);
+    case 'deleteReadinessItem': return handleDeleteReadinessItem_(body.payload || {}, actor);
+    case 'deleteCompliance':    return handleDeleteCompliance_(body.payload || {}, actor);
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -2222,30 +2227,119 @@ function safePanel_(label, produce, fallback) {
   }
 }
 
+// ===== Readiness checklists (מוכנות בתים לפתיחה / בקרת מוכנות לזמן חירום) — PR B =====
+// Two Logistics-owned checklists with the SAME shape (id, house, item, done, date, by), edited from the
+// /management screen. `board` selects the sheet from a FIXED allow-list — never an arbitrary sheet name.
+var READINESS_SHEETS_ = { opening: 'OpeningChecklist', emergency: 'EmergencyReadiness' };
+function readinessSheetName_(board) {
+  return Object.prototype.hasOwnProperty.call(READINESS_SHEETS_, String(board)) ? READINESS_SHEETS_[String(board)] : '';
+}
+
+// Generic in-place update / delete of a row addressed by its `id` column, for a named sheet.
+function updateSheetRowById_(sheetName, id, fields) {
+  var sheet = getSheet_(sheetName);
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(id)) {
+      for (var key in fields) {
+        var col = headers.indexOf(key);
+        if (col !== -1) sheet.getRange(r + 1, col + 1).setValue(fields[key]);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+function deleteSheetRowById_(sheetName, id) {
+  var sheet = getSheet_(sheetName);
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(id)) { sheet.deleteRow(r + 1); return true; }
+  }
+  return false;
+}
+
+function handleAddReadinessItem_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  var sheetName = readinessSheetName_(p.board);
+  if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
+  if (!p.house || !p.item) return jsonOut_({ ok: false, error: 'Missing house or item' });
+  var id = genId_('CHK');
+  appendRow_(sheetName, { id: id, house: String(p.house), item: String(p.item), done: 'FALSE', date: '', by: '' });
+  return jsonOut_({ ok: true, id: id });
+}
+
+// Tick / untick an item. Ticking stamps today's date + the actor; unticking clears both. Actor from the
+// verified token, never the client body.
+function handleUpdateReadinessItem_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  var sheetName = readinessSheetName_(p.board);
+  if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
+  if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
+  var done = (p.done === true || String(p.done).toUpperCase() === 'TRUE');
+  var fields = {
+    done: done ? 'TRUE' : 'FALSE',
+    date: done ? new Date().toISOString().slice(0, 10) : '',
+    by: done ? (actor.name || '') : '',
+  };
+  if (!updateSheetRowById_(sheetName, p.id, fields)) return jsonOut_({ ok: false, error: 'Item not found' });
+  return jsonOut_({ ok: true, done: done });
+}
+
+function handleDeleteReadinessItem_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  var sheetName = readinessSheetName_(p.board);
+  if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
+  if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
+  if (!deleteSheetRowById_(sheetName, p.id)) return jsonOut_({ ok: false, error: 'Item not found' });
+  return jsonOut_({ ok: true });
+}
+
+// עמידה באמות מידה — delete a Compliance entry, AUDIT-LOGGED (manager-tier only). The row is logged to
+// AuditLog before removal so the deletion is never silent.
+function handleDeleteCompliance_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
+  var sheet = getSheet_('Compliance');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  var itemCol = headers.indexOf('item');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(p.id)) {
+      var itemName = itemCol !== -1 ? data[r][itemCol] : '';
+      writeAuditEntry('COMPLIANCE-' + p.id, '', 'נמחק', actor.name, 'אמת מידה נמחקה: ' + itemName);
+      sheet.deleteRow(r + 1);
+      return jsonOut_({ ok: true });
+    }
+  }
+  return jsonOut_({ ok: false, error: 'Compliance item not found' });
+}
+
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
-  // Core Logistics reads (the screen's baseline dataset). Each foreign/derived PANEL below is wrapped in
-  // safePanel_ so one panel's failure degrades to its own "unavailable" state, never the whole response.
+  // PR B — the screen was trimmed to what Logistics OWNS a real source for. Removed from the payload:
+  // inspections/findings/inventory (no longer rendered), and the kitchen / coordinators / training / events
+  // panels (their data returns via their own increments). Each remaining server-derived panel is wrapped in
+  // safePanel_ so one panel's failure degrades to its own state, never the whole response.
   var requests = getRequests();
   return jsonOut_({
     ok: true,
     data: {
       requests: requests,
-      inspections: readObjects_('Inspections'),
-      findings: readObjects_('InspectionFindings'),
       houses: getHouses(),
-      inventoryItems: readObjects_('InventoryItems'),
-      inventoryCounts: readObjects_('InventoryCounts'),
-      // available:false panels (html checks `.available`) fall back to an explicit read-error card.
-      kitchen: safePanel_('kitchen', readKitchenShortages_, { available: false, reason: 'שגיאת קריאה מדייג׳סט המטבח — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
-      coordinators: safePanel_('coordinators', readCoordinatorsShortages_, { available: false, reason: 'שגיאת קריאה בדייג׳סט הרכזים' }),
-      training: safePanel_('training', readTrainingCompliance_, { available: false, reason: 'שגיאת קריאה מדייג׳סט הרכזים — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
-      // budget/maintenance/compliance/events panels (html checks for a truthy object with rows) fall back
-      // to null, which their render treats as an explicit "לא זמין" card.
+      // Logistics-owned readiness checklists (feed the pre-opening + emergency panels). Wrapped so a
+      // not-yet-run setupSheet() (missing sheet) degrades to an empty list, never a whole-screen error.
+      openingChecklist: safePanel_('openingChecklist', function () { return readObjects_('OpeningChecklist'); }, []),
+      emergencyReadiness: safePanel_('emergencyReadiness', function () { return readObjects_('EmergencyReadiness'); }, []),
+      // Financial + compliance + preventive-maintenance panels (html renders their rows as-is).
       budget: safePanel_('budget', function () { return readBudgetAdherence_(p && p.period, requests); }, null),
       maintenance: safePanel_('maintenance', readMaintenanceAdherence_, null),
       compliance: safePanel_('compliance', readComplianceAdherence_, null),
-      events: safePanel_('events', readEventsAnalysis_, null),
     },
   });
 }

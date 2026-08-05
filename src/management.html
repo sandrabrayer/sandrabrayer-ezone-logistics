@@ -75,7 +75,6 @@
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
 
     // ---- Aggregation mirror of src/management.js (read-only view; the server is the gate). ----
-    const CLOSED = ['הושלם', 'סגור'];
     const TERMINAL = ['הושלם', 'סגור', 'לא מאושר'];
     const isOpenReq = (r) => r && TERMINAL.indexOf(String(r.status)) === -1;
     const isBlockedR = (r) => String(r.blocked == null ? '' : r.blocked).toUpperCase() === 'TRUE';
@@ -87,93 +86,92 @@
     }
     const daysOverdueR = (r, now) => Math.floor((now - new Date(r.due_at).getTime()) / 86400000);
 
+    const RECURRENCE_WINDOW_DAYS = 90, RECURRENCE_MIN = 2;
+    const normText = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toLowerCase();
+    // Recurring defects from Requests ONLY: same house + category + normalized description ≥2 in 90 days.
+    function recurringDefects(requests, now) {
+      const win = RECURRENCE_WINDOW_DAYS * 86400000, groups = {};
+      (requests || []).forEach((r) => {
+        if (!r || !r.house) return;
+        const t = new Date(r.created_at).getTime();
+        if (isNaN(t) || (now - t) > win || t > now) return;
+        const cat = String(r.category || '').trim(), descNorm = normText(r.description);
+        if (!cat && !descNorm) return;
+        const label = String(r.description || '').trim() || cat;
+        const key = String(r.house) + '|' + cat + '|' + descNorm;
+        const g = groups[key] || (groups[key] = { house: String(r.house), category: cat, description: label, count: 0 });
+        g.count++;
+      });
+      return Object.values(groups).filter((g) => g.count >= RECURRENCE_MIN)
+        .sort((a, b) => b.count - a.count || String(a.house).localeCompare(String(b.house), 'he'));
+    }
+
+    const isDoneCell = (v) => v === true || v === 1 || ['TRUE', '1'].indexOf(String(v == null ? '' : v).trim().toUpperCase()) !== -1;
+    // Shape flat checklist rows {id,house,item,done,date,by} into per-house groups, only for `houses`.
+    function readinessByHouse(rows, houses) {
+      const byHouse = {}, order = [];
+      (houses || []).forEach((h) => { const n = h && h.name; if (!n || byHouse[n]) return; byHouse[n] = { house: n, items: [], doneCount: 0, total: 0 }; order.push(n); });
+      (rows || []).forEach((row) => {
+        if (!row || !row.house) return;
+        const b = byHouse[row.house]; if (!b) return;
+        const done = isDoneCell(row.done);
+        b.items.push({ id: row.id, item: row.item, done, date: row.date || '', by: row.by || '' });
+        b.total++; if (done) b.doneCount++;
+      });
+      return order.map((k) => byHouse[k]);
+    }
+
     function build(d, now) {
-      const reqs = d.requests || [], findings = d.findings || [], inspections = d.inspections || [],
-        houses = d.houses || [], counts = d.inventoryCounts || [];
+      const reqs = d.requests || [], houses = d.houses || [];
       const open = reqs.filter(isOpenReq);
 
       // Panel: SLA / delays
       const byHouse = {};
-      open.forEach((r) => {
-        const b = byHouse[r.house] || (byHouse[r.house] = { house: r.house, open: 0, overdue: 0, blocked: 0 });
-        b.open++; if (isOverdueR(r, now)) b.overdue++; if (isBlockedR(r)) b.blocked++;
-      });
+      open.forEach((r) => { const b = byHouse[r.house] || (byHouse[r.house] = { house: r.house, open: 0, overdue: 0, blocked: 0 }); b.open++; if (isOverdueR(r, now)) b.overdue++; if (isBlockedR(r)) b.blocked++; });
       const overdue = open.filter((r) => isOverdueR(r, now));
       const worst = overdue.map((r) => ({ ...r, dov: daysOverdueR(r, now) })).sort((a, b) => b.dov - a.dov);
-      const sla = { openCount: open.length, overdueCount: overdue.length,
-        blockedCount: open.filter(isBlockedR).length, byHouse: Object.values(byHouse), worst };
+      const sla = { openCount: open.length, overdueCount: overdue.length, blockedCount: open.filter(isBlockedR).length, byHouse: Object.values(byHouse), worst };
 
-      // Panel: defect closure
-      const reqById = {}; reqs.forEach((r) => reqById[String(r.id)] = r);
-      const defects = findings.filter((f) => f && f.finding_type === 'physical_defect');
-      let dOpen = 0, onTime = 0, late = 0, noDue = 0;
-      defects.forEach((f) => {
-        const r = f.linked_request_id ? reqById[String(f.linked_request_id)] : null;
-        if (!r || CLOSED.indexOf(String(r.status)) === -1) { dOpen++; return; }
-        if (r.due_at && r.completed_at) {
-          if (new Date(r.completed_at).getTime() <= new Date(r.due_at).getTime()) onTime++; else late++;
-        } else noDue++;
-      });
-      const measured = onTime + late;
-      const defectClosure = { total: defects.length, open: dOpen, onTime, late, noDue,
-        rate: measured > 0 ? Math.round(100 * onTime / measured) : null };
-
-      // Panel: house quality
-      const insById = {}; inspections.forEach((i) => { if (i && i.id != null) insById[String(i.id)] = i; });
-      const hq = {};
-      houses.forEach((h) => hq[h.name] = { house: h.name, status: h.status, last: '', low: 0, medium: 0, high: 0, recurring: 0 });
-      inspections.forEach((i) => { const b = hq[i.house]; if (b) { const dt = String(i.inspection_date || ''); if (dt > b.last) b.last = dt; } });
-      const tally = {};
-      findings.forEach((f) => {
-        if (!f || f.finding_type !== 'physical_defect') return;
-        const ins = insById[String(f.inspection_id)]; const house = ins ? ins.house : ''; const b = hq[house]; if (!b) return;
-        if (!f.linked_request_id) { const s = String(f.severity || '').toLowerCase(); b[(s === 'medium' || s === 'high') ? s : 'low']++; }
-        const k = String(f.finding_text || '').trim().replace(/\s+/g, ' ').toLowerCase();
-        if (k) { (tally[house] = tally[house] || {})[k] = ((tally[house] || {})[k] || 0) + 1; }
-      });
-      Object.keys(tally).forEach((house) => { if (hq[house]) hq[house].recurring = Object.values(tally[house]).filter((n) => n >= 2).length; });
-
-      // Panel: spend (owned cost)
-      let est = 0, act = 0; const spendHouse = {};
-      reqs.forEach((r) => { const e = Number(r.estimated_cost) || 0, a = Number(r.actual_cost) || 0; est += e; act += a;
-        const b = spendHouse[r.house] || (spendHouse[r.house] = { house: r.house, estimated: 0, actual: 0 }); b.estimated += e; b.actual += a; });
-
-      // Panel: pre-opening readiness
-      const countedHouse = {}; counts.forEach((c) => { if (c && c.house) countedHouse[c.house] = true; });
-      const pre = houses.filter((h) => String(h.status) === 'pre-opening').map((h) => ({
-        house: h.name,
-        openRequests: reqs.filter((r) => r.house === h.name && isOpenReq(r)).length,
-        openDefects: findings.filter((f) => f && f.finding_type === 'physical_defect' && !f.linked_request_id && insById[String(f.inspection_id)] && insById[String(f.inspection_id)].house === h.name).length,
-        inventoryCounted: !!countedHouse[h.name],
-      }));
-
-      // kitchen + coordinators + budget + maintenance + compliance are computed SERVER-SIDE (Code.gs)
-      // and passed through as-is; the browser only renders them.
-      return { sla, defectClosure, houseQuality: Object.values(hq), spend: { est, act, byHouse: Object.values(spendHouse) },
-        preOpening: pre, kitchen: d.kitchen || null, coordinators: d.coordinators || null, budget: d.budget || null,
-        maintenance: d.maintenance || null, compliance: d.compliance || null, events: d.events || null,
-        training: d.training || null };
+      const preOpening = houses.filter((h) => String(h.status) === 'pre-opening');
+      return {
+        sla,
+        recurring: recurringDefects(reqs, now),
+        opening: readinessByHouse(d.openingChecklist || [], preOpening),
+        emergency: readinessByHouse(d.emergencyReadiness || [], houses),
+        budget: d.budget || null, maintenance: d.maintenance || null, compliance: d.compliance || null,
+      };
     }
-
-    // The (c) items — no source in this repo. Mirror of UNAVAILABLE_CAPABILITIES (food_quality, budget,
-    // preventive_maintenance and training_adherence are now LIVE panels below, so they are no longer here).
-    const UNAVAILABLE = [
-      ['הטמעת מערכות', 'אין מקור נתוני הטמעת תוכנות/אפליקציות.'],
-      ['איכות הרשומה ועמידה בדרישות משרד הבריאות', 'בבעלות האפליקציות הקליניות; אינו בתחום הלוגיסטיקה.'],
-    ];
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const nis = (n) => '₪' + Number(n || 0).toLocaleString('he-IL');
     const fmtDate = (v) => { const m = String(v || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (v ? esc(v) : '—'); };
+    function kpi(n, label, cls, alarm) { return `<div class="kpi${alarm ? ' alarm' : ''}"><div class="n ${cls || ''}">${n}</div><div class="l">${esc(label)}</div></div>`; }
 
-    function kpi(n, label, cls, alarm) {
-      return `<div class="kpi${alarm ? ' alarm' : ''}"><div class="n ${cls || ''}">${n}</div><div class="l">${esc(label)}</div></div>`;
+    // Editable readiness checklist (opening / emergency): tick, add, delete — writes go through the
+    // manage-only actions and reload the screen.
+    function readinessSection(title, note, board, groups) {
+      let html = `<h2>${esc(title)}</h2>`;
+      if (note) html += `<p class="sub">${esc(note)}</p>`;
+      if (!groups.length) { html += '<div class="kpi"><div class="n na">אין בתים</div></div>'; return html; }
+      html += groups.map((h) => {
+        let block = `<h3 style="margin:14px 0 6px">${esc(h.house)} <span class="pill ${h.total && h.doneCount === h.total ? 'ok' : 'amber'}">${h.doneCount}/${h.total}</span></h3>`;
+        block += '<table><thead><tr><th style="width:44px">בוצע</th><th>פריט</th><th>תאריך</th><th>ע״י</th><th style="width:44px"></th></tr></thead><tbody>';
+        block += h.items.map((it) => `<tr>
+          <td><input type="checkbox" ${it.done ? 'checked' : ''} onchange="toggleReadiness('${esc(board)}','${esc(it.id)}',this.checked)" aria-label="בוצע"></td>
+          <td>${esc(it.item)}</td>
+          <td>${it.date ? fmtDate(it.date) : '<span class="na">—</span>'}</td>
+          <td>${it.by ? esc(it.by) : '<span class="na">—</span>'}</td>
+          <td><button class="pill red" style="border:0;cursor:pointer" onclick="delReadiness('${esc(board)}','${esc(it.id)}')" title="מחיקה">מחק</button></td>
+        </tr>`).join('') || '<tr><td colspan="5" class="empty">אין פריטים — הוסף/י פריט ראשון.</td></tr>';
+        block += '</tbody></table>';
+        block += `<div style="display:flex;gap:8px;margin:8px 0 6px"><input id="add-${esc(board)}-${esc(h.house)}" placeholder="פריט חדש" style="flex:1;min-height:36px;background:#161a20;color:var(--ink);border:1.5px solid var(--card-line);border-radius:8px;padding:6px 10px"><button class="pill ok" style="border:0;cursor:pointer;padding:6px 14px" onclick="addReadiness('${esc(board)}','${esc(h.house)}')">הוסף</button></div>`;
+        return block;
+      }).join('');
+      return html;
     }
-    // A metric with no data source → explicit "לא זמין", never 0.
-    function naKpi(label) { return `<div class="kpi"><div class="n na">לא זמין</div><div class="l">${esc(label)}</div></div>`; }
 
     function render(m) {
-      const s = m.sla, dc = m.defectClosure;
+      const s = m.sla;
       let html = '';
 
       html += '<h2>עיכובים ו-SLA (הצפת עיכובים)</h2><div class="grid">';
@@ -187,98 +185,22 @@
         html += '</tbody></table>';
       }
 
-      html += '<h2>סגירת ליקויים במועד</h2><div class="grid">';
-      html += kpi(dc.total, 'ליקויים (פגמים פיזיים)');
-      html += kpi(dc.open, 'ליקויים פתוחים', dc.open ? 'amber' : 'ok');
-      html += (dc.rate == null) ? naKpi('אחוז סגירה במועד') : kpi(dc.rate + '%', 'סגירה במועד', dc.rate >= 80 ? 'ok' : 'amber');
-      html += kpi(dc.onTime + ' / ' + dc.late, 'במועד / באיחור');
-      html += '</div>';
-      if (dc.noDue) html += `<p class="sub">(${dc.noDue} ליקויים נסגרו ללא תאריך יעד — לא נכללים באחוז הסגירה במועד.)</p>`;
-
-      html += '<h2>רמת הבתים ואירועים חוזרים</h2><table><thead><tr><th>בית</th><th>סטטוס</th><th>בקרה אחרונה</th><th>ליקויים פתוחים (גבוה/בינוני/נמוך)</th><th>חוזרים</th></tr></thead><tbody>';
-      html += m.houseQuality.map((h) => `<tr><td>${esc(h.house)}</td><td>${h.status === 'pre-opening' ? 'טרום-פתיחה' : 'פתוח'}</td><td>${h.last ? fmtDate(h.last) : '<span class="na">אין בקרה</span>'}</td><td><span class="pill red">${h.high}</span> / <span class="pill amber">${h.medium}</span> / ${h.low}</td><td>${h.recurring ? '<span class="pill amber">' + h.recurring + '</span>' : '0'}</td></tr>`).join('');
-      html += '</tbody></table>';
-
-      html += '<h2>הוצאות (רכש) — לפי בית</h2><div class="grid">';
-      html += kpi(nis(m.spend.act), 'הוצאה בפועל (סה״כ)');
-      html += kpi(nis(m.spend.est), 'הערכת עלות (סה״כ)');
-      html += naKpi('עמידה בתקציב');
-      html += '</div>';
-      html += '<table><thead><tr><th>בית</th><th>הערכה</th><th>בפועל</th></tr></thead><tbody>';
-      html += m.spend.byHouse.filter((b) => b.house).sort((a, b) => b.actual - a.actual).map((b) => `<tr><td>${esc(b.house)}</td><td>${nis(b.estimated)}</td><td>${nis(b.actual)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">אין נתוני הוצאה.</td></tr>';
-      html += '</tbody></table>';
-
-      if (m.preOpening.length) {
-        html += '<h2>מוכנות בתים לפתיחה</h2><table><thead><tr><th>בית</th><th>דרישות פתוחות</th><th>ליקויים פתוחים</th><th>ספירת מלאי בוצעה</th></tr></thead><tbody>';
-        html += m.preOpening.map((p) => `<tr><td>${esc(p.house)}</td><td>${p.openRequests}</td><td>${p.openDefects}</td><td>${p.inventoryCounted ? '<span class="pill ok">כן</span>' : '<span class="pill amber">לא</span>'}</td></tr>`).join('');
+      // Recurring defects — from Requests only (same house + category/description ≥2 in 90 days).
+      html += '<h2>אירועים חוזרים (ליקויים חוזרים לפי בית — 90 יום)</h2>';
+      if (!m.recurring.length) {
+        html += '<div class="kpi"><div class="n ok">אין</div><div class="l">אין ליקויים חוזרים ב-90 הימים האחרונים</div></div>';
+      } else {
+        html += '<table><thead><tr><th>בית</th><th>קטגוריה</th><th>תיאור</th><th>מופעים</th></tr></thead><tbody>';
+        html += m.recurring.map((g) => `<tr><td>${esc(g.house)}</td><td>${esc(g.category) || '—'}</td><td>${esc(g.description)}</td><td><span class="pill red">${g.count}</span></td></tr>`).join('');
         html += '</tbody></table>';
       }
 
-      // Kitchen food shortages — READ-ONLY from the ezone-kitchen digest. Unavailable renders as a
-      // "לא זמין" card with the reason (never as 0); an available-but-empty result says "no shortages".
-      html += '<h2>חוסרי מזון לפי בית (דייג׳סט המטבח — קריאה בלבד)</h2>';
-      const k = m.kitchen;
-      if (!k || !k.available) {
-        html += `<div class="unavail"><div class="t">חוסרי מזון — לא זמין</div><div class="r">${esc((k && k.reason) || 'אין מקור נתונים')}</div></div>`;
-      } else if (!k.houses || !k.houses.length) {
-        html += '<div class="kpi"><div class="n ok">אין חוסרים</div><div class="l">לא דווחו חוסרי מזון כרגע</div></div>';
-      } else {
-        html += '<table><thead><tr><th>בית</th><th>מספר פריטים בחוסר</th><th>פריטים</th></tr></thead><tbody>';
-        html += k.houses.map((h) => `<tr><td>${esc(h.house)}</td><td><span class="pill red">${h.count}</span></td><td>${(h.items || []).map(esc).join('، ')}</td></tr>`).join('');
-        html += '</tbody></table>';
-      }
-
-      // Coordinators digest — no coordinators-published source exists yet; shown as "לא זמין" with why.
-      const co = m.coordinators;
-      if (!co || !co.available) {
-        html += `<div class="unavail" style="margin-top:8px"><div class="t">דייג׳סט רכזים — לא זמין</div><div class="r">${esc((co && co.reason) || 'אין דייג׳סט רכזים מתפרסם לקריאה')}</div></div>`;
-      }
-
-      // Training compliance (עמידה בתוכנית הדרכה) — READ-ONLY from the coordinators-published digest
-      // (tab TrainingCompliance). Unavailable (no id / no access / missing tab / header mismatch) renders
-      // as a "לא זמין" card with the reason (never as 0). Per house, worst-first guides (blocked, then
-      // notRecorded, then warn); notRecorded is a NEUTRAL pill, never green. A house absent from the digest
-      // shows "אין נתונים לבית זה" — distinct from the whole digest being unavailable.
-      const tr = m.training;
-      html += '<h2>עמידה בתוכנית הדרכה (דייג׳סט הרכזים — קריאה בלבד)</h2>';
-      if (!tr || !tr.available) {
-        html += `<div class="unavail"><div class="t">עמידה בתוכנית הדרכה — לא זמין</div><div class="r">${esc((tr && tr.reason) || 'אין מקור נתוני הדרכה')}</div></div>`;
-      } else if (!tr.houses || !tr.houses.length) {
-        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים במיפוי</div></div>';
-      } else {
-        const stName = { ok: 'תקין', warn: 'אזהרה', blocked: 'חסום', notRecorded: 'לא תועד' };
-        const stCls = { ok: 'ok', warn: 'amber', blocked: 'red', notRecorded: 'gray' };
-        const pill = (st) => `<span class="pill ${stCls[st] || 'gray'}">${esc(stName[st] || st || '—')}</span>`;
-        html += tr.houses.map((h) => {
-          if (!h.hasData) {
-            return `<h3 style="margin:14px 0 6px">${esc(h.house)}</h3><div class="unavail" style="margin-bottom:4px"><div class="r">אין נתונים לבית זה</div></div>`;
-          }
-          const pct = h.compliancePercent == null ? '—' : h.compliancePercent + '%';
-          const pctCls = h.compliancePercent == null ? 'na' : (h.compliancePercent >= 80 ? 'ok' : (h.compliancePercent >= 50 ? 'amber' : 'red'));
-          const badges = `${h.counts.blocked ? ` <span class="pill red">${h.counts.blocked} חסום</span>` : ''}${h.counts.notRecorded ? ` <span class="pill gray">${h.counts.notRecorded} לא תועד</span>` : ''}${h.counts.warn ? ` <span class="pill amber">${h.counts.warn} אזהרה</span>` : ''}`;
-          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${badges}</h3>`;
-          block += `<div class="grid" style="margin-bottom:8px"><div class="kpi"><div class="n ${pctCls}">${pct}</div><div class="l">עמידה (תקין מתוך ${h.total})</div></div>`;
-          block += `<div class="kpi"><div class="n ok">${h.counts.ok}</div><div class="l">תקין</div></div>`;
-          block += `<div class="kpi"><div class="n">${h.total}</div><div class="l">מדריכים</div></div></div>`;
-          block += '<table><thead><tr><th>מדריך</th><th>סטטוס כללי</th><th>חסר</th><th>עזרה ראשונה</th><th>הדרכת מדריכים</th></tr></thead><tbody>';
-          block += h.guides.map((g) => {
-            const lacking = (g.lacking && g.lacking.length) ? g.lacking.map(esc).join('، ') : '<span class="na">—</span>';
-            const fa = `${pill(g.firstAidStatus)}${g.firstAidDate ? ' ' + esc(g.firstAidDate) : ''}`;
-            const ins = `${pill(g.instructorStatus)}${g.instructorDate ? ' ' + esc(g.instructorDate) : ''}`;
-            return `<tr><td>${esc(g.guideName) || '<span class="na">—</span>'}</td><td>${pill(g.overallStatus)}</td><td>${lacking}</td><td>${fa}</td><td>${ins}</td></tr>`;
-          }).join('');
-          block += '</tbody></table>';
-          return block;
-        }).join('');
-      }
-
-      // Budget adherence (עמידה בתקציב) — computed server-side per selected month. Financial data;
-      // shown only here (canManage-gated), never in any digest. Over-budget highlighted worst-first;
-      // a house with no budget row shows "לא הוגדר תקציב" (never a fabricated 0).
+      // עמידה בתקציב — actual spend per house (Requests actual_cost) vs the Budgets sheet, per month.
       const bud = m.budget;
       html += '<h2>עמידה בתקציב</h2>';
+      html += '<p class="sub">הוצאה בפועל (רכש/תיקונים) מול התקציב החודשי לכל בית. הוצאות מזון יתווספו בהמשך מדייג׳סט המטבח.</p>';
       if (!bud) {
-        html += '<div class="unavail"><div class="t">עמידה בתקציב — לא זמין</div><div class="r">אין נתוני תקציב</div></div>';
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין נתוני תקציב</div></div>';
       } else {
         const opts = (bud.periods || []).map((p) => `<option value="${esc(p)}"${p === bud.period ? ' selected' : ''}>${esc(p)}</option>`).join('');
         html += `<div class="grid" style="margin-bottom:10px"><div class="kpi"><label class="l">חודש</label><br><select onchange="loadMonth(this.value)" style="margin-top:6px;min-height:36px">${opts || `<option>${esc(bud.period)}</option>`}</select></div></div>`;
@@ -288,9 +210,7 @@
         } else {
           html += '<table><thead><tr><th>בית</th><th>תקציב</th><th>בפועל</th><th>יתרה</th><th>ניצול</th><th>סטטוס</th></tr></thead><tbody>';
           html += rows.map((r) => {
-            if (!r.budgetDefined) {
-              return `<tr><td>${esc(r.house)}</td><td colspan="3" class="na">לא הוגדר תקציב</td><td>—</td><td>${nis(r.actual)} הוצאה${r.usedEstimated ? ' *' : ''}</td></tr>`;
-            }
+            if (!r.budgetDefined) return `<tr><td>${esc(r.house)}</td><td colspan="3" class="na">לא הוגדר תקציב</td><td>—</td><td>${nis(r.actual)} הוצאה${r.usedEstimated ? ' *' : ''}</td></tr>`;
             const pct = r.percentUsed == null ? '—' : r.percentUsed + '%';
             const status = r.over ? '<span class="pill red">חריגה</span>' : (r.percentUsed != null && r.percentUsed >= 90 ? '<span class="pill amber">קרוב לתקרה</span>' : '<span class="pill ok">בתקציב</span>');
             return `<tr><td>${esc(r.house)}</td><td>${nis(r.budget)}</td><td>${nis(r.actual)}${r.usedEstimated ? ' *' : ''}</td><td>${nis(r.remaining)}</td><td>${pct}</td><td>${status}</td></tr>`;
@@ -301,30 +221,29 @@
         if (bud.adherence && bud.adherence.skipped) html += `<p class="sub">${bud.adherence.skipped} שורות תקציב לא תקינות דולגו (בדוק פורמט חודש/סכום בגיליון Budgets).</p>`;
       }
 
-      // Preventive maintenance (תחזוקה מונעת) — computed server-side from the MaintenancePlan sheet.
-      // Per house, worst-first: overdue tasks first, then soonest-due. A house with no plan row shows
-      // "לא הוגדרה תוכנית" (never a fabricated 0). next_due / overdue are derived, never stored.
+      // מוכנות בתים לפתיחה — Logistics-owned checklist per pre-opening house (editable).
+      html += readinessSection('מוכנות בתים לפתיחה', 'צ׳ק-ליסט פתיחה לכל בית טרום-פתיחה (בבעלות הלוגיסטיקה).', 'opening', m.opening);
+
+      // בקרת מוכנות לזמן חירום — per-house emergency-preparedness checklist (editable).
+      html += readinessSection('בקרת מוכנות לזמן חירום', 'גנרטור / גז / מים / עזרה ראשונה וכו׳ — ניתן להוסיף ולערוך פריטים לכל בית.', 'emergency', m.emergency);
+
+      // תחזוקה מונעת — computed server-side from the MaintenancePlan sheet.
       const mnt = m.maintenance;
       html += '<h2>תחזוקה מונעת</h2>';
       if (!mnt || !mnt.houses) {
-        html += '<div class="unavail"><div class="t">תחזוקה מונעת — לא זמין</div><div class="r">אין נתוני תוכנית תחזוקה</div></div>';
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין נתוני תוכנית תחזוקה</div></div>';
       } else if (!mnt.houses.length) {
         html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים פעילים</div></div>';
       } else {
         html += mnt.houses.map((h) => {
           let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${h.overdueCount ? ` <span class="pill red">${h.overdueCount} באיחור</span>` : ''}</h3>`;
-          if (!h.planDefined) {
-            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרה תוכנית תחזוקה מונעת לבית זה.</div></div>';
-            return block;
-          }
+          if (!h.planDefined) { block += '<p class="sub">לא הוגדרה תוכנית תחזוקה מונעת לבית זה.</p>'; return block; }
           block += '<table><thead><tr><th>משימה</th><th>תדירות</th><th>בוצע לאחרונה</th><th>מועד הבא</th><th>סטטוס</th></tr></thead><tbody>';
           block += h.tasks.map((t) => {
             const freq = `כל ${t.frequency} חוד׳`;
             const last = t.lastDone ? fmtDate(t.lastDone) : '<span class="na">מעולם לא</span>';
             const next = t.nextDue ? fmtDate(t.nextDue) : '<span class="na">מיידי</span>';
-            const status = t.overdue
-              ? '<span class="pill red">' + (t.lastDone ? `באיחור ${Math.abs(t.daysUntil)} ימים` : 'טרם בוצע') + '</span>'
-              : (t.daysUntil <= 30 ? `<span class="pill amber">בעוד ${t.daysUntil} ימים</span>` : `<span class="pill ok">בעוד ${t.daysUntil} ימים</span>`);
+            const status = t.overdue ? '<span class="pill red">' + (t.lastDone ? `באיחור ${Math.abs(t.daysUntil)} ימים` : 'טרם בוצע') + '</span>' : (t.daysUntil <= 30 ? `<span class="pill amber">בעוד ${t.daysUntil} ימים</span>` : `<span class="pill ok">בעוד ${t.daysUntil} ימים</span>`);
             return `<tr><td>${esc(t.task)}</td><td>${esc(freq)}</td><td>${last}</td><td>${next}</td><td>${status}</td></tr>`;
           }).join('');
           block += '</tbody></table>';
@@ -333,30 +252,25 @@
         if (mnt.skipped) html += `<p class="sub">${mnt.skipped} שורות תוכנית לא תקינות דולגו (בדוק id/משימה/תדירות/בית בגיליון MaintenancePlan).</p>`;
       }
 
-      // Compliance (עמידה באמות מידה) — computed server-side from the Compliance sheet. Per house,
-      // worst-first: expired first, then soonest-to-expire, with a doc link when present. A house with
-      // no compliance row shows "לא הוגדרו פריטי אמות מידה" (never a fabricated 0). status is derived.
+      // עמידה באמות מידה — computed server-side; each entry can be DELETED (confirm + audit-logged).
       const cmp = m.compliance;
       html += '<h2>עמידה באמות מידה</h2>';
       if (!cmp || !cmp.houses) {
-        html += '<div class="unavail"><div class="t">עמידה באמות מידה — לא זמין</div><div class="r">אין נתוני אמות מידה</div></div>';
+        html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין נתוני אמות מידה</div></div>';
       } else if (!cmp.houses.length) {
         html += '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין בתים פעילים</div></div>';
       } else {
         html += cmp.houses.map((h) => {
           const badges = `${h.expiredCount ? ` <span class="pill red">${h.expiredCount} פג תוקף</span>` : ''}${h.expiringCount ? ` <span class="pill amber">${h.expiringCount} פג בקרוב</span>` : ''}`;
           let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${badges}</h3>`;
-          if (!h.defined) {
-            block += '<div class="unavail" style="margin-bottom:4px"><div class="r">לא הוגדרו פריטי אמות מידה לבית זה.</div></div>';
-            return block;
-          }
-          block += '<table><thead><tr><th>פריט</th><th>תוקף עד</th><th>ימים לתפוגה</th><th>סטטוס</th><th>מסמך</th></tr></thead><tbody>';
+          if (!h.defined) { block += '<p class="sub">לא הוגדרו פריטי אמות מידה לבית זה.</p>'; return block; }
+          block += '<table><thead><tr><th>פריט</th><th>תוקף עד</th><th>ימים לתפוגה</th><th>סטטוס</th><th>מסמך</th><th></th></tr></thead><tbody>';
           block += h.items.map((it) => {
             const days = it.daysToExpiry == null ? '—' : (it.daysToExpiry < 0 ? `−${Math.abs(it.daysToExpiry)}` : it.daysToExpiry);
-            const status = it.expired ? `<span class="pill red">${esc(it.status)}</span>`
-              : (it.expiring ? `<span class="pill amber">${esc(it.status)}</span>` : `<span class="pill ok">${esc(it.status)}</span>`);
+            const status = it.expired ? `<span class="pill red">${esc(it.status)}</span>` : (it.expiring ? `<span class="pill amber">${esc(it.status)}</span>` : `<span class="pill ok">${esc(it.status)}</span>`);
             const doc = it.docUrl ? `<a href="${esc(it.docUrl)}" target="_blank" rel="noopener">מסמך</a>` : '<span class="na">—</span>';
-            return `<tr><td>${esc(it.item)}</td><td>${fmtDate(it.expires)}</td><td>${days}</td><td>${status}</td><td>${doc}</td></tr>`;
+            const del = it.id ? `<button class="pill red" style="border:0;cursor:pointer" onclick="delCompliance('${esc(it.id)}')" title="מחיקה">מחק</button>` : '';
+            return `<tr><td>${esc(it.item)}</td><td>${fmtDate(it.expires)}</td><td>${days}</td><td>${status}</td><td>${doc}</td><td>${del}</td></tr>`;
           }).join('');
           block += '</tbody></table>';
           return block;
@@ -364,60 +278,35 @@
         if (cmp.skipped) html += `<p class="sub">${cmp.skipped} שורות אמות מידה לא תקינות דולגו (בדוק id/פריט/תאריך תוקף/בית בגיליון Compliance).</p>`;
       }
 
-      // Exceptional events (אירועים חריגים) — computed server-side from the Events register. Open events
-      // worst-first per house, recurrence (same type+house ≥2 in 90 days), monthly trend, missing lessons.
-      // A house with no open events shows "אין אירועים" — a TRUE zero (the register is always available).
-      const evt = m.events;
-      html += '<h2>אירועים חריגים</h2>';
-      if (!evt || !evt.available) {
-        html += '<div class="unavail"><div class="t">אירועים חריגים — לא זמין</div><div class="r">אין נתוני אירועים</div></div>';
-      } else {
-        html += '<div class="grid" style="margin-bottom:10px">';
-        html += kpi(evt.openCount || 0, 'אירועים פתוחים', (evt.openCount ? 'amber' : 'ok'));
-        html += kpi((evt.recurrence || []).length, 'דפוסים חוזרים', ((evt.recurrence || []).length ? 'red' : 'ok'), (evt.recurrence || []).length > 0);
-        html += kpi(evt.missingLessonsCount || 0, 'ללא הפקת לקחים', (evt.missingLessonsCount ? 'amber' : 'ok'));
-        html += '</div>';
-
-        // Recurrence — the JD success metric (ירידה באירועים חוזרים).
-        if ((evt.recurrence || []).length) {
-          html += '<h3 style="margin:12px 0 6px">אירועים חוזרים (אותו סוג + בית, 90 יום)</h3><table><thead><tr><th>בית</th><th>סוג</th><th>מופעים</th></tr></thead><tbody>';
-          html += evt.recurrence.map((r) => `<tr><td>${esc(r.houseName || r.house)}</td><td>${esc(r.type)}</td><td><span class="pill red">${r.count}</span></td></tr>`).join('');
-          html += '</tbody></table>';
-        }
-
-        // Per-house open events, worst-first; a house with none → "אין אירועים" (true zero).
-        html += (evt.houses || []).map((h) => {
-          let block = `<h3 style="margin:14px 0 6px">${esc(h.house)}${h.openCount ? ` <span class="pill amber">${h.openCount} פתוחים</span>` : ''}</h3>`;
-          if (!h.hasEvents) { block += '<div class="kpi"><div class="n na">אין אירועים</div></div>'; return block; }
-          block += '<table><thead><tr><th>תאריך</th><th>סוג</th><th>חומרה</th><th>סטטוס</th><th>תיאור</th><th>לקחים</th></tr></thead><tbody>';
-          block += h.events.map((e) => {
-            const sev = e.severity === 'גבוה' ? 'red' : (e.severity === 'בינוני' ? 'amber' : 'ok');
-            const lessons = e.missingLessons ? '<span class="pill amber">חסר</span>' : '✓';
-            return `<tr><td>${fmtDate(e.occurred)}</td><td>${esc(e.type)}</td><td><span class="pill ${sev}">${esc(e.severity || '—')}</span></td><td>${esc(e.status)}</td><td>${esc(e.description)}</td><td>${lessons}</td></tr>`;
-          }).join('');
-          block += '</tbody></table>';
-          return block;
-        }).join('');
-
-        // Monthly trend (last 6 months).
-        if ((evt.trend || []).length) {
-          html += '<h3 style="margin:14px 0 6px">מגמה חודשית (6 חודשים)</h3><table><thead><tr><th>חודש</th><th>אירועים</th></tr></thead><tbody>';
-          html += evt.trend.map((t) => `<tr><td>${esc(t.month)}</td><td>${t.count}</td></tr>`).join('');
-          html += '</tbody></table>';
-        }
-        if (evt.skipped) html += `<p class="sub">${evt.skipped} שורות אירועים לא תקינות דולגו (בדוק id/בית/תאריך בגיליון Events).</p>`;
-      }
-
-      html += '<h2>מדדים ללא מקור נתונים (לא מוצגים כאפס)</h2>';
-      html += UNAVAILABLE.map(([t, r]) => `<div class="unavail" style="margin-bottom:8px"><div class="t">${esc(t)} — לא זמין</div><div class="r">${esc(r)}</div></div>`).join('');
-
       document.getElementById('out').innerHTML = html;
     }
 
+    // ---- writes (manager-only actions; server re-verifies) ----
+    async function post(action, payload) {
+      const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, token: window.__STAFF_TOKEN__ || '', payload }) });
+      return res.json();
+    }
+    async function writeThenReload(action, payload) {
+      try { const j = await post(action, payload); if (!j || !j.ok) { alert((j && j.error) || 'שגיאה'); return; } load(_period); }
+      catch (e) { alert('שגיאת רשת'); }
+    }
+    window.toggleReadiness = (board, id, done) => writeThenReload('updateReadinessItem', { board, id, done });
+    window.delReadiness = (board, id) => { if (confirm('למחוק את הפריט?')) writeThenReload('deleteReadinessItem', { board, id }); };
+    window.addReadiness = (board, house) => {
+      const el = document.getElementById('add-' + board + '-' + house);
+      const item = (el && el.value || '').trim();
+      if (!item) return;
+      writeThenReload('addReadinessItem', { board, house, item });
+    };
+    window.delCompliance = (id) => { if (confirm('למחוק את אמת המידה? הפעולה תתועד ביומן הביקורת.')) writeThenReload('deleteCompliance', { id }); };
+
     // Month selector re-requests the same screen for the chosen budget month (server recomputes).
+    let _period = null;
     window.loadMonth = (period) => load(period);
 
     async function load(period) {
+      _period = period || null;
       try {
         const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: period ? { period } : {} }) });
