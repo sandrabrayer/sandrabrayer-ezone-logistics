@@ -1,10 +1,10 @@
 // access.js — role-based page + data-action visibility (owner's required model, increment 38).
 //
-// Owner's model:
-//   coordinator  → ONLY the new-request form (/) + their own house's request status (shown ON /), plus
+// Owner's model (entry-flow redesign):
+//   coordinator  → the PUBLIC request form (/request), their own house's request status (/status), plus
 //                  event ENTRY (/events). No dashboard / inventory / reports / בקרה / משימות / management.
-//   maintenance  → unchanged from before this increment (the tier-B pages it already had).
-//   field_ops    → everything EXCEPT /management.
+//   maintenance  → the tier-B pages it already had (request form + dashboard/workorders/inventory/…).
+//   field_ops    → everything EXCEPT /management (and /status, which is coordinator-only).
 //   ops_manager  → everything, including /management.
 //   ceo          → everything, including /management.
 //
@@ -54,27 +54,31 @@ function canRead(role, action) {
 
 // ---- Pages / nav (Node-only: the shim renders these and redirects) ----
 // The full ordered link set; each role gets a subset. Labels are the canonical Hebrew nav labels.
+// Entry-flow redesign: the request form is now the PUBLIC page '/request' (no login), so the in-app
+// "דרישה חדשה" link points there. '/status' is a coordinator's own-house request status (their
+// authenticated home, kept so a coordinator who logs in still sees status) — coordinator-only.
 const NAV_ALL = [
-  { href: '/', label: 'דרישה חדשה' },
+  { href: '/request', label: 'דרישה חדשה' },
   { href: '/dashboard', label: 'דשבורד' },
   { href: '/workorders', label: 'משימות' },
   { href: '/inventory', label: 'מלאי' },
   { href: '/inspection', label: 'בקרה' },
   { href: '/reports', label: 'דוחות' },
+  { href: '/status', label: 'הדרישות שלי' },
   { href: '/events', label: 'אירועים חריגים' },
   { href: '/management', label: 'ניהול תפעולי רשת' },
 ];
 const NAV_HREFS_BY_ROLE = {
-  coordinator: ['/', '/events'],
-  maintenance: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  field_ops: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events'],
-  ops_manager: NAV_ALL.map((l) => l.href),
-  ceo: NAV_ALL.map((l) => l.href),
+  coordinator: ['/request', '/status', '/events'],
+  maintenance: ['/request', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
+  field_ops: ['/request', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events'],
+  ops_manager: ['/request', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events', '/management'],
+  ceo: ['/request', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events', '/management'],
 };
 
 // Ordered [{href,label}] a role may open. Unknown/blank role → just the request form (fail closed).
 function navLinksFor(role) {
-  const hrefs = NAV_HREFS_BY_ROLE[role] || ['/'];
+  const hrefs = NAV_HREFS_BY_ROLE[role] || ['/request'];
   return NAV_ALL.filter((l) => hrefs.indexOf(l.href) !== -1);
 }
 
@@ -96,7 +100,7 @@ function canonicalPath(path) {
 
 // May this role open this page? Unknown page → false (fail closed).
 function canOpenPage(role, path) {
-  const hrefs = NAV_HREFS_BY_ROLE[role] || ['/'];
+  const hrefs = NAV_HREFS_BY_ROLE[role] || ['/request'];
   return hrefs.indexOf(canonicalPath(path)) !== -1;
 }
 

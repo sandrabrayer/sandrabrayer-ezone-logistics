@@ -130,6 +130,16 @@ function rosterProof_() {
   return secret ? hmacHex_(secret, 'roster:users') : '';
 }
 
+// Proof the Node gateway presents to drive the PUBLIC (no-login) request submit (entry-flow redesign).
+// Mirrors src/auth.js submitProof: HMAC(SESSION_SECRET, 'submit:request'). The request form is reachable
+// without a session token, but the /exec endpoint is world-callable — so createRequestPublic is accepted
+// ONLY when this server-to-server proof matches, i.e. only from the Node gateway (which holds the shared
+// secret). '' when the secret is unset → every public submit is rejected (fail-closed).
+function submitProof_() {
+  var secret = getSessionSecret_();
+  return secret ? hmacHex_(secret, 'submit:request') : '';
+}
+
 // The Users roster for a doGet('users') read. pin_hash is returned ONLY to a caller presenting the
 // server-to-server proof (Node login). Every other caller — including anyone who has the world-
 // callable /exec URL — gets pin_hash STRIPPED, so password hashes never leak off the sheet.
@@ -552,6 +562,24 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
+  // PUBLIC request submit (entry-flow redesign) — the ONE write that does NOT carry a session token,
+  // because the request form is reachable without a login. It is instead gated by a server-to-server
+  // proof (submitProof_) so ONLY the Node gateway can invoke it, and it is validated STRICTLY here
+  // (independently of Node). Handled BEFORE the token check and returns immediately, so no tokenless
+  // caller can ever reach dispatchAction_/any other write. Every OTHER action still requires a token.
+  if (body && body.action === 'createRequestPublic') {
+    var expectedSubmit = submitProof_();
+    if (!expectedSubmit || !constantTimeEq_(String(body.proof || ''), expectedSubmit)) {
+      return jsonOut_({ ok: false, error: 'Unauthorized' });
+    }
+    try {
+      return handleCreateRequestPublic_(body.payload || {});
+    } catch (err) {
+      Logger.log('doPost createRequestPublic error: ' + (err && err.stack ? err.stack : err));
+      return jsonOut_({ ok: false, error: 'Server error' });
+    }
+  }
+
   // Fail-closed identity auth: EVERY write must carry a valid HMAC session token, verified here
   // against the SESSION_SECRET Script Property. The actor (name + role) comes from the token only.
   var actor = verifyToken_(getSessionSecret_(), (body && body.token) || '');
@@ -619,6 +647,52 @@ function handleCreateRequest_(input, actor) {
   appendRequest(row);
   rebuildDigest();
   return jsonOut_({ ok: true, id: row.id });
+}
+
+// PUBLIC (no-login) request create. Validated STRICTLY and independently of the Node gateway: the
+// submitter is untrusted (no session identity), so created_by is accepted only as a non-empty label,
+// house MUST be a real house, category/urgency MUST be in the controlled vocabularies, and the free-text
+// fields are length-capped. No status transitions, no scope powers — it only ever appends a fresh
+// 'דרישה'. estimated_cost is never taken from the public form (always blank). Mirrors the trusted
+// createRequest's row shape + SLA derivation so a public request behaves identically downstream.
+function handleCreateRequestPublic_(input) {
+  var err = validatePublicRequest_(input);
+  if (err) return jsonOut_({ ok: false, error: err });
+  var clean = {
+    created_by: String(input.created_by).replace(/^\s+|\s+$/g, '').slice(0, 40),
+    house: String(input.house).replace(/^\s+|\s+$/g, ''),
+    category: input.category,
+    urgency: input.urgency,
+    description: String(input.description == null ? '' : input.description).slice(0, 2000),
+    location_in_house: String(input.location_in_house == null ? '' : input.location_in_house).slice(0, 200),
+    estimated_cost: '', // never trusted from a public submit
+  };
+  var row = buildNewRequest_(clean);
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
+  row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  appendRequest(row);
+  rebuildDigest();
+  return jsonOut_({ ok: true, id: row.id });
+}
+
+// Strict validator for a PUBLIC request. Unlike validateNewRequest_ (whose created_by is the trusted
+// token identity), here created_by is untrusted and house must be a KNOWN house — a public caller can
+// never file against an arbitrary/spoofed house.
+function validatePublicRequest_(p) {
+  if (!p || typeof p !== 'object') return 'Missing payload';
+  var by = (p.created_by == null ? '' : String(p.created_by)).replace(/^\s+|\s+$/g, '');
+  if (!by) return 'Missing created_by';
+  if (VALID_CATEGORIES.indexOf(p.category) === -1) return 'Invalid or missing category';
+  if (VALID_URGENCIES.indexOf(p.urgency) === -1) return 'Invalid or missing urgency';
+  var house = (p.house == null ? '' : String(p.house)).replace(/^\s+|\s+$/g, '');
+  if (!house) return 'Missing house';
+  var houses = getHouses();
+  var known = false;
+  for (var i = 0; i < houses.length; i++) {
+    if (String(houses[i].name).replace(/^\s+|\s+$/g, '') === house) { known = true; break; }
+  }
+  if (!known) return 'Unknown house';
+  return null;
 }
 
 function validateNewRequest_(p) {

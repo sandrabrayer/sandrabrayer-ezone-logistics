@@ -45,7 +45,7 @@ function runShim(role, pathname) {
 
 // Each role is tested on a page IT MAY OPEN (else the shim redirects and renders no nav).
 test('every reporting role (coordinator, field_ops, ops_manager, ceo) sees the "אירועים חריגים" nav link', () => {
-  const onPage = { coordinator: '/', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
+  const onPage = { coordinator: '/status', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
   for (const role of ['coordinator', 'field_ops', 'ops_manager', 'ceo']) {
     const link = runShim(role, onPage[role]);
     assert.ok(link, `${role} must see the /events nav link`);
@@ -85,18 +85,18 @@ function runShimCapturingRedirect(role, pathname) {
   return { replacedTo, navChildren: nav.children.length };
 }
 
-test('coordinator on a disallowed page (/dashboard) is redirected to / and no nav is rendered', () => {
+test('coordinator on a disallowed page (/dashboard) is redirected to their home (/status) and no nav is rendered', () => {
   const { replacedTo, navChildren } = runShimCapturingRedirect('coordinator', '/dashboard');
-  assert.equal(replacedTo, '/');
+  assert.equal(replacedTo, '/status');
   assert.equal(navChildren, 0);
 });
 
-test('field_ops on /management is redirected to / (management is exec-only)', () => {
+test('field_ops on /management is redirected to their home (/dashboard) (management is exec-only)', () => {
   const { replacedTo } = runShimCapturingRedirect('field_ops', '/management');
-  assert.equal(replacedTo, '/');
+  assert.equal(replacedTo, '/dashboard');
 });
 
-test('an allowed page is NOT redirected (coordinator on /)', () => {
-  const { replacedTo } = runShimCapturingRedirect('coordinator', '/');
+test('an allowed page is NOT redirected (coordinator on /status)', () => {
+  const { replacedTo } = runShimCapturingRedirect('coordinator', '/status');
   assert.equal(replacedTo, null);
 });

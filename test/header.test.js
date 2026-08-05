@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, '..', 'src');
 
 // Every user-facing page carries the shared topbar.
-const PAGES = ['index.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html', 'inventory.html'];
+const PAGES = ['landing.html', 'request.html', 'login.html', 'status.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html', 'inventory.html'];
 
 for (const page of PAGES) {
   const html = readFileSync(join(srcDir, page), 'utf8');

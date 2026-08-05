@@ -1,13 +1,10 @@
-// test/login-page.test.js — the LOGIN PAGE submit path, end-to-end, for every role. Renders the ACTUAL
-// served '/' (the injected auth shim + index.html's own inline scripts) in one DOM sandbox with
-// real-browser timing (shim runs while document.body is null, as it does in <head>), triggers the login
-// overlay via the page's first /api/exec fetch, then clicks כניסה and asserts login completes.
-//
-// Regression guard: after the role-based nav rewrite (shim: nav rebuild + redirect replacing the old
-// per-feature mounters), a broken shim could leave the login page dead — the overlay never binds, or the
-// redirect logic fires on the login page. This proves, for coordinator/maintenance/field_ops/ops_manager/
-// ceo, that the overlay appears, the click posts /api/login, the session is saved, the overlay closes,
-// and NO redirect fires while logging in on '/'.
+// test/login-page.test.js — the dedicated managers-login page (/login, the "כניסת מנהלים" path) end-to-end,
+// for every role. The server injects __FORCE_LOGIN__ (auto-open the overlay) + __LOGIN_NAMES__ (the LIVE,
+// normalized active roster as the dropdown) into the auth shim on this route; on success the shim sends the
+// user to their authenticated home (dashboard for managers, /status for a coordinator). This renders the
+// ACTUAL injected shim in a DOM sandbox with real-browser timing (shim runs while document.body is null,
+// as it does in <head>) and proves: the overlay auto-appears, the dropdown is the injected roster, כניסה
+// posts /api/login, the session is saved, the overlay closes, and the user is redirected to their home.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -17,9 +14,14 @@ import { dirname, join } from 'node:path';
 import { _CLIENT_SHIM } from '../src/server.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const HTML = readFileSync(join(root, 'src/index.html'), 'utf8');
-// index.html's own inline <script> blocks (run after the shim, at end of <body>).
+const HTML = readFileSync(join(root, 'src/login.html'), 'utf8');
+// login.html's own inline <script> blocks (run after the shim, at end of <body>).
 const PAGE_SCRIPTS = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+
+// The live active roster the server injects into /login (window.__LOGIN_NAMES__). All 9 seeded users.
+const ROSTER = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי', 'שירה', 'יעקב', 'אורן', 'אביב'];
+
+const HOME_BY_ROLE = { coordinator: '/status', maintenance: '/dashboard', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
 
 function makeEl(tag) {
   const attrs = {}, listeners = {};
@@ -41,22 +43,21 @@ function makeEl(tag) {
   return node;
 }
 
-function loadLoginPage(role, pathname) {
+// Render /login for `role`: shim (with __FORCE_LOGIN__ + __LOGIN_NAMES__ injected) + login.html's scripts.
+// `seedSession` seeds a persisted session (to prove an already-logged-in visitor skips straight to home).
+function loadLoginPage(role, seedSession) {
   const calls = [], store = {};
-  const ids = {};
-  for (const id of ['created_by', 'house', 'submitBtn', 'msg', 'myStatus', 'myStatusBody', 'location_in_house', 'description']) {
-    ids[id] = makeEl(id === 'submitBtn' ? 'button' : 'div'); ids[id].id = id;
-  }
+  if (seedSession) store.ezone_session = JSON.stringify(seedSession);
   const nav = makeEl('nav');
   let body = null; // real browser: null while <head> scripts run
   const domL = {};
   const document = {
-    get body() { return body; }, createElement: makeEl, getElementById: (id) => ids[id] || null,
+    get body() { return body; }, createElement: makeEl, getElementById: () => null,
     querySelector: (sel) => (sel === '.nav' ? nav : null), querySelectorAll: () => [],
     addEventListener: (ev, fn) => { (domL[ev] = domL[ev] || []).push(fn); },
   };
   let replacedTo = null;
-  const location = { pathname: pathname || '/', href: pathname || '/', reload() {}, replace(u) { replacedTo = u; } };
+  const location = { pathname: '/login', href: '/login', reload() {}, replace(u) { replacedTo = u; } };
   const realFetch = (input) => {
     const u = typeof input === 'string' ? input : (input && input.url) || '';
     calls.push(u);
@@ -64,7 +65,7 @@ function loadLoginPage(role, pathname) {
     if (u.indexOf('/api/data') === 0) return Promise.resolve({ status: 200, json: () => Promise.resolve({ ok: true, data: [] }) });
     return Promise.resolve({ status: 404, json: () => Promise.resolve({ ok: false }) });
   };
-  const windowObj = { fetch: realFetch, addEventListener: (ev, fn) => { (domL[ev] = domL[ev] || []).push(fn); } };
+  const windowObj = { fetch: realFetch, __FORCE_LOGIN__: true, __LOGIN_NAMES__: ROSTER.slice(), addEventListener: (ev, fn) => { (domL[ev] = domL[ev] || []).push(fn); } };
   const sandbox = {
     window: windowObj, document, navigator: {}, get fetch() { return windowObj.fetch; },
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
@@ -79,30 +80,39 @@ function loadLoginPage(role, pathname) {
   return { sandbox, get body() { return body; }, nav, calls, store, get replacedTo() { return replacedTo; } };
 }
 
-async function flush(n) { for (let i = 0; i < (n || 8); i++) await Promise.resolve(); }
+async function flush(n) { for (let i = 0; i < (n || 12); i++) await Promise.resolve(); }
 
 for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo']) {
-  test(`login page submit works end-to-end for ${role}`, async () => {
-    const ctx = loadLoginPage(role, '/');
+  test(`/login submit works end-to-end for ${role} and redirects to their home`, async () => {
+    const ctx = loadLoginPage(role);
     await flush();
     const btn = ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה');
-    assert.ok(btn, `${role}: the כניסה login overlay must appear`);
+    assert.ok(btn, `${role}: the כניסה login overlay must auto-appear on /login`);
+    // The dropdown is the injected LIVE roster (data-driven), not a partial/hardcoded list.
+    const sel = ctx.body._find((c) => c.tagName === 'select');
+    assert.ok(sel, `${role}: the roster dropdown must render`);
+    assert.deepEqual(sel.children.map((o) => o.value), ROSTER, `${role}: dropdown must list the full active roster`);
     btn.click();
     await flush();
     assert.ok(ctx.calls.some((u) => u.indexOf('/api/login') === 0), `${role}: clicking כניסה must POST /api/login`);
     assert.ok('ezone_session' in ctx.store, `${role}: a session must be saved on success`);
     assert.ok(!ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה'), `${role}: the overlay must close`);
-    assert.equal(ctx.replacedTo, null, `${role}: logging in on / must NOT redirect`);
+    assert.equal(ctx.replacedTo, HOME_BY_ROLE[role], `${role}: must be sent to their authenticated home`);
   });
 }
 
-test('the nav redirect never fires on a logged-out view (login page is never bounced)', async () => {
-  // On a page a role could not open, a LOGGED-OUT visitor (no session) must still get the login overlay,
-  // not a redirect — the redirect only applies to an authenticated known role.
-  const ctx = loadLoginPage('coordinator', '/dashboard');
+test('/login with an EXISTING valid session skips the overlay and goes straight home', async () => {
+  const seed = { token: 'T', role: 'ceo', scope: '', exp: Date.now() + 30 * 864e5 };
+  const ctx = loadLoginPage('ceo', seed);
   await flush();
-  // No session yet → shim must not have redirected; the login overlay must be present.
-  assert.equal(ctx.replacedTo, null, 'a logged-out visitor is never redirected (overlay owns the screen)');
+  assert.ok(!ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה'), 'no overlay when already logged in');
+  assert.equal(ctx.replacedTo, '/dashboard', 'an already-authenticated visitor is sent straight to their home');
+});
+
+test('a logged-out visitor on /login is never redirected — the overlay owns the screen', async () => {
+  const ctx = loadLoginPage('field_ops');
+  await flush();
   const btn = ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה');
-  assert.ok(btn, 'the login overlay appears even on a restricted page when logged out');
+  assert.ok(btn, 'the login overlay appears for a logged-out visitor');
+  assert.equal(ctx.replacedTo, null, 'no redirect before a successful login');
 });

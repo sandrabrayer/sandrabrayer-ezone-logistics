@@ -153,196 +153,36 @@
 </head>
 <body>
   <div class="topbar">
-    <nav class="nav"><a href="/" class="active">דרישה חדשה</a><a href="/dashboard">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <nav class="nav"></nav>
     <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span class="brand-name">לוגיסטיקה</span></div>
   </div>
   <div class="wrap">
     <header>
-      <h1>דרישה חדשה</h1>
-      <p>מילוי בקשה לרכישה, תיקון או החלפה</p>
+      <h1>הדרישות שלי</h1>
+      <p>סטטוס הדרישות של הבית שלך</p>
     </header>
-
-    <div class="card">
-      <div class="field">
-        <label for="created_by">מגיש הבקשה</label>
-        <select id="created_by" required>
-          <option value="" disabled selected>בחר/י…</option>
-          <option value="שירה">שירה (קיסריה עפרוני)</option>
-          <option value="יעקב">יעקב (קיסריה ריהאב)</option>
-          <option value="אורן">אורן (רעננה אשר)</option>
-          <option value="אביב">אביב (רמות השבים)</option>
-          <option value="צחי">צחי (צפון)</option>
-          <option value="רועי">רועי</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="house">בית</label>
-        <select id="house" required>
-          <option value="" disabled selected class="loading">טוען בתים…</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>קטגוריה</label>
-        <div class="seg" id="category">
-          <label><input type="radio" name="category" value="רכישה" /><span>רכישה</span></label>
-          <label><input type="radio" name="category" value="תיקון" /><span>תיקון</span></label>
-          <label><input type="radio" name="category" value="החלפה" /><span>החלפה</span></label>
-        </div>
-      </div>
-
-      <div class="field">
-        <label>דחיפות</label>
-        <div class="seg" id="urgency">
-          <label><input type="radio" name="urgency" value="רגיל" checked /><span>רגיל</span></label>
-          <label><input type="radio" name="urgency" value="דחוף" /><span>דחוף</span></label>
-          <label><input type="radio" name="urgency" value="חירום" /><span>חירום</span></label>
-        </div>
-        <div class="hint">חירום עוקף אישור ומבוצע מיידית.</div>
-      </div>
-
-      <div class="field">
-        <label for="description">תיאור</label>
-        <textarea id="description" placeholder="מה צריך לרכוש / לתקן / להחליף?"></textarea>
-      </div>
-
-      <div class="field">
-        <label for="location_in_house">מיקום בבית <span class="opt">(לא חובה)</span></label>
-        <input id="location_in_house" type="text" placeholder="למשל: מטבח, חדר 4, גינה" />
-      </div>
-
-      <button class="submit" id="submitBtn">שליחת דרישה</button>
-      <div class="msg" id="msg"></div>
-    </div>
-
-    <!-- Coordinator-only: their own house's request status. Populated by loadMyStatus() when the session
-         role is coordinator (the server scope-filters the requests read to their house). Hidden for
-         everyone else, who reach status via /workorders (משימות). -->
-    <section id="myStatus" style="display:none;margin-top:22px">
-      <h2 style="font-size:1.1rem;margin:0 0 10px">סטטוס הדרישות שלי</h2>
-      <div id="myStatusBody" class="card"><p class="empty">טוען…</p></div>
-    </section>
+    <div id="myStatusBody" class="card"><p class="loading">טוען…</p></div>
   </div>
 
   <script>
-    // The /exec URL is injected at serve time by the Node frontend from .env (never hardcoded
-    // here, never committed). For local static testing, the server replaces __EXEC_URL__.
-    const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
-
-    const houseSelect = document.getElementById('house');
-    const msg = document.getElementById('msg');
-    const btn = document.getElementById('submitBtn');
-
-    // Populate houses from the live feed confirmed in increment 1.
-    async function loadHouses() {
-      try {
-        const res = await fetch(EXEC_URL + '?action=houses');
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'load failed');
-        houseSelect.innerHTML = '<option value="" disabled selected>בחר/י בית…</option>';
-        json.data.forEach(h => {
-          const o = document.createElement('option');
-          o.value = h.name; o.textContent = h.name;
-          houseSelect.appendChild(o);
-        });
-      } catch (e) {
-        houseSelect.innerHTML = '<option value="" disabled selected>שגיאה בטעינת בתים</option>';
-        showMsg('err', 'לא ניתן לטעון את רשימת הבתים. רענן/י ונסה/י שוב.');
-      }
-    }
-
-    // Each coordinator handles one house → auto-fill + lock. צחי (north) and רועי file anywhere.
-    const COORDINATOR_HOUSE = {
-      'שירה': 'קיסריה עפרוני',
-      'יעקב': 'קיסריה ריהאב',
-      'אורן': 'רעננה אשר',
-      'אביב': 'רמות השבים',
-    };
-    function onSubmitterChange() {
-      const who = document.getElementById('created_by').value;
-      const house = COORDINATOR_HOUSE[who];
-      if (house) {
-        houseSelect.value = house;
-        houseSelect.disabled = true;   // locked to their house
-      } else {
-        houseSelect.disabled = false;  // צחי / רועי choose freely
-      }
-    }
-
-    function showMsg(kind, text) {
-      msg.className = 'msg ' + kind;
-      msg.textContent = text;
-    }
-
-    function checked(name) {
-      const el = document.querySelector('input[name="' + name + '"]:checked');
-      return el ? el.value : '';
-    }
-
-    async function submit() {
-      const payload = {
-        created_by: document.getElementById('created_by').value,
-        house: houseSelect.value,
-        category: checked('category'),
-        urgency: checked('urgency'),
-        description: document.getElementById('description').value.trim(),
-        location_in_house: document.getElementById('location_in_house').value.trim(),
-      };
-
-      // Client-side mirror of server validation (server is the source of truth).
-      if (!payload.created_by) return showMsg('err', 'יש לבחור מגיש בקשה.');
-      if (!payload.house) return showMsg('err', 'יש לבחור בית.');
-      if (!payload.category) return showMsg('err', 'יש לבחור קטגוריה.');
-      if (!payload.urgency) return showMsg('err', 'יש לבחור דחיפות.');
-
-      btn.disabled = true; btn.textContent = 'שולח…';
-      try {
-        const res = await fetch(EXEC_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight to Apps Script
-          body: JSON.stringify({ action: 'createRequest', payload }),
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'שגיאה');
-        showMsg('ok', 'הדרישה נשלחה בהצלחה. מספר בקשה: ' + json.id);
-        resetForm();
-      } catch (e) {
-        showMsg('err', 'השליחה נכשלה: ' + e.message);
-      } finally {
-        btn.disabled = false; btn.textContent = 'שליחת דרישה';
-      }
-    }
-
-    function resetForm() {
-      document.getElementById('created_by').selectedIndex = 0;
-      houseSelect.disabled = false;
-      houseSelect.selectedIndex = 0;
-      document.querySelectorAll('input[name="category"]').forEach(r => r.checked = false);
-      document.querySelector('input[name="urgency"][value="רגיל"]').checked = true;
-      document.getElementById('description').value = '';
-      document.getElementById('location_in_house').value = '';
-    }
-
-    // Coordinator's own-house request status, shown ONLY on this page (their only landing page). The
-    // server scope-filters the `requests` read to their house; other roles reach status via /workorders.
+    // Authenticated status page (auth shim injected in <head>). Data goes through the shimmed sentinel
+    // (window.__EXEC_URL__ → Bearer-gated /api/data), and the server scope-filters the requests read to the
+    // session's house — so a coordinator sees only their own house's requests.
+    const EXEC_URL = window.__EXEC_URL__ || '/api/exec';
     const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     async function loadMyStatus() {
-      if (String(window.__ROLE__ || '') !== 'coordinator') return; // only the coordinator model
-      const sec = document.getElementById('myStatus');
       const body = document.getElementById('myStatusBody');
-      sec.style.display = '';
       try {
         const res = await fetch(EXEC_URL + '?action=requests');
-        if (res.status === 403) { body.innerHTML = '<p class="empty">אין הרשאה לצפייה בסטטוס.</p>'; return; }
+        if (res.status === 403) { body.innerHTML = '<p class="loading">אין הרשאה לצפייה בסטטוס.</p>'; return; }
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'load failed');
         const rows = (json.data || []).slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-        if (!rows.length) { body.innerHTML = '<p class="empty">אין דרישות פתוחות לבית שלך.</p>'; return; }
+        if (!rows.length) { body.innerHTML = '<p class="loading">אין דרישות פתוחות לבית שלך.</p>'; return; }
         let html = '<table style="width:100%;border-collapse:collapse;font-size:.92rem"><thead><tr>'
           + '<th style="text-align:right;padding:6px">תיאור</th><th style="text-align:right;padding:6px">דחיפות</th>'
           + '<th style="text-align:right;padding:6px">סטטוס</th><th style="text-align:right;padding:6px">נפתחה</th></tr></thead><tbody>';
-        html += rows.slice(0, 30).map((r) => '<tr>'
+        html += rows.slice(0, 50).map((r) => '<tr>'
           + '<td style="padding:6px">' + escHtml(r.description || r.id) + '</td>'
           + '<td style="padding:6px">' + escHtml(r.urgency || '') + '</td>'
           + '<td style="padding:6px">' + escHtml(r.status || '') + '</td>'
@@ -350,24 +190,14 @@
         html += '</tbody></table>';
         body.innerHTML = html;
       } catch (e) {
-        body.innerHTML = '<p class="empty">לא ניתן לטעון סטטוס. רענן/י ונסה/י שוב.</p>';
+        body.innerHTML = '<p class="loading">לא ניתן לטעון סטטוס. רענן/י ונסה/י שוב.</p>';
       }
     }
-
-    document.getElementById('created_by').addEventListener('change', onSubmitterChange);
-    btn.addEventListener('click', submit);
-    // loadHouses() triggers the login flow on a fresh session; chaining ensures window.__ROLE__ is set
-    // (post-login) before loadMyStatus() decides whether to show the coordinator status section.
-    loadHouses().then(loadMyStatus);
+    loadMyStatus();
   </script>
   <script>
-    // PWA: register the service worker so the app is installable to the home
-    // screen and opens standalone. Guarded — a failed registration must never
-    // break the page.
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js').catch(function () {});
-      });
+      window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
     }
   </script>
 </body>

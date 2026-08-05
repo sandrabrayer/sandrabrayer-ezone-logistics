@@ -250,6 +250,24 @@
 
     function showMsg(kind, text) { msg.className = 'msg ' + kind; msg.textContent = text; setTimeout(() => { if (kind === 'ok') msg.className = 'msg'; }, 4000); }
     function who() { return document.getElementById('who').value; }
+
+    // Populate the "משתמש" picker from the LIVE roster (bug fix: it was hardcoded to a single name — רועי —
+    // so the dashboard user filter only ever showed one user). The server returns the shared, normalized,
+    // ACTIVE-only roster (users is read live, never cached/bundled); a non-manager gets 403 and we keep the
+    // default option. users is deliberately NOT part of the aggregated pageData read — it stays a live read.
+    async function fillWho() {
+      try {
+        const j = await fetch(EXEC_URL + '?action=users').then(r => r.json());
+        if (!j || !j.ok || !Array.isArray(j.data)) return;
+        const names = j.data.map(u => String(u.name == null ? '' : u.name).trim()).filter(Boolean);
+        if (!names.length) return;
+        const sel = document.getElementById('who');
+        const cur = sel.value;
+        sel.innerHTML = '';
+        names.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+        sel.value = names.indexOf(cur) !== -1 ? cur : names[0];
+      } catch (e) { /* keep the default hardcoded option */ }
+    }
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
@@ -278,6 +296,7 @@
         allHouses = d.houses || [];
         const sel = document.getElementById('filterHouse');
         allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+        fillWho();
         render();
       } catch (e) {
         board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';

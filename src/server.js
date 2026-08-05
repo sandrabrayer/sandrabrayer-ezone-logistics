@@ -15,9 +15,10 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
-import { signToken, verifyToken, checkPin, verifyPin, rosterProof } from './auth.js';
+import { signToken, verifyToken, checkPin, verifyPin, rosterProof, submitProof } from './auth.js';
 import { ROLE, isManagerRole, houseInScope, canManage } from './roles.js';
 import { canRead, canWriteAction, canOpenPage, navByRole } from './access.js';
+import { CATEGORY, URGENCY } from './schema.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +39,16 @@ const APP_PIN = process.env.APP_PIN || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS) || 0;
 
+// Cache-busting version stamped into the landing page's links to the two entry paths (?v=…). Railway
+// sets RAILWAY_GIT_COMMIT_SHA per deploy, so a redeploy changes the query and clients fetch the fresh
+// /request and /login pages instead of a stale cached copy. Falls back to a static tag locally.
+const ASSET_VERSION = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.ASSET_VERSION || 'entry-flow';
+
 const PUBLIC = join(__dirname, 'public');
+
+// Controlled vocabularies for the PUBLIC submit validation (mirror of Code.gs VALID_* and src/schema.js).
+const VALID_CATEGORIES = [CATEGORY.PURCHASE, CATEGORY.REPAIR, CATEGORY.REPLACEMENT];
+const VALID_URGENCIES = [URGENCY.NORMAL, URGENCY.URGENT, URGENCY.EMERGENCY];
 
 const HEAD_INJECT =
   '<link rel="manifest" href="/manifest.json">'
@@ -62,7 +72,22 @@ const CLIENT_SHIM = `<script>(function(){
   var TOKEN=null,authPromise=null,origFetch=window.fetch.bind(window);
   window.__EXEC_URL__='/api/exec'; window.__STAFF_TOKEN__='';
   try{sessionStorage.setItem('ezone_staff_token','1');}catch(e){}
-  var NAMES=${JSON.stringify(LOGIN_NAMES)};
+  // Login-page freeze fix: every network call on the auth path is bounded by a timeout. A hung
+  // /api/login (or a stalled data proxy) used to leave the כניסה button disabled and the overlay stuck
+  // forever — the page appeared frozen. AbortController turns a hang into a rejection, which the .catch
+  // below surfaces as 'שגיאת רשת' and re-enables the button so the user can retry. Guarded so a sandbox
+  // without AbortController simply skips the timeout (never throws).
+  var AUTH_TIMEOUT_MS=12000;
+  function timedFetch(url,init,ms){
+    var ctrl=(typeof AbortController!=='undefined')?new AbortController():null,to=null;
+    if(ctrl){init=Object.assign({},init,{signal:ctrl.signal});to=setTimeout(function(){try{ctrl.abort();}catch(e){}},ms||AUTH_TIMEOUT_MS);}
+    return origFetch(url,init).then(function(r){if(to)clearTimeout(to);return r;},function(e){if(to)clearTimeout(to);throw e;});
+  }
+  // Login dropdown roster is data-driven (bug fix): the /login page injects the LIVE active roster as
+  // window.__LOGIN_NAMES__ (single source of truth = the Users sheet, normalized server-side). The
+  // hardcoded fallback only applies to the in-app re-login overlay on a session-expiry, where a slightly
+  // stale name list is harmless (the server still verifies name+PIN against the live roster).
+  var NAMES=(window.__LOGIN_NAMES__&&window.__LOGIN_NAMES__.length)?window.__LOGIN_NAMES__:${JSON.stringify(LOGIN_NAMES)};
   // Role → ordered nav links the role may open (from src/access.js — single source of truth, no drift).
   // Display only; the server + Code.gs data gates are the authority.
   var NAV_BY_ROLE=${JSON.stringify(navByRole())};
@@ -113,15 +138,19 @@ const CLIENT_SHIM = `<script>(function(){
   // action). The static per-page .nav markup is replaced wholesale so every page shows exactly the
   // permitted set — no per-page edits, and a restricted role never briefly sees links it can't open.
   function norm(p){p=String(p||'/');var q=p.indexOf('?');if(q!==-1)p=p.slice(0,q);if(p==='/index.html'||p==='/index')return '/';p=p.replace(/\\.html$/,'');return p===''?'/':p;}
-  function navLinks(){var r=String(window.__ROLE__||'');return NAV_BY_ROLE[r]||[{href:'/',label:'דרישה חדשה'}];}
+  function navLinks(){var r=String(window.__ROLE__||'');return NAV_BY_ROLE[r]||[{href:'/request',label:'דרישה חדשה'}];}
   function allowedHere(){var here=norm(location.pathname);return navLinks().some(function(l){return l.href===here;});}
+  // The role's authenticated home: the first nav link that is an in-app (login-gated) page, skipping the
+  // PUBLIC request form ('/request'). Managers → '/dashboard'; a coordinator → '/status'. Used both to
+  // bounce an authenticated role off a page it may not open, and as the post-login redirect on '/login'.
+  function homeHref(){var ls=navLinks();for(var i=0;i<ls.length;i++){if(ls[i].href!=='/request')return ls[i].href;}return (ls[0]&&ls[0].href)||'/request';}
   function mountNav(){
     function m(){
       var role=String(window.__ROLE__||''),here=norm(location.pathname);
       // Only bounce a KNOWN, authenticated role off a page it may not open. NEVER redirect a logged-out
       // view (role==='' — the login overlay owns the screen) and never redirect the request form '/'
       // itself. This guarantees the redirect logic can never fire on, or interfere with, the login page.
-      if(role && here!=='/' && !allowedHere()){try{location.replace('/');}catch(e){}return;}
+      if(role && here!=='/' && here!=='/request' && !allowedHere()){try{location.replace(homeHref());}catch(e){}return;}
       var nav=document.querySelector('.nav'); if(!nav)return;
       nav.innerHTML='';
       navLinks().forEach(function(l){
@@ -148,7 +177,7 @@ const CLIENT_SHIM = `<script>(function(){
       document.body.appendChild(ov);pin.focus();
       function attempt(){
         err.textContent='';btn.disabled=true;
-        origFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sel.value,pin:pin.value})})
+        timedFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sel.value,pin:pin.value})},AUTH_TIMEOUT_MS)
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           btn.disabled=false;
@@ -171,8 +200,8 @@ const CLIENT_SHIM = `<script>(function(){
       var target;
       if(method==='POST'){target='/api/action';}
       else{var qs=url.indexOf('?')>=0?url.slice(url.indexOf('?')):'';target='/api/data'+qs;}
-      return origFetch(target,ni).then(function(r){
-        if(r.status===401){TOKEN=null;authPromise=null;clearSession();return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return origFetch(target,Object.assign({},init,{headers:headers}));});}
+      return timedFetch(target,ni,AUTH_TIMEOUT_MS).then(function(r){
+        if(r.status===401){TOKEN=null;authPromise=null;clearSession();return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return timedFetch(target,Object.assign({},init,{headers:headers}),AUTH_TIMEOUT_MS);});}
         return r;
       });
     });
@@ -182,6 +211,14 @@ const CLIENT_SHIM = `<script>(function(){
     if(url.indexOf('/api/exec')===0)return route(url,init||{});
     return origFetch(input,init);
   };
+  // Dedicated managers-login page (/login, the "כניסת מנהלים" path). __FORCE_LOGIN__ is injected only on
+  // that route: open the login overlay immediately (no data call needed to trigger it) and, on success,
+  // send the user to their authenticated home (dashboard for managers, status for a coordinator). If a
+  // valid session already exists, skip straight to the home. Everywhere else this block is inert.
+  if(window.__FORCE_LOGIN__){
+    if(_boot){try{location.replace(homeHref());}catch(e){}}
+    else{ensureAuth().then(function(){try{location.replace(homeHref());}catch(e){}});}
+  }
 })();</script>`;
 
 const PUBLIC_ASSETS = {
@@ -192,8 +229,10 @@ const PUBLIC_ASSETS = {
   '/icon-v1-maskable.png': { file: 'icon-v1-maskable.png', type: 'image/png' },
 };
 
+// APP pages — the auth shim is injected (login-gated app). A login-gated page never appears without the
+// shim (guarded by server-static.test.js). '/login' is the managers-login entry (shim + auto-open overlay);
+// '/status' is a coordinator's own-house request status (kept per the entry-flow split).
 const HTML_ROUTES = {
-  '/': 'index.html', '/index.html': 'index.html',
   '/dashboard': 'dashboard.html', '/dashboard.html': 'dashboard.html',
   '/inspection': 'inspection.html', '/inspection.html': 'inspection.html',
   '/inventory': 'inventory.html', '/inventory.html': 'inventory.html',
@@ -201,11 +240,27 @@ const HTML_ROUTES = {
   '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
   '/management': 'management.html', '/management.html': 'management.html',
   '/events': 'events.html', '/events.html': 'events.html',
+  '/status': 'status.html', '/status.html': 'status.html',
+  '/login': 'login.html', '/login.html': 'login.html',
+};
+
+// PUBLIC pages — NO auth shim, reachable without a login (entry-flow redesign). '/' is the landing that
+// offers both paths; '/request' is the request form. The form's data (house list + submitter roster) is
+// injected server-side so no unauthenticated READ endpoint is exposed — the only public write is /api/submit.
+const PUBLIC_HTML_ROUTES = {
+  '/': 'landing.html', '/index.html': 'landing.html',
+  '/request': 'request.html', '/request.html': 'request.html',
 };
 
 function notFound(res) {
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
+}
+
+// JSON for embedding inside an inline <script>. Escapes '<' so a value can never break out of the script
+// element (e.g. a sheet cell containing "</script>"). Used for the injected roster / house-list boot data.
+function safeJson(obj) {
+  return JSON.stringify(obj).replace(/</g, '\\u003c');
 }
 
 function sendJson(res, status, obj) {
@@ -243,6 +298,22 @@ function rateLimitLogin(ip) {
   return entry.count <= LOGIN_MAX;
 }
 
+// ---- public-submit rate limiter (in-memory, fail-closed): 20 submits / 15 min per IP ----
+// The request form is unauthenticated, so its submit is the one write anyone can reach. A per-IP cap
+// keeps it from being a spam/abuse vector while staying generous enough for a coordinator filing a batch
+// of real requests. Same window/shape as the login limiter.
+const submitAttempts = new Map();
+const SUBMIT_MAX = 20;
+
+function rateLimitSubmit(ip) {
+  const now = Date.now();
+  const entry = submitAttempts.get(ip) || { count: 0, resetAt: now + LOGIN_WINDOW_MS };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + LOGIN_WINDOW_MS; }
+  entry.count++;
+  submitAttempts.set(ip, entry);
+  return entry.count <= SUBMIT_MAX;
+}
+
 function clientIp(req) {
   // Behind Railway's proxy the socket address is the proxy for everyone, so honor the first
   // X-Forwarded-For hop when present; otherwise fall back to the socket address.
@@ -251,25 +322,64 @@ function clientIp(req) {
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 
+// Body read is BOUNDED in both size AND time. Without a time bound, a client that opens a POST and never
+// finishes sending the body (a stalled or slow-loris connection) leaves the handler's `await
+// readJsonBody(...)` pending forever — the request never gets a response. That server-side hang is the
+// other half of the login-freeze fix (the client-side timeout alone can't cover a request that reached
+// the server but stalled mid-body): after BODY_TIMEOUT_MS we resolve null and the caller returns a clean
+// 400, so /api/login and /api/submit always respond.
+const BODY_TIMEOUT_MS = Number(process.env.BODY_TIMEOUT_MS) || 15000;
 function readJsonBody(req, limitBytes) {
   return new Promise((resolve) => {
     let raw = '';
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; clearTimeout(timer); resolve(val); };
+    // On a stalled body, resolve null (→ the caller returns a clean 400/401) WITHOUT destroying the socket,
+    // so the error response can still be written back over the open connection instead of the client hanging.
+    const timer = setTimeout(() => finish(null), BODY_TIMEOUT_MS);
     let tooBig = false;
     req.on('data', (chunk) => {
       raw += chunk;
       if (raw.length > (limitBytes || 65536)) { tooBig = true; req.destroy(); }
     });
     req.on('end', () => {
-      if (tooBig) return resolve(null);
-      if (!raw) return resolve({});
-      try { resolve(JSON.parse(raw)); } catch (e) { resolve(null); }
+      if (tooBig) return finish(null);
+      if (!raw) return finish({});
+      try { finish(JSON.parse(raw)); } catch (e) { finish(null); }
     });
-    req.on('error', () => resolve(null));
+    req.on('error', () => finish(null));
   });
 }
 
 function isActive(u) {
   return u.active === true || u.active === 'TRUE' || u.active === 'true' || u.active === 1 || u.active === '1';
+}
+
+// ---- Shared users-read normalization (single source of truth for the roster) ----
+// Both symptoms of the "wrong users list" bug (dashboard filter showing one name; login dropdown showing
+// a partial/wrong roster and rejecting a valid user with "שם או קוד שגויים") trace to the roster being
+// re-derived, hardcoded, or matched inconsistently per screen. These helpers centralize it: names are
+// trimmed (a trailing space hand-typed into the Users sheet no longer breaks an exact-string login match)
+// and only ACTIVE users are surfaced. Every consumer — login verification, the injected login dropdown,
+// the request-form submitters, and the dashboard users read — goes through here, so all screens agree.
+
+// Trim-tolerant name equality (fixes: a valid user rejected because the sheet cell had a trailing space).
+function sameName(a, b) {
+  return String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
+}
+
+// Map a raw Users row to the public roster shape (name/role/house), trimmed; pin_hash never included.
+function normalizeUser(u) {
+  return { name: String(u.name == null ? '' : u.name).trim(), role: u.role || '', house: String(u.house == null ? '' : u.house).trim() };
+}
+
+// The ACTIVE roster, normalized and pin_hash-free. Live read (never cached) — same freshness guarantee as
+// login. Returns [] when the roster is unavailable (callers degrade gracefully). Used to inject the login
+// dropdown (/login) and the request-form submitter list (/request), so both are data-driven from the sheet.
+async function activeRoster() {
+  const users = await fetchAppsScriptData('users', { auth: rosterProof(SESSION_SECRET) });
+  if (!Array.isArray(users)) return [];
+  return users.filter(isActive).map(normalizeUser).filter((u) => u.name);
 }
 
 // Read a data action from Apps Script (server-to-server). Returns the `data` array, or null on any
@@ -423,7 +533,9 @@ async function handleLogin(req, res) {
   // this proof; public reads get them stripped).
   const users = await fetchAppsScriptData('users', { auth: rosterProof(SESSION_SECRET) });
   if (!users) { console.warn(`[login] roster unavailable for ${ip}`); return generic401(); }
-  const user = users.find((u) => String(u.name) === String(name) && isActive(u));
+  // Trim-tolerant match (bug fix): a trailing space in the Users sheet name cell used to make the exact
+  // string compare fail, rejecting a valid user with "שם או קוד שגויים". sameName trims both sides.
+  const user = users.find((u) => sameName(u.name, name) && isActive(u));
 
   let ok = false;
   if (user) {
@@ -502,9 +614,16 @@ async function handleData(req, res, url) {
   // Post-process per action for scope/secret hygiene.
   if (payload && payload.ok && Array.isArray(payload.data)) {
     if (action === 'users') {
-      // The roster is manager-only, and pin_hash is NEVER exposed to the browser.
+      // The roster is manager-only, and pin_hash is NEVER exposed to the browser. Returned as the SAME
+      // normalized, ACTIVE-ONLY, trimmed view the login dropdown uses (shared users-read path) — this is
+      // the fix for the dashboard users filter that showed only a single name.
       if (!manager) return sendJson(res, 403, { ok: false, error: 'forbidden' });
-      payload.data = payload.data.map((u) => { const c = Object.assign({}, u); delete c.pin_hash; return c; });
+      payload.data = payload.data.filter(isActive).map((u) => {
+        const c = Object.assign({}, u);
+        delete c.pin_hash;
+        c.name = String(c.name == null ? '' : c.name).trim();
+        return c;
+      });
     } else if (action === 'requests' && !manager) {
       // Managers (field_ops / ops_manager / ceo) never reach here — they get the unfiltered list above.
       // Tier B sees ONLY their in-scope houses. Any OTHER role is an invalid session for a scoped read:
@@ -568,12 +687,64 @@ async function handleAction(req, res) {
   }
 }
 
+// PUBLIC request submit (entry-flow redesign) — the ONLY unauthenticated write. No Bearer token: the
+// request form is reachable without a login. Defense in depth: (1) per-IP rate limit, (2) STRICT input
+// validation here (controlled category/urgency vocab + house must be a REAL house; created_by accepted as
+// a non-empty label; free-text length-capped), (3) forwarded to Code.gs as `createRequestPublic` with the
+// server-to-server submitProof so the world-callable /exec still can't be driven by anyone but this
+// gateway, and (4) Code.gs re-validates independently. It can ONLY append a fresh request — never any read
+// or other write. Every other Node write stays Bearer-gated.
+async function handleSubmit(req, res) {
+  const ip = clientIp(req);
+  if (!rateLimitSubmit(ip)) {
+    return sendJson(res, 429, { ok: false, error: 'יותר מדי בקשות. נסו שוב מאוחר יותר.' });
+  }
+  const body = await readJsonBody(req, 16384);
+  if (!body || typeof body !== 'object') return sendJson(res, 400, { ok: false, error: 'bad request' });
+  const p = (body.payload && typeof body.payload === 'object') ? body.payload : body;
+
+  const created_by = (typeof p.created_by === 'string') ? p.created_by.trim() : '';
+  const house = (typeof p.house === 'string') ? p.house.trim() : '';
+  const category = (typeof p.category === 'string') ? p.category : '';
+  const urgency = (typeof p.urgency === 'string') ? p.urgency : '';
+  const description = (typeof p.description === 'string') ? p.description.slice(0, 2000) : '';
+  const location_in_house = (typeof p.location_in_house === 'string') ? p.location_in_house.slice(0, 200) : '';
+
+  if (!created_by || created_by.length > 40) return sendJson(res, 400, { ok: false, error: 'יש לבחור מגיש בקשה.' });
+  if (VALID_CATEGORIES.indexOf(category) === -1) return sendJson(res, 400, { ok: false, error: 'יש לבחור קטגוריה.' });
+  if (VALID_URGENCIES.indexOf(urgency) === -1) return sendJson(res, 400, { ok: false, error: 'יש לבחור דחיפות.' });
+
+  // house must be a KNOWN house (never an arbitrary/spoofed value). Uses the stable Node micro-cache when
+  // warm, otherwise a live read; Code.gs enforces the same check independently.
+  const houses = nodeCacheGet('houses') || (await fetchAppsScriptData('houses')) || [];
+  if (!house || !houses.some((h) => String(h.name == null ? '' : h.name).trim() === house)) {
+    return sendJson(res, 400, { ok: false, error: 'יש לבחור בית.' });
+  }
+
+  const upstreamBody = JSON.stringify({
+    action: 'createRequestPublic',
+    payload: { created_by, house, category, urgency, description, location_in_house },
+    proof: submitProof(SESSION_SECRET),
+  });
+  try {
+    const upstream = await fetch(EXEC_URL, {
+      method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' }, body: upstreamBody,
+    });
+    const text = await upstream.text();
+    res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json', 'Cache-Control': 'no-store' });
+    res.end(text);
+  } catch (err) {
+    return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+  }
+}
+
 export async function requestHandler(req, res) {
   const url = new URL(req.url || '/', 'http://localhost');
   const path = url.pathname;
 
   // ---- API gateway (auth + data proxy) ----
   if (path === '/api/login' && req.method === 'POST') return handleLogin(req, res);
+  if (path === '/api/submit' && req.method === 'POST') return handleSubmit(req, res);
   if (path === '/api/data' && req.method === 'GET') return handleData(req, res, url);
   if (path === '/api/action' && req.method === 'POST') return handleAction(req, res);
   if (path === '/api/health') return sendJson(res, 200, { ok: true, ts: Date.now() });
@@ -616,12 +787,42 @@ export async function requestHandler(req, res) {
     return notFound(res);
   }
 
-  // HTML routes — inject the PWA head links. (No secret is injected: data goes through the
-  // Bearer-gated /api proxy, so the /exec URL never reaches the page source.)
-  const file = HTML_ROUTES[path];
-  if (file) {
-    let html = readFileSync(join(__dirname, file), 'utf8');
-    html = html.replace('</head>', HEAD_INJECT + CLIENT_SHIM + '</head>');
+  // APP (login-gated) HTML routes — inject the PWA head links + the auth shim. (No secret is injected:
+  // data goes through the Bearer-gated /api proxy, so the /exec URL never reaches the page source.) The
+  // login page additionally auto-opens the overlay and carries the LIVE, normalized active roster as its
+  // dropdown (data-driven, single source of truth).
+  const appFile = HTML_ROUTES[path];
+  if (appFile) {
+    let html;
+    try { html = readFileSync(join(__dirname, appFile), 'utf8'); } catch (e) { return notFound(res); }
+    let headExtra = HEAD_INJECT;
+    if (appFile === 'login.html') {
+      const names = (await activeRoster()).map((u) => u.name);
+      headExtra += `<script>window.__FORCE_LOGIN__=true;window.__LOGIN_NAMES__=${safeJson(names)};</script>`;
+    }
+    html = html.replace('</head>', headExtra + CLIENT_SHIM + '</head>');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    return res.end(html);
+  }
+
+  // PUBLIC HTML routes — NO auth shim. The landing links carry ?v=ASSET_VERSION (cache-busting). The
+  // request form gets its house list + submitter roster injected server-side (so the public page needs
+  // NO unauthenticated read endpoint — the only public write is /api/submit).
+  const pubFile = PUBLIC_HTML_ROUTES[path];
+  if (pubFile) {
+    let html;
+    try { html = readFileSync(join(__dirname, pubFile), 'utf8'); } catch (e) { return notFound(res); }
+    let headExtra = HEAD_INJECT;
+    if (pubFile === 'landing.html') {
+      html = html.replace(/__ASSET_V__/g, encodeURIComponent(ASSET_VERSION));
+    } else if (pubFile === 'request.html') {
+      let houses = nodeCacheGet('houses');
+      if (!houses) { houses = (await fetchAppsScriptData('houses')) || []; nodeCachePut('houses', houses); }
+      const houseNames = houses.map((h) => String(h.name == null ? '' : h.name).trim()).filter(Boolean);
+      const submitters = (await activeRoster()).map((u) => ({ name: u.name, house: u.house }));
+      headExtra += `<script>window.__PUBLIC_BOOT__=${safeJson({ houses: houseNames, submitters })};</script>`;
+    }
+    html = html.replace('</head>', headExtra + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
@@ -655,6 +856,8 @@ if (isMain) {
 }
 
 export { loginAttempts as _loginAttempts };
+// Exported so the submit tests can reset the per-IP public-submit rate limiter between cases.
+export { submitAttempts as _submitAttempts };
 // Exported so a guard test can enumerate EVERY served HTML route and assert each carries the auth
 // shim (a page missing it would re-prompt for login — the bug this guards against).
 export { HTML_ROUTES as _HTML_ROUTES };

@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, '..', 'src');
 
-const PAGES = ['index.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html', 'inventory.html'];
+const PAGES = ['landing.html', 'request.html', 'login.html', 'status.html', 'dashboard.html', 'inspection.html', 'reports.html', 'workorders.html', 'inventory.html'];
 
 for (const page of PAGES) {
   const html = readFileSync(join(srcDir, page), 'utf8');
@@ -34,14 +34,14 @@ for (const page of PAGES) {
   });
 }
 
-// Step 2 — intake form polish (index.html only).
-const indexHtml = readFileSync(join(srcDir, 'index.html'), 'utf8');
+// Step 2 — intake form polish (the request form, now the PUBLIC request.html).
+const requestHtml = readFileSync(join(srcDir, 'request.html'), 'utf8');
 
-test('index.html mobile: seg groups wrap gracefully on narrow screens', () => {
-  assert.match(indexHtml, /\.seg\s*\{\s*flex-wrap:\s*wrap/);
-  assert.match(indexHtml, /\.seg label\s*\{\s*min-width:\s*0/);
+test('request.html mobile: seg groups wrap gracefully on narrow screens', () => {
+  assert.match(requestHtml, /\.seg\s*\{\s*flex-wrap:\s*wrap/);
+  assert.match(requestHtml, /\.seg label\s*\{\s*min-width:\s*0/);
 });
 
-test('index.html mobile: submit button gets a ≥48px touch target', () => {
-  assert.match(indexHtml, /button\.submit\s*\{\s*min-height:\s*48px/);
+test('request.html mobile: submit button gets a ≥48px touch target', () => {
+  assert.match(requestHtml, /button\.submit\s*\{\s*min-height:\s*48px/);
 });

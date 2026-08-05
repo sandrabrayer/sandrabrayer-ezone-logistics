@@ -145,4 +145,18 @@ export function rosterProof(secret) {
   return hmacHex(secret, 'roster:users');
 }
 
+/**
+ * Server-to-server proof for the PUBLIC request submit (entry-flow redesign). The request form is
+ * reachable WITHOUT a login, so its submit has no session token — but the Apps Script /exec endpoint is
+ * world-callable, so an unauthenticated createRequestPublic must NOT be invokable by just anyone who has
+ * the /exec URL. The Node gateway (which shares SESSION_SECRET with Apps Script) presents this
+ * HMAC(SESSION_SECRET, 'submit:request') proof; Code.gs recomputes and compares it, so ONLY the Node
+ * gateway can drive the unauthenticated create. The raw secret never appears in a request body. Mirrors
+ * the rosterProof pattern. '' when the secret is unset (fail-closed: Code.gs then rejects every submit).
+ */
+export function submitProof(secret) {
+  if (!secret) return '';
+  return hmacHex(secret, 'submit:request');
+}
+
 export { DEFAULT_DAYS };

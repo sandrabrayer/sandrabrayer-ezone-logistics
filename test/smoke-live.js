@@ -5,11 +5,15 @@
 //   APP_URL=https://<your-app> SMOKE_USER='רועי' SMOKE_PIN='...' node test/smoke-live.js   # + authed read
 //
 // It verifies the ONE thing unit tests can't (they mock Apps Script): the whole live chain
-// browser → Node (Railway) → Apps Script /exec (302) → Sheets actually responds. Three checks:
-//   1. GET /            → 200 and the login shim markup is present (the page can prompt for login).
-//   2. POST /api/login  → a proper JSON 401 for a bogus user (the whole Node→Apps Script auth path
+// browser → Node (Railway) → Apps Script /exec (302) → Sheets actually responds. Checks:
+//   1. GET /            → 200 public landing offering BOTH entry paths (טופס דרישה / כניסת מנהלים), NO shim.
+//   2. GET /request     → 200 public request form (submitter roster injected), NO shim.
+//   3. GET /login       → 200 managers-login page carrying the auth shim (can prompt for login).
+//   4. POST /api/submit → a proper JSON 400 for an INVALID public request (the unauthenticated write path
+//                         responds + validates through Node→Apps Script; no row is created).
+//   5. POST /api/login  → a proper JSON 401 for a bogus user (the whole Node→Apps Script auth path
 //                         responds with JSON — not a crash, hang, HTML error page, or 5xx).
-//   3. (optional) with SMOKE_USER/SMOKE_PIN → login returns 200 + token, and one authenticated read
+//   6. (optional) with SMOKE_USER/SMOKE_PIN → login returns 200 + token, and one authenticated read
 //                         (GET /api/data?action=houses) returns 200 — proving an end-to-end read works.
 // Exit code 0 only if every attempted check passes; non-zero otherwise (so it can gate a deploy).
 
@@ -42,13 +46,58 @@ async function checkHome() {
     const r = await req('/', { headers: { Accept: 'text/html' } });
     const body = await r.text();
     if (r.status !== 200) return fail(`GET / returned ${r.status} (expected 200)`);
-    // The auth shim is injected into every served page; these markers prove it shipped and the page can
-    // present the login overlay. ('כניסה — לוגיסטיקה' is the overlay title; __EXEC_URL__ is the shim.)
-    if (!body.includes('__EXEC_URL__')) return fail('GET / body is missing the auth shim (__EXEC_URL__)');
-    if (!body.includes('כניסה')) return fail('GET / body is missing the login markup (כניסה)');
-    pass('GET / → 200 with login shim markup');
+    // The landing is PUBLIC (no auth shim) and offers both entry paths.
+    if (!body.includes('טופס דרישה')) return fail('GET / landing is missing the request-form path (טופס דרישה)');
+    if (!body.includes('כניסת מנהלים')) return fail('GET / landing is missing the managers-login path (כניסת מנהלים)');
+    if (body.includes('__EXEC_URL__')) return fail('GET / (public landing) must NOT carry the auth shim');
+    pass('GET / → 200 public landing with both entry paths (no shim)');
   } catch (e) {
     fail(`GET / threw: ${e && e.message ? e.message : e}`);
+  }
+}
+
+async function checkRequestForm() {
+  try {
+    const r = await req('/request', { headers: { Accept: 'text/html' } });
+    const body = await r.text();
+    if (r.status !== 200) return fail(`GET /request returned ${r.status} (expected 200)`);
+    if (!body.includes('__PUBLIC_BOOT__')) return fail('GET /request is missing the injected boot data (houses + submitters)');
+    if (body.includes('__EXEC_URL__')) return fail('GET /request (public form) must NOT carry the auth shim');
+    pass('GET /request → 200 public request form (boot injected, no shim)');
+  } catch (e) {
+    fail(`GET /request threw: ${e && e.message ? e.message : e}`);
+  }
+}
+
+async function checkLoginPage() {
+  try {
+    const r = await req('/login', { headers: { Accept: 'text/html' } });
+    const body = await r.text();
+    if (r.status !== 200) return fail(`GET /login returned ${r.status} (expected 200)`);
+    if (!body.includes('__EXEC_URL__')) return fail('GET /login is missing the auth shim (__EXEC_URL__)');
+    if (!body.includes('__FORCE_LOGIN__')) return fail('GET /login must auto-open the login overlay (__FORCE_LOGIN__)');
+    pass('GET /login → 200 managers-login page with the auth shim');
+  } catch (e) {
+    fail(`GET /login threw: ${e && e.message ? e.message : e}`);
+  }
+}
+
+async function checkPublicSubmitValidates() {
+  try {
+    // An INVALID public submit must return a JSON 4xx (validation) WITHOUT creating a row — proving the
+    // unauthenticated write path responds through Node→Apps Script. A missing category is always invalid.
+    const r = await req('/api/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: { created_by: 'smoke-test', house: 'no-such-house', urgency: 'רגיל' } }),
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (r.status !== 400) return fail(`POST /api/submit (invalid) returned ${r.status} (expected 400)`);
+    if (!/application\/json/i.test(ct)) return fail(`POST /api/submit returned 400 but content-type is "${ct}" (expected JSON)`);
+    const j = JSON.parse(await r.text());
+    if (j.ok !== false) return fail(`POST /api/submit JSON missing ok:false (got ${JSON.stringify(j)})`);
+    pass('POST /api/submit (invalid) → proper JSON 400 (public write path validates, no row created)');
+  } catch (e) {
+    fail(`POST /api/submit threw: ${e && e.message ? e.message : e}`);
   }
 }
 
@@ -101,6 +150,9 @@ async function checkAuthedRead() {
 (async () => {
   console.log(`smoke-live against ${APP_URL}`);
   await checkHome();
+  await checkRequestForm();
+  await checkLoginPage();
+  await checkPublicSubmitValidates();
   await checkLogin401();
   await checkAuthedRead();
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');

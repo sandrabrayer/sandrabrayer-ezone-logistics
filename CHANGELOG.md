@@ -3,6 +3,80 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — split entry flow: a PUBLIC request form (no password) + a managers login
+
+**Why.** Coordinators file purchase/repair/replacement requests dozens of times a week but had to log in
+first — every request-form load forced the auth overlay. Requests are not privileged, so the login was
+pure friction. This splits the entry experience: anyone can file a request without a password, while the
+dashboard/approvals/management stay behind the existing HMAC login.
+
+**What.**
+- **Landing page (`/`, public, no auth shim).** Two paths, Hebrew RTL: **טופס דרישה** → the public request
+  form, and **כניסת מנהלים** → the managers login. Both links carry `?v=<ASSET_VERSION>` cache-busting
+  (Railway's commit SHA per deploy) so a redeploy is picked up immediately.
+- **Public request form (`/request`, public, no auth shim).** The former `/` form, now reachable without a
+  login. Its house list and submitter roster are **injected server-side** (from the shared reads) so the
+  page needs **no unauthenticated read endpoint**. It posts to the new `POST /api/submit`.
+- **`POST /api/submit` — the ONE unauthenticated write.** Per-IP rate-limited (20/15 min), strictly
+  validated (category/urgency from the controlled vocab; house must be a REAL house; `created_by` a
+  non-empty label; free-text length-capped), then forwarded to Apps Script as `createRequestPublic` with a
+  server-to-server **`submitProof`** = HMAC(SESSION_SECRET, 'submit:request'). Code.gs verifies that proof
+  and re-validates independently, so the world-callable `/exec` still can't be driven by anyone but the Node
+  gateway, and this path can only ever append a request-tier row. **Every other endpoint stays fail-closed**
+  — reads and all other writes still require a Bearer token (locked by tests).
+- **Managers login (`/login`, auth shim).** Auto-opens the existing login overlay and, on success, sends the
+  user to their authenticated home (dashboard for managers, `/status` for a coordinator). Coordinators keep
+  their login: `/status` is their own-house request status page (server scope-filtered).
+- **Nav model:** the in-app "דרישה חדשה" link now points to the public `/request`; added `/status`
+  (coordinator-only). `apps-script/**` deploys via clasp CI on merge (no manual paste).
+
+New tests: unauthenticated submit works end-to-end; strict validation rejects bad input before any upstream
+call; the submitProof is forwarded and unlocks no other action; the trusted `createRequest` still needs a
+token; the landing/request/login pages serve with the right shim/no-shim + injections. `node --test` green.
+
+## [Unreleased] — fix — login page freeze: bound every auth network call in time (client + server)
+
+**Why.** The login page sometimes froze — the כניסה button stuck disabled, the overlay never dismissed. The
+shim's `/api/login` fetch (and the routed data fetches) had a `.catch` but **no timeout**, so a hung or
+stalled network left the request pending forever with the UI mid-submit. And on the server, `readJsonBody`
+had **no time bound**, so a client that opened a POST and never finished sending the body left the handler's
+`await` pending forever — a second, server-side way to hang.
+
+**What (verified server-side, not UI-only).**
+- **Client:** a `timedFetch` helper wraps the login + routed fetches in an `AbortController` timeout
+  (12 s). A timeout now rejects → the existing `.catch` re-enables the button and shows `שגיאת רשת`, so the
+  page can never sit frozen; the user can retry. Guarded so a browser/sandbox without `AbortController`
+  simply skips the timeout.
+- **Server:** `readJsonBody` is now bounded by `BODY_TIMEOUT_MS` — a stalled body resolves `null` (→ a clean
+  400/401 written back over the open socket) instead of hanging the handler, so `/api/login` and
+  `/api/submit` always respond.
+
+New tests: a hung `/api/login` aborts on the timeout and re-enables the button (real injected shim); a POST
+whose body never completes is torn down server-side rather than hanging. `node --test` green.
+
+## [Unreleased] — fix — wrong users lists: one shared, normalized, live roster-read path
+
+**Why (two symptoms, one root cause).** (a) The dashboard "משתמש" filter showed only **רועי** — it was a
+hardcoded `<option>`, never wired to the roster. (b) The login dropdown showed a partial/wrong roster and a
+valid user with the correct code was rejected with **"שם או קוד שגויים"**. The roster was re-derived and
+hardcoded in ~5 disconnected places, and login matched the name as an **exact** string — so a trailing space
+in the Users-sheet name cell broke the match.
+
+**What (fixed once, in the shared users-read path).**
+- **Normalization at the source:** a shared server-side roster read trims names and surfaces only ACTIVE
+  users (pin_hash always stripped). Login now matches names **trim-tolerantly** (`sameName`), so a
+  trailing-space sheet cell no longer rejects a valid login.
+- **Data-driven dropdowns from that one path:** the dashboard user filter is populated from the live
+  `users` read (all active users, not a hardcoded name); the `/login` dropdown is injected with the same
+  normalized active roster; the public request form's submitter list comes from it too.
+- **Freshness/secrecy unchanged:** `users` is still read **live** — never in the Node micro-cache, never
+  bundleable, never in the Apps Script reference cache (existing guards still pass); `pin_hash` is never
+  exposed to the browser or injected into a page. The pageData/perf work did not touch the users/login path.
+
+New tests: the roster endpoint returns all active users (inactive excluded, trimmed, pin_hash-free); login
+succeeds for every seeded user that has a code (tier-A password + tier-B shared PIN) and is trim-tolerant;
+login fails closed on a wrong code and for a user with no login path. `node --test` green.
+
 ## [Unreleased] — perf (round 2, safe reapply) — pageData aggregation + Node micro-cache, deploy-window-proof
 
 Reintroduces the #62 performance work (one aggregated `pageData` call per page + a Node micro-cache for

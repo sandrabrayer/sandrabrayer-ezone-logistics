@@ -56,7 +56,7 @@ test('exec roles (ops_manager, ceo) see the "ניהול תפעולי רשת" nav
 
 test('non-exec roles (coordinator, field_ops, maintenance) do NOT see the nav link', () => {
   // Run each on a page it MAY open (else the shim redirects and renders no nav at all).
-  const onPage = { coordinator: '/', field_ops: '/dashboard', maintenance: '/dashboard' };
+  const onPage = { coordinator: '/status', field_ops: '/dashboard', maintenance: '/dashboard' };
   for (const role of ['coordinator', 'field_ops', 'maintenance']) {
     const { link } = runShim(role, onPage[role]);
     assert.equal(link, null, `${role} must NOT see the /management nav link`);

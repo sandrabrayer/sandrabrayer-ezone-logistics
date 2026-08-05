@@ -27,10 +27,14 @@
 // management) CACHE-FIRST, so after a redeploy those pages served STALE html — including the pre-fix
 // version WITHOUT the persisted-session shim, which re-prompted for the PIN. Bumping purges v2 on
 // activate, and every app document is now network-first (below) so a redeploy is always picked up.
-var CACHE = 'ezone-logistics-v3';
+// Bumped v3 → v4: the entry flow split into a public landing ('/'), a public request form ('/request')
+// and a managers-login page ('/login'); '/' now serves the landing (not the old request form). Bumping
+// purges the v3 cache on activate so clients don't serve the pre-split '/' document from cache.
+var CACHE = 'ezone-logistics-v4';
 var SHELL = [
   './',
-  './index.html',
+  './request',
+  './login',
   './dashboard.html',
   './manifest.json',
   './icon-v1-192.png',
@@ -53,12 +57,16 @@ function isNetworkOnly(url) {
 // (request.mode === 'navigate') as network-first, so a newly added page can't regress to stale cache.
 var DOCUMENT_ROUTES = [
   '/', '/index.html',
+  '/request', '/request.html',
+  '/login', '/login.html',
+  '/status', '/status.html',
   '/dashboard', '/dashboard.html',
   '/inspection', '/inspection.html',
   '/inventory', '/inventory.html',
   '/reports', '/reports.html',
   '/workorders', '/workorders.html',
   '/management', '/management.html',
+  '/events', '/events.html',
 ];
 function isNetworkFirst(url) {
   return DOCUMENT_ROUTES.indexOf(url.pathname) !== -1;
@@ -112,7 +120,7 @@ self.addEventListener('fetch', function (e) {
         }
         return res;
       }).catch(function () {
-        return caches.match(req).then(function (hit) { return hit || caches.match('./index.html'); });
+        return caches.match(req).then(function (hit) { return hit || caches.match('./'); });
       })
     );
     return;
