@@ -130,6 +130,20 @@ APP_URL=https://<your-deployed-app> SMOKE_USER='רועי' SMOKE_PIN='<password>'
 Exit code is non-zero if any check fails, so it can gate a deploy. This is the guard for the login
 regressions (#59, #61-branch, #62) that all passed unit tests but broke in production.
 
+**Automated** — `.github/workflows/smoke-live.yml` runs this on **every push to `main`** (after a short
+delay for Railway to finish deploying) and via manual **Run workflow** dispatch. Set these repository
+secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Required | Value |
+|---|---|---|
+| `APP_URL` | yes | the deployed URL, e.g. `https://ezone-logistics.up.railway.app` |
+| `SMOKE_USER` | optional | a real login name (e.g. `רועי`) — enables the end-to-end authenticated-read check |
+| `SMOKE_PIN` | optional | that user's password/PIN |
+
+Without `APP_URL` the job fails loudly (so it can't silently pass). Without `SMOKE_USER`/`SMOKE_PIN` the
+authenticated-read check is skipped and the other two checks still run. The GitHub runner has open egress,
+so it can reach Railway (the Claude Code sandbox cannot — its egress policy blocks arbitrary hosts).
+
 ## Apps Script deployment
 
 1. Create a new Google Sheet (this app's own — not the Dashboard one).
