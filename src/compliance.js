@@ -156,7 +156,7 @@ function complianceAdherence(items, maps, openHouseIds, defaultReminderDays, now
     var houseIds = expandHouses(it.house, openIds);
     for (var h = 0; h < houseIds.length; h++) {
       ensure(houseIds[h]).push({
-        item: it.item, expires: it.expires, reminderDays: it.reminderDays, docUrl: it.docUrl,
+        id: it.id, item: it.item, expires: it.expires, reminderDays: it.reminderDays, docUrl: it.docUrl,
         daysToExpiry: status.daysToExpiry, status: status.status, expiring: status.expiring, expired: status.expired
       });
     }

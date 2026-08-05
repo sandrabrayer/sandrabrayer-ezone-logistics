@@ -111,12 +111,15 @@ test('events.js MIRROR:events matches apps-script/Code.gs (exceptional-events re
 // setup.gs is Apps Script, not a module — its top-level `var` declarations are plain data, so we
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
 // globals) are only PARSED here, never run, so no Apps Script stubs are needed.
-import { HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS, SEED_CONFIG } from '../src/schema.js';
+import {
+  HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS, SEED_CONFIG,
+  SEED_OPENING_CHECKLIST, SEED_EMERGENCY_READINESS,
+} from '../src/schema.js';
 
 function loadSetupGs() {
   const src = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
   // eslint-disable-next-line no-new-func
-  const fn = new Function(src + '\n;return { HEADERS: HEADERS, SEED_HOUSES: SEED_HOUSES, SEED_USERS: SEED_USERS, SEED_INVENTORY_ITEMS: SEED_INVENTORY_ITEMS, SEED_CONFIG: SEED_CONFIG };');
+  const fn = new Function(src + '\n;return { HEADERS: HEADERS, SEED_HOUSES: SEED_HOUSES, SEED_USERS: SEED_USERS, SEED_INVENTORY_ITEMS: SEED_INVENTORY_ITEMS, SEED_CONFIG: SEED_CONFIG, SEED_OPENING_CHECKLIST: SEED_OPENING_CHECKLIST, SEED_EMERGENCY_READINESS: SEED_EMERGENCY_READINESS };');
   return fn();
 }
 
@@ -189,6 +192,22 @@ test('Compliance header + Requests compliance_id + config mirror between schema.
   // compliance_reminder_days is seeded on both sides (the SEED_CONFIG deep-equal below also covers it).
   assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'compliance_reminder_days'));
   assert.ok(SEED_CONFIG.some((o) => o.key === 'compliance_reminder_days'));
+});
+
+test('OpeningChecklist + EmergencyReadiness headers and seeds mirror between schema.js and setup.gs (PR B)', () => {
+  const gs = loadSetupGs();
+  assert.deepEqual(gs.HEADERS.OpeningChecklist, SCHEMA_HEADERS.OpeningChecklist);
+  assert.deepEqual(gs.HEADERS.EmergencyReadiness, SCHEMA_HEADERS.EmergencyReadiness);
+  assert.deepEqual(SCHEMA_HEADERS.OpeningChecklist, ['house', 'item', 'done', 'date', 'by']);
+  assert.deepEqual(SCHEMA_HEADERS.EmergencyReadiness, ['house', 'item', 'done', 'date', 'by']);
+  // Seeds mirror row-for-row (schema exports objects; setup.gs exports arrays in column order).
+  const fromSchemaOpen = SEED_OPENING_CHECKLIST.map((o) => [o.house, o.item, o.done, o.date, o.by]);
+  assert.deepEqual(gs.SEED_OPENING_CHECKLIST, fromSchemaOpen);
+  const fromSchemaEmg = SEED_EMERGENCY_READINESS.map((o) => [o.house, o.item, o.done, o.date, o.by]);
+  assert.deepEqual(gs.SEED_EMERGENCY_READINESS, fromSchemaEmg);
+  // Seeded UNCHECKED (done=FALSE, date/by blank) so panels show real "not yet done" state.
+  assert.ok(SEED_OPENING_CHECKLIST.every((o) => o.done === 'FALSE' && o.date === '' && o.by === ''));
+  assert.ok(SEED_EMERGENCY_READINESS.every((o) => o.done === 'FALSE'));
 });
 
 test('Events header + event_types config mirror between schema.js and setup.gs (exceptional-events register)', () => {

@@ -3,6 +3,58 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feat (PR B, /management cleanup) — trim Olga's screen to Logistics-owned data + move non-food inventory counting out
+
+**Why.** Olga's ניהול תפעולי רשת screen had grown metrics Logistics doesn't own or can't act on (defect-
+closure %, exceptional-events analysis, food shortages, training adherence, a zero-filled 6-month trend,
+and a "no data source" section). PR B trims it to what Logistics genuinely owns and adds two Logistics-
+owned readiness checklists. Separately, non-food inventory **counting** moves to the Coordinators app
+(food already lives in ezone-kitchen), so this app keeps the inventory **views** but drops the entry form.
+
+**⚠️ After merge: re-run `setupSheet()` once.** PR B adds two sheets — `OpeningChecklist` and
+`EmergencyReadiness`. `setupSheet()` is idempotent (creates + seeds only a fresh tab, never duplicates or
+overwrites). Apps Script deploys via clasp CI (no manual paste). Until it re-runs, the two new panels
+degrade to "טרם הוזנה" (safePanel_ returns `[]`), never a crash.
+
+**/management changes.**
+- **Removed entirely from the screen + the `managementData` payload:** סגירת ליקויים במועד (defect closure),
+  אירועים חריגים (events analysis), חוסרי מזון (kitchen food shortages), עמידה בתוכנית הדרכה (training
+  adherence), the "מגמה חודשית (6 חודשים)" trend, and the "מדדים ללא מקור נתונים" section (הטמעת מערכות,
+  איכות הרשומה). The **event register itself stays** — `/events` entry + `createEvent`/`updateEvent` are
+  untouched; only the /management *analysis* panel is gone.
+- **Simplified — רמת הבתים · אירועים חוזרים:** now a single plain list of recurring defects derived ONLY
+  from Requests — same house + same category + description ≥2 within 90 days. No scores, no severity levels.
+- **מוכנות בתים לפתיחה:** now fed by a new Logistics-owned `OpeningChecklist` sheet (per pre-opening house:
+  item / done / date / by), seeded UNCHECKED for רעננה הפרדס + שדה אליעזר. Shows done/total per house.
+- **בקרת מוכנות לזמן חירום (new):** a per-house control checklist (`EmergencyReadiness` sheet — generator /
+  gas / water / first-aid / fire-extinguisher, editable in the Sheet), done + date + by. Shows done/total.
+- **עמידה בתקציב:** the redundant plain "הוצאות (רכש)" panel is gone; the budget panel (actual spend per
+  house from Requests `actual_cost` vs the `Budgets` sheet) is the single spend view, with a UI note that
+  **food spend will arrive later from the Kitchen digest** (not wired now). (`Budgets` already existed keyed
+  by house+period+amount — kept as-is; it already satisfies "budget per house" more flexibly than a single
+  monthly figure.)
+- **עמידה באמות מידה:** added a **delete (with confirm)** per entry — exec-only (`canManage`), enforced at
+  the gateway AND in Code.gs, and **audit-logged** (`AuditLog`, to_status `נמחק`). Compliance items now carry
+  their stable `id` (added to the `MIRROR:compliance` item shape in both `compliance.js` and Code.gs).
+
+**Inventory ownership.**
+- The count-entry form (**ספירת מלאי**) is removed from `/inventory`; the page is now a read-only weekly
+  **status view** (which houses were counted, by whom, latest numbers). The counter picker is gone; the
+  `submitInventory` handler is left server-side (harmless). Page retitled + a note that counting moved to
+  the Coordinators app.
+- `DIGEST-CONTRACT.md` gains a **v2-compatible "DIGEST CONSUME" section** defining what Logistics will READ
+  from the coordinators + kitchen digests (weekly non-food counts; food shortages) — read weekly, columns by
+  header name, no financial fields, unmapped houses omitted. **Contract text only — no read wiring yet.**
+
+**Tests.** `test/management.test.js` rewritten for the new pure panels (SLA, recurring-from-requests,
+opening + emergency readiness). `test/management-handler.test.js` rewritten (Code.gs sandbox): the new
+payload shape, safePanel_ isolation, missing-sheet → `[]` degrade, and `deleteCompliance` (delete by id,
+audit-logged, canManage-gated, unknown-id reported). New `test/compliance-gateway.test.js` locks the
+server-side `deleteCompliance` role gate (ops_manager forwarded with the real token; field_ops + tier B
+403'd; unauth 401). `test/schema.test.js` + `test/mirror-drift.test.js` extended for the two new sheets +
+seeds (headers, seed rows, seeded-unchecked). `node --test` green (575 tests). No secrets; explicit-path
+`git add`; Hebrew RTL UI preserved.
+
 ## [Unreleased] — fix (PR A, production bugs) — approve/reject write path locked, pageData fallback proven not-permanent, per-lead task view
 
 Three production reports, investigated read-only first, then fixed/locked with tests.

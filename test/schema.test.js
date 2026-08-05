@@ -8,10 +8,15 @@ import {
 
 test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
-    'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'Events', 'Houses',
-    'InspectionFindings', 'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan',
-    'Requests', 'Technicians', 'Users',
+    'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'EmergencyReadiness', 'Events',
+    'Houses', 'InspectionFindings', 'Inspections', 'InventoryCounts', 'InventoryItems',
+    'MaintenancePlan', 'OpeningChecklist', 'Requests', 'Technicians', 'Users',
   ].sort());
+});
+
+test('PR B readiness checklists have the [house, item, done, date, by] columns', () => {
+  assert.deepEqual(HEADERS.OpeningChecklist, ['house', 'item', 'done', 'date', 'by']);
+  assert.deepEqual(HEADERS.EmergencyReadiness, ['house', 'item', 'done', 'date', 'by']);
 });
 
 test('Events sheet has the append-only exceptional-events columns', () => {

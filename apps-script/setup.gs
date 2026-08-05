@@ -83,6 +83,14 @@ var HEADERS = {
     'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
     'status', 'closed_at', 'notes',
   ],
+  // Pre-opening readiness checklist (מוכנות בתים לפתיחה) — Logistics-owned (PR B). One row per checklist
+  // item per pre-opening house. done = TRUE/FALSE; date + by filled on completion. Created + seeded empty
+  // (unchecked) idempotently by setupSheet() for the pre-opening houses; edited in the Sheet, no entry UI.
+  OpeningChecklist: ['house', 'item', 'done', 'date', 'by'],
+  // Emergency-readiness checklist (בקרת מוכנות לזמן חירום) — Logistics-owned (PR B). One row per control
+  // item per house (generator/gas/water/first-aid/…). Editable list in the Sheet. Created + seeded empty
+  // idempotently by setupSheet(); read READ-ONLY by /management.
+  EmergencyReadiness: ['house', 'item', 'done', 'date', 'by'],
 };
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
@@ -202,6 +210,39 @@ var SEED_INVENTORY_ITEMS = [
   ['מזון', 'דגני בוקר', 'FALSE', '', '', ''],
 ];
 
+// Pre-opening + emergency readiness checklists (PR B). Mirror of src/schema.js. Seeded UNCHECKED
+// (done=FALSE, date/by blank) so the panels show real "not yet done" state, never a fabricated ready.
+// Every row is the SAME width (5) — seedIfEmpty_ writes a rectangular range.
+var PRE_OPENING_HOUSES = ['רעננה הפרדס', 'שדה אליעזר'];
+var OPENING_CHECKLIST_ITEMS = [
+  'חשמל, מים וגז מחוברים ותקינים',
+  'ריהוט וציוד בסיסי הותקן',
+  'ניקיון מסירה בוצע',
+  'בטיחות: מטפים וגילוי אש תקינים',
+  'מלאי פתיחה ראשוני הוזמן',
+];
+var SEED_OPENING_CHECKLIST = (function () {
+  var rows = [];
+  PRE_OPENING_HOUSES.forEach(function (house) {
+    OPENING_CHECKLIST_ITEMS.forEach(function (item) { rows.push([house, item, 'FALSE', '', '']); });
+  });
+  return rows;
+})();
+var EMERGENCY_READINESS_ITEMS = [
+  'גנרטור חירום תקין',
+  'מלאי גז / דלק',
+  'מים לשעת חירום (מכל רזרבה)',
+  'ערכת עזרה ראשונה מלאה',
+  'מטפי כיבוי אש בתוקף',
+];
+var SEED_EMERGENCY_READINESS = (function () {
+  var rows = [];
+  SEED_HOUSES.forEach(function (h) {
+    EMERGENCY_READINESS_ITEMS.forEach(function (item) { rows.push([h[0], item, 'FALSE', '', '']); });
+  });
+  return rows;
+})();
+
 function setupSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -233,6 +274,9 @@ function setupSheet() {
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
   seedIfEmpty_(ss.getSheetByName('InventoryItems'), SEED_INVENTORY_ITEMS);
+  // PR B: pre-opening + emergency readiness checklists — seeded UNCHECKED, idempotent (only on a fresh tab).
+  seedIfEmpty_(ss.getSheetByName('OpeningChecklist'), SEED_OPENING_CHECKLIST);
+  seedIfEmpty_(ss.getSheetByName('EmergencyReadiness'), SEED_EMERGENCY_READINESS);
 
   // Config + Users are upserted by key/name (NOT seed-if-empty) so re-running setupSheet() after
   // this increment ADDS the new ceo_ceiling key and the Users roster to already-populated sheets,

@@ -1,66 +1,60 @@
-// management.js — pure aggregation for the /management screen (increment 37), role-gated to
-// ops_manager + ceo. Built STRICTLY from data this repo owns (Requests, Inspections,
-// InspectionFindings, Houses, InventoryItems/Counts). It reads nothing from another app.
+// management.js — pure aggregation for the /management screen (Olga's ניהול תפעולי רשת), role-gated
+// to ops_manager + ceo. Built STRICTLY from data this repo owns (Requests, Houses, and two Logistics-
+// owned checklists: OpeningChecklist, EmergencyReadiness). It reads nothing from another app.
 //
-// HONESTY RULE (the whole point of this screen): never render absent data as zero. A metric with no
-// underlying data returns { available: false, reason } via unavailable(), and the UI shows it as
-// "לא זמין", NOT as 0. Anything that would need the kitchen/coordinator digest, a budget source, a
-// training/adoption source, or clinical records is listed in UNAVAILABLE_CAPABILITIES — those
-// sources are not wired in this repo, so we report them rather than invent a number.
+// PR B cleanup: the screen was trimmed to what Logistics genuinely owns and can act on. Removed
+// entirely — defect-closure-on-time, exceptional-events analysis, food shortages, training adherence,
+// the 6-month trend, and the "no data source" placeholder section. Recurring issues are now derived
+// from REQUESTS (not inspection findings), pre-opening readiness is a Logistics-owned checklist, and a
+// new emergency-readiness checklist is added. Budget / preventive-maintenance / compliance stay and are
+// computed server-side (Code.gs) — the browser only renders them.
 //
-// Dependency-free except for sibling PURE modules; unit-tested under node:test. management.html
-// mirrors this logic inline for rendering (same pattern as the other pages).
+// Dependency-free (pure JS, no Apps Script, no DOM) so node:test verifies it. management.html mirrors
+// this logic inline for rendering (same pattern as the other pages).
 
-import { isOverdue, isBlocked } from './sla.js';
 import { STATUSES } from './schema.js';
 
-// A request is "closed" (no longer actionable) at הושלם / סגור; terminal also includes לא מאושר.
-const CLOSED = [STATUSES.COMPLETED, STATUSES.CLOSED];
+// A request is "terminal" (no longer actionable) at הושלם / סגור / לא מאושר.
 const TERMINAL = [STATUSES.COMPLETED, STATUSES.CLOSED, STATUSES.NOT_APPROVED];
-
-/** Marker for a metric that has no data source wired — rendered as "לא זמין", never as 0. */
-export function unavailable(reason) {
-  return { available: false, reason: reason };
-}
-function value(v) {
-  return { available: true, value: v };
-}
 
 function isOpenRequest(r) {
   return r && TERMINAL.indexOf(String(r.status)) === -1;
 }
 
-// JD capabilities that map to data NOT available anywhere in this repo (category (c)). Each is shown
-// explicitly as unavailable, with what would need to be built — never faked with a placeholder number.
-export const UNAVAILABLE_CAPABILITIES = [
-  // budget_adherence moved to a LIVE panel (Budgets sheet vs Requests spend) — see the "עמידה בתקציב" panel.
-  // food_quality moved to a LIVE panel (kitchen-digest read) — see the "חוסרי מזון" panel.
-  // preventive_maintenance moved to a LIVE panel (MaintenancePlan sheet) — see the "תחזוקה מונעת" panel.
-  // training_adherence moved to a LIVE panel (coordinators-published TrainingCompliance digest, read-only)
-  //   — see the "עמידה בתוכנית הדרכה" panel.
-  { key: 'systems_adoption', label: 'הטמעת מערכות', reason: 'אין מקור נתוני הטמעת תוכנות/אפליקציות.' },
-  { key: 'record_quality', label: 'איכות הרשומה המקצועית ועמידה בדרישות משרד הבריאות', reason: 'בבעלות האפליקציות הקליניות (outpatient/therapists); אינו בתחום הלוגיסטיקה.' },
-];
+function toMs(now) {
+  if (now instanceof Date) return now.getTime();
+  const n = new Date(now);
+  return isNaN(n.getTime()) ? Date.now() : n.getTime();
+}
 
-// ---- Panel: requests SLA / delays (Roy's הצפת עיכובים) ----
-// Open requests, how many are overdue / blocked, broken down by house. Worst-first list of the
-// overdue ones so the biggest delays surface immediately.
-export function requestsPanel(requests, now) {
+// TRUE when a checklist cell reads done (tolerant of boolean TRUE or the text 'TRUE'/'true'/'1').
+export function isChecklistDone(v) {
+  if (v === true || v === 1) return true;
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  return s === 'TRUE' || s === '1';
+}
+
+// ---- Panel: requests SLA / delays (הצפת עיכובים) ----
+// Open requests, how many are overdue / blocked, by house, with a worst-first list of the overdue ones.
+// isOverdue/isBlocked are passed in (from src/sla.js in the app) to keep this module dependency-light.
+export function requestsPanel(requests, now, isOverdue, isBlocked) {
+  const overdueFn = isOverdue || (() => false);
+  const blockedFn = isBlocked || (() => false);
   const open = (requests || []).filter(isOpenRequest);
   const byHouse = {};
   open.forEach((r) => {
     const h = String(r.house || '');
     const b = byHouse[h] || (byHouse[h] = { house: h, open: 0, overdue: 0, blocked: 0 });
     b.open++;
-    if (isOverdue(r.due_at, r.status, now)) b.overdue++;
-    if (isBlocked(r.blocked)) b.blocked++;
+    if (overdueFn(r.due_at, r.status, now)) b.overdue++;
+    if (blockedFn(r.blocked)) b.blocked++;
   });
-  const overdue = open.filter((r) => isOverdue(r.due_at, r.status, now));
-  const blocked = open.filter((r) => isBlocked(r.blocked));
+  const overdue = open.filter((r) => overdueFn(r.due_at, r.status, now));
+  const blocked = open.filter((r) => blockedFn(r.blocked));
   const worst = overdue
     .map((r) => ({ id: r.id, house: r.house, description: r.description, urgency: r.urgency,
       days_overdue: Math.floor((toMs(now) - new Date(r.due_at).getTime()) / 86400000),
-      blocked: isBlocked(r.blocked) }))
+      blocked: blockedFn(r.blocked) }))
     .sort((a, b) => b.days_overdue - a.days_overdue);
   return {
     openCount: open.length,
@@ -71,152 +65,85 @@ export function requestsPanel(requests, now) {
   };
 }
 
-// ---- Panel: defect closure on time (Olga's סגירת ליקויים במועד) ----
-// A "defect" is a physical_defect finding. Its corrective action is the linked request. Closure is
-// on time when that request completed on or before its due_at. Findings with no linked request, or a
-// still-open one, are OPEN. The on-time RATE is unavailable (not 0%) until some defect has closed
-// against a due date to measure.
-export function defectClosurePanel(findings, requests, now) {
-  const reqById = {};
-  (requests || []).forEach((r) => { reqById[String(r.id)] = r; });
-  const defects = (findings || []).filter((f) => f && f.finding_type === 'physical_defect');
-  let open = 0, onTime = 0, late = 0, closedNoDue = 0;
-  defects.forEach((f) => {
-    const rid = f.linked_request_id ? String(f.linked_request_id) : '';
-    const r = rid ? reqById[rid] : null;
-    if (!r || CLOSED.indexOf(String(r.status)) === -1) { open++; return; }  // unlinked or still open
-    if (r.due_at && r.completed_at) {
-      if (new Date(r.completed_at).getTime() <= new Date(r.due_at).getTime()) onTime++;
-      else late++;
-    } else {
-      closedNoDue++;   // closed, but no due date to judge against — not counted in the rate
-    }
-  });
-  const measured = onTime + late;
-  return {
-    totalDefects: defects.length,
-    open: open,
-    closedOnTime: onTime,
-    closedLate: late,
-    closedNoDueDate: closedNoDue,
-    onTimeRate: measured > 0 ? value(Math.round((100 * onTime) / measured)) : unavailable('טרם נסגר ליקוי עם תאריך יעד למדידה'),
-  };
+// ---- Panel: recurring issues from REQUESTS (רמת הבתים — אירועים חוזרים), SIMPLIFIED ----
+// PR B: a single, simple list of recurring defects derived ONLY from Requests — the same house with the
+// same category + description appearing ≥ RECUR_MIN times within RECUR_WINDOW_DAYS. No scores, no levels,
+// no severities — just "this keeps coming back at this house." Sorted most-frequent first.
+export const RECUR_MIN = 2;
+export const RECUR_WINDOW_DAYS = 90;
+
+function normText(s) {
+  return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-// ---- Panel: house quality (רמת הבתים) + recurring defects (אירועים חריגים חוזרים) ----
-// Per house: last inspection date, count of OPEN defects (physical_defect not yet turned into a
-// request) by severity, and how many distinct defects RECUR (same text seen ≥2× at that house).
-export function houseQualityPanel(houses, inspections, findings, now) {
-  const insById = {};
-  (inspections || []).forEach((i) => { if (i && i.id != null) insById[String(i.id)] = i; });
-
-  const rows = {};
-  (houses || []).forEach((h) => {
-    rows[h.name] = {
-      house: h.name, status: h.status || '',
-      lastInspection: '', openFindings: { low: 0, medium: 0, high: 0 }, recurringDefects: 0,
-    };
-  });
-  (inspections || []).forEach((i) => {
-    const b = rows[i.house]; if (!b) return;
-    const d = String(i.inspection_date || '');
-    if (d && d > b.lastInspection) b.lastInspection = d;
-  });
-
-  // Open defects by severity + recurrence text tally, joined to house via the finding's inspection.
-  const textTally = {};   // house -> normalized text -> count
-  (findings || []).forEach((f) => {
-    if (!f || f.finding_type !== 'physical_defect') return;
-    const ins = insById[String(f.inspection_id)];
-    const house = ins ? ins.house : '';
-    const b = rows[house]; if (!b) return;
-    if (!f.linked_request_id) {
-      const sev = String(f.severity || '').toLowerCase();
-      if (sev === 'low' || sev === 'medium' || sev === 'high') b.openFindings[sev]++;
-      else b.openFindings.low++;   // unknown severity counts as low, never dropped
-    }
-    const key = String(f.finding_text || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    if (key) {
-      const t = textTally[house] || (textTally[house] = {});
-      t[key] = (t[key] || 0) + 1;
-    }
-  });
-  Object.keys(textTally).forEach((house) => {
-    const t = textTally[house];
-    const recurring = Object.keys(t).filter((k) => t[k] >= 2).length;
-    if (rows[house]) rows[house].recurringDefects = recurring;
-  });
-
-  return Object.keys(rows).map((k) => rows[k]);
-}
-
-// ---- Panel: spend monitoring (הוצאות / רכש — Logistics owns cost) ----
-// Sums estimated + actual cost by house and by category. Budget ADHERENCE is deliberately NOT
-// computed — there is no budget source — so it is reported as unavailable, not as 0.
-export function spendPanel(requests) {
-  const byHouse = {};
-  const byCategory = {};
-  let estimatedTotal = 0, actualTotal = 0;
+export function recurringDefectsPanel(requests, now) {
+  const cutoff = toMs(now) - RECUR_WINDOW_DAYS * 86400000;
+  const groups = {};
   (requests || []).forEach((r) => {
-    const est = Number(r.estimated_cost); const act = Number(r.actual_cost);
-    const e = isFinite(est) ? est : 0; const a = isFinite(act) ? act : 0;
-    estimatedTotal += e; actualTotal += a;
-    const h = String(r.house || '');
-    const bh = byHouse[h] || (byHouse[h] = { house: h, estimated: 0, actual: 0 });
-    bh.estimated += e; bh.actual += a;
-    const c = String(r.category || '');
-    const bc = byCategory[c] || (byCategory[c] = { category: c, estimated: 0, actual: 0 });
-    bc.estimated += e; bc.actual += a;
+    if (!r) return;
+    const t = new Date(r.created_at).getTime();
+    if (isNaN(t) || t < cutoff) return;                 // only the last RECUR_WINDOW_DAYS
+    const house = String(r.house || '').trim();
+    const category = String(r.category || '').trim();
+    const description = String(r.description || '').trim();
+    if (!house || (!category && !description)) return;
+    const key = house + '||' + category + '||' + normText(description);
+    const g = groups[key] || (groups[key] = { house, category, description, count: 0 });
+    g.count++;
   });
-  return {
-    estimatedTotal: estimatedTotal,
-    actualTotal: actualTotal,
-    byHouse: Object.keys(byHouse).sort().map((k) => byHouse[k]),
-    byCategory: Object.keys(byCategory).sort().map((k) => byCategory[k]),
-    budgetAdherence: unavailable('אין יעד תקציב להשוואה — מוצגת ההוצאה בפועל בלבד'),
-  };
+  return Object.keys(groups)
+    .map((k) => groups[k])
+    .filter((g) => g.count >= RECUR_MIN)
+    .sort((a, b) => b.count - a.count || a.house.localeCompare(b.house, 'he'));
 }
 
-// ---- Panel: pre-opening readiness (פתיחת בתים חדשים) ----
-// For each pre-opening house: open requests, open defects, and whether a stock count was ever taken.
-export function preOpeningPanel(houses, requests, inspections, findings, inventoryCounts) {
-  const insById = {};
-  (inspections || []).forEach((i) => { if (i && i.id != null) insById[String(i.id)] = i; });
-  const counted = {};
-  (inventoryCounts || []).forEach((c) => { if (c && c.house) counted[String(c.house)] = true; });
-
-  const pre = (houses || []).filter((h) => String(h.status) === 'pre-opening');
-  return pre.map((h) => {
-    const openReqs = (requests || []).filter((r) => String(r.house) === String(h.name) && isOpenRequest(r)).length;
-    const openDefects = (findings || []).filter((f) => {
-      if (!f || f.finding_type !== 'physical_defect' || f.linked_request_id) return false;
-      const ins = insById[String(f.inspection_id)];
-      return ins && String(ins.house) === String(h.name);
-    }).length;
-    return {
-      house: h.name,
-      openRequests: openReqs,
-      openDefects: openDefects,
-      inventoryCounted: !!counted[String(h.name)],
-    };
+// ---- Checklist readiness (shared shape for OpeningChecklist + EmergencyReadiness) ----
+// Each checklist row: { house, item, done, date, by }. For the given houses, produce per-house progress
+// (done/total) and the rows, so the UI shows exactly what is and isn't ready — never a fabricated number.
+function checklistByHouse(houses, rows, houseNames) {
+  const wanted = houseNames; // Set of house names to include
+  const byHouse = {};
+  (houses || []).forEach((h) => {
+    if (!h || !h.name) return;
+    if (wanted && !wanted.has(String(h.name))) return;
+    byHouse[h.name] = { house: h.name, status: h.status || '', total: 0, done: 0, items: [] };
   });
+  (rows || []).forEach((row) => {
+    if (!row) return;
+    const house = String(row.house || '');
+    const b = byHouse[house];
+    if (!b) return;                                     // a checklist row for an out-of-scope house is ignored
+    const done = isChecklistDone(row.done);
+    b.total++;
+    if (done) b.done++;
+    b.items.push({ item: String(row.item || ''), done, date: String(row.date || ''), by: String(row.by || '') });
+  });
+  return Object.keys(byHouse).map((k) => byHouse[k]);
 }
 
-// The whole screen payload, from the raw owned arrays. `now` is passed in (deterministic + testable).
-export function buildManagementSummary(data, now) {
+// ---- Panel: pre-opening readiness (מוכנות בתים לפתיחה) — from the OpeningChecklist (Logistics-owned) ----
+// Only pre-opening houses. Each shows its checklist progress; a house with no rows yet reads "טרם הוזנה"
+// (total 0), never a fabricated ready/not-ready.
+export function openingReadinessPanel(houses, openingChecklist) {
+  const pre = new Set((houses || []).filter((h) => String(h.status) === 'pre-opening').map((h) => String(h.name)));
+  return checklistByHouse(houses, openingChecklist, pre);
+}
+
+// ---- Panel: emergency readiness (בקרת מוכנות לזמן חירום) — from EmergencyReadiness (Logistics-owned) ----
+// Every house (an emergency checklist applies open or pre-opening). Editable item list lives in the Sheet.
+export function emergencyReadinessPanel(houses, emergencyReadiness) {
+  return checklistByHouse(houses, emergencyReadiness, null);
+}
+
+// The whole owned-data screen payload, from the raw owned arrays. `now` is passed in (deterministic +
+// testable). isOverdue/isBlocked are injected by the caller (the app passes src/sla.js). Budget /
+// maintenance / compliance are computed SERVER-SIDE and merged by the client — not here.
+export function buildManagementSummary(data, now, isOverdue, isBlocked) {
   const d = data || {};
   return {
-    requests: requestsPanel(d.requests || [], now),
-    defectClosure: defectClosurePanel(d.findings || [], d.requests || [], now),
-    houseQuality: houseQualityPanel(d.houses || [], d.inspections || [], d.findings || [], now),
-    spend: spendPanel(d.requests || []),
-    preOpening: preOpeningPanel(d.houses || [], d.requests || [], d.inspections || [], d.findings || [], d.inventoryCounts || []),
-    unavailable: UNAVAILABLE_CAPABILITIES,
+    requests: requestsPanel(d.requests || [], now, isOverdue, isBlocked),
+    recurringDefects: recurringDefectsPanel(d.requests || [], now),
+    openingReadiness: openingReadinessPanel(d.houses || [], d.openingChecklist || []),
+    emergencyReadiness: emergencyReadinessPanel(d.houses || [], d.emergencyReadiness || []),
   };
-}
-
-function toMs(now) {
-  if (now instanceof Date) return now.getTime();
-  const n = new Date(now);
-  return isNaN(n.getTime()) ? Date.now() : n.getTime();
 }

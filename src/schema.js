@@ -155,6 +155,19 @@ export const HEADERS = {
     'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
     'status', 'closed_at', 'notes',
   ],
+
+  // Pre-opening readiness checklist (מוכנות בתים לפתיחה) — Logistics-owned (PR B). One row per checklist
+  // item per pre-opening house. `house` is the CANONICAL house display name (HOUSE-IDS.md). `done` is
+  // 'TRUE'/'FALSE'; `date` (YYYY-MM-DD) and `by` are filled when the item is completed. Created + seeded
+  // idempotently by setupSheet() for the pre-opening houses; Logistics edits rows in the Sheet (no entry
+  // UI). The /management "מוכנות בתים לפתיחה" panel reads it READ-ONLY. Append-only.
+  OpeningChecklist: ['house', 'item', 'done', 'date', 'by'],
+
+  // Emergency-readiness checklist (בקרת מוכנות לזמן חירום) — Logistics-owned (PR B). One row per control
+  // item per house (generator / gas / water / first-aid / fire-extinguisher / …). `house` is the CANONICAL
+  // display name. `done` is 'TRUE'/'FALSE'; `date` + `by` filled on completion. The item list is EDITABLE
+  // in the Sheet. Created + seeded idempotently by setupSheet(); read READ-ONLY by /management. Append-only.
+  EmergencyReadiness: ['house', 'item', 'done', 'date', 'by'],
 };
 
 export const SHEET_NAMES = Object.keys(HEADERS);
@@ -420,3 +433,34 @@ export const SEED_INVENTORY_ITEMS = [
   { category: 'מזון', item_text: 'שימורים', active: 'FALSE' },
   { category: 'מזון', item_text: 'דגני בוקר', active: 'FALSE' },
 ];
+
+// ---- Pre-opening + emergency readiness checklists (PR B) ----
+
+// The pre-opening houses (HOUSE_STATUS.PRE_OPENING) that get a seeded opening checklist. Kept in sync
+// with SEED_HOUSES — a house that changes to 'open' simply stops appearing on the pre-opening panel.
+export const PRE_OPENING_HOUSES = ['רעננה הפרדס', 'שדה אליעזר'];
+
+// A minimal, editable pre-opening checklist. Seeded UNCHECKED (done=FALSE, date/by blank — "empty") for
+// each pre-opening house; Logistics ticks items off in the Sheet as the house gets ready. Rows: house,
+// item, done, date, by. seedIfEmpty_ writes a rectangular range, so every row has the same width (5).
+export const OPENING_CHECKLIST_ITEMS = [
+  'חשמל, מים וגז מחוברים ותקינים',
+  'ריהוט וציוד בסיסי הותקן',
+  'ניקיון מסירה בוצע',
+  'בטיחות: מטפים וגילוי אש תקינים',
+  'מלאי פתיחה ראשוני הוזמן',
+];
+export const SEED_OPENING_CHECKLIST = PRE_OPENING_HOUSES.flatMap((house) =>
+  OPENING_CHECKLIST_ITEMS.map((item) => ({ house, item, done: 'FALSE', date: '', by: '' })));
+
+// A minimal, EDITABLE emergency-readiness checklist, seeded UNCHECKED for EVERY house. Logistics adds /
+// removes items and ticks them in the Sheet. Rows: house, item, done, date, by.
+export const EMERGENCY_READINESS_ITEMS = [
+  'גנרטור חירום תקין',
+  'מלאי גז / דלק',
+  'מים לשעת חירום (מכל רזרבה)',
+  'ערכת עזרה ראשונה מלאה',
+  'מטפי כיבוי אש בתוקף',
+];
+export const SEED_EMERGENCY_READINESS = SEED_HOUSES.flatMap((h) =>
+  EMERGENCY_READINESS_ITEMS.map((item) => ({ house: h.name, item, done: 'FALSE', date: '', by: '' })));

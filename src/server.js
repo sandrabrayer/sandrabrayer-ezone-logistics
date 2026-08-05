@@ -601,6 +601,11 @@ async function handleAction(req, res) {
   if (body.action === 'managementData' && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
+  // Deleting a compliance (עמידה באמות מידה) entry is exec-only (ops_manager + ceo). Enforced here AND
+  // independently in Code.gs (canManage) — field_ops passes the generic write gate but is refused here.
+  if (body.action === 'deleteCompliance' && !canManage(actor.role)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
   // Exceptional-events register (אירועים חריגים). Reporting is closed to maintenance; editing/closing an
   // event is exec-only. Enforced here (server-side) AND independently in Code.gs (which also enforces the
   // coordinator own-house-only scope on create). A blocked role gets 403 with no upstream call.

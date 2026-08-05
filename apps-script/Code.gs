@@ -585,6 +585,7 @@ function dispatchAction_(body, actor) {
     case 'setExecution':  return handleSetExecution_(body.payload || {}, actor);
     case 'setBlocked':    return handleSetBlocked_(body.payload || {}, actor);
     case 'managementData': return handleManagementData_(body.payload || {}, actor);
+    case 'deleteCompliance': return handleDeleteCompliance_(body.payload || {}, actor);
     case 'createEvent':   return handleCreateEvent_(body.payload || {}, actor);
     case 'updateEvent':   return handleUpdateEvent_(body.payload || {}, actor);
     case 'createInspection': return handleCreateInspection_(body.payload || {}, actor);
@@ -1690,7 +1691,7 @@ function complianceAdherence(items, maps, openHouseIds, defaultReminderDays, now
     var houseIds = expandHouses(it.house, openIds);
     for (var h = 0; h < houseIds.length; h++) {
       ensure(houseIds[h]).push({
-        item: it.item, expires: it.expires, reminderDays: it.reminderDays, docUrl: it.docUrl,
+        id: it.id, item: it.item, expires: it.expires, reminderDays: it.reminderDays, docUrl: it.docUrl,
         daysToExpiry: status.daysToExpiry, status: status.status, expiring: status.expiring, expired: status.expired
       });
     }
@@ -2224,30 +2225,53 @@ function safePanel_(label, produce, fallback) {
 
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
-  // Core Logistics reads (the screen's baseline dataset). Each foreign/derived PANEL below is wrapped in
+  // Core Logistics reads (the screen's baseline dataset). Each derived PANEL below is wrapped in
   // safePanel_ so one panel's failure degrades to its own "unavailable" state, never the whole response.
+  // PR B cleanup: removed the food-shortage (kitchen), coordinators, training, and events panels — the
+  // screen now shows only what Logistics genuinely owns. Recurring issues are derived client-side from
+  // `requests`; pre-opening + emergency readiness come from two Logistics-owned checklist sheets (which
+  // may not exist until setupSheet() is re-run after this deploy — safePanel_ degrades them to []).
   var requests = getRequests();
   return jsonOut_({
     ok: true,
     data: {
       requests: requests,
-      inspections: readObjects_('Inspections'),
-      findings: readObjects_('InspectionFindings'),
       houses: getHouses(),
-      inventoryItems: readObjects_('InventoryItems'),
-      inventoryCounts: readObjects_('InventoryCounts'),
-      // available:false panels (html checks `.available`) fall back to an explicit read-error card.
-      kitchen: safePanel_('kitchen', readKitchenShortages_, { available: false, reason: 'שגיאת קריאה מדייג׳סט המטבח — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
-      coordinators: safePanel_('coordinators', readCoordinatorsShortages_, { available: false, reason: 'שגיאת קריאה בדייג׳סט הרכזים' }),
-      training: safePanel_('training', readTrainingCompliance_, { available: false, reason: 'שגיאת קריאה מדייג׳סט הרכזים — בדוק הרשאת צפייה לחשבון הלוגיסטיקה' }),
-      // budget/maintenance/compliance/events panels (html checks for a truthy object with rows) fall back
-      // to null, which their render treats as an explicit "לא זמין" card.
+      // Logistics-owned readiness checklists (PR B). Missing sheet (setup not yet re-run) → [] (never a crash).
+      openingChecklist: safePanel_('openingChecklist', function () { return readObjects_('OpeningChecklist'); }, []),
+      emergencyReadiness: safePanel_('emergencyReadiness', function () { return readObjects_('EmergencyReadiness'); }, []),
+      // budget/maintenance/compliance panels (html checks for a truthy object with rows) fall back to null,
+      // which their render treats as an explicit "לא זמין" card.
       budget: safePanel_('budget', function () { return readBudgetAdherence_(p && p.period, requests); }, null),
       maintenance: safePanel_('maintenance', readMaintenanceAdherence_, null),
       compliance: safePanel_('compliance', readComplianceAdherence_, null),
-      events: safePanel_('events', readEventsAnalysis_, null),
     },
   });
+}
+
+// Delete a Compliance (עמידה באמות מידה) row by its stable id. ops_manager + ceo ONLY (canManage) —
+// gated HERE independent of the gateway. The delete is AUDIT-LOGGED (AuditLog) so a removal is never
+// silent. Idempotent-ish: an unknown id is reported, not treated as success.
+function handleDeleteCompliance_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  var id = String((p && p.id) == null ? '' : p.id).replace(/^\s+|\s+$/g, '');
+  if (!id) return jsonOut_({ ok: false, error: 'Missing id' });
+  var sheet = getSheet_('Compliance');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return jsonOut_({ ok: false, error: 'Compliance entry not found' });
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  if (idCol === -1) return jsonOut_({ ok: false, error: 'Compliance sheet has no id column' });
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]).replace(/^\s+|\s+$/g, '') === id) {
+      var itemCol = headers.indexOf('item');
+      var itemName = itemCol !== -1 ? String(data[r][itemCol] || '') : '';
+      sheet.deleteRow(r + 1);
+      writeAuditEntry(id, '', 'נמחק', actor.name, 'רשומת אמות מידה נמחקה' + (itemName ? ' (' + itemName + ')' : ''));
+      return jsonOut_({ ok: true, id: id });
+    }
+  }
+  return jsonOut_({ ok: false, error: 'Compliance entry not found' });
 }
 
 // ===== Inspections module =====

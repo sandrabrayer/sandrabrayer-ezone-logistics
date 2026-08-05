@@ -52,3 +52,38 @@ shortagesSummary — we never fabricate weekly data.
 
 INVARIANTS: no financial fields, ever. Columns are append-only — never reorder
 or remove. Consumers read by header name, not index.
+
+--- FROZEN CONTRACT — DIGEST CONSUME (v2) ---
+
+The direction above is what Logistics PUBLISHES. This section is what Logistics CONSUMES: two
+inbound, READ-ONLY digests published by OTHER apps that the /management screen will read. As of PR B
+non-food inventory COUNTING moved to the Coordinators app (food already lives in ezone-kitchen), so
+Logistics stops OWNING those counts and instead READS them. This is a contract definition only — the
+read wiring is NOT implemented yet (no code reads these tabs today). When wired, the reads obey the
+same discipline as the export above: read WEEKLY, columns resolved BY HEADER NAME (never index),
+NO financial fields consumed, and a house whose id does not map is OMITTED (never guessed).
+
+Inbound A — Coordinators digest, tab WeeklyNonFoodCounts — the weekly non-food (טואלטיקה / חומרי ניקוי)
+counts the coordinators now own. Columns Logistics reads by header name:
+  house         house id (canonical, shared namespace; unmapped → omitted)
+  weekStart     YYYY-MM-DD, Sunday (Israeli week)
+  status        'בוצעה' / 'לא בוצעה'
+  shortagesSummary  text, below-par items (may be ""); NON-financial
+  updatedAt     ISO 8601 UTC
+Read the LATEST row per house+week. No quantities/costs/budgets are consumed — only the status and the
+scrubbed shortage summary. A missing tab / id renders the panel "לא זמין", never fabricated counts.
+
+Inbound B — Kitchen digest, tab FoodShortages — the food shortages ezone-kitchen owns. Columns read by
+header name:
+  house         house id (canonical; unmapped → omitted)
+  item          Hebrew item name
+  weekStart     YYYY-MM-DD, Sunday (optional; when present, read the latest week)
+  updatedAt     ISO 8601 UTC (optional)
+Read WEEKLY. Only shortage facts (house + item) are consumed — NO quantities, par, budget, or any
+financial field. Grant the Logistics Apps Script account VIEWER access for the read to work; a blank
+id or missing tab renders "לא זמין".
+
+INVARIANTS (consume): read-only (Logistics never writes these tabs); NO financial fields consumed,
+ever; columns read BY HEADER NAME, not index (append-only on the publisher side); unmapped houses are
+omitted, never guessed; a missing/inaccessible source renders "לא זמין", never a fabricated number.
+This is v2-compatible: it ADDS a consume contract without changing any published column above.
