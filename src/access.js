@@ -37,7 +37,7 @@ var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
   if (role === 'coordinator') return action === 'createRequest' || action === 'createEvent';
-  if (role === 'maintenance') return action === 'createRequest';
+  if (role === 'maintenance') return action === 'createRequest' || action === 'updatePreventiveItem';
   return false;
 }
 // === MIRROR:access END ===
@@ -49,6 +49,10 @@ function canWriteAction(role, action) {
 const READ_ALL_ROLES = new Set(['houses', 'config', 'requests']);
 function canRead(role, action) {
   if (READ_ALL_ROLES.has(action)) return true;
+  // The daily preventive checklist is read by the maintenance leads (their own houses, scope-filtered in the
+  // proxy exactly like requests) AND by managers for the /management hub. openingChecklist / emergencyReadiness
+  // / trainings stay manager-tier (field_ops = manager reads them for the /workorders entry tabs).
+  if (action === 'preventiveDaily') return role === 'maintenance' || isManagerRole(role);
   return isManagerRole(role);
 }
 

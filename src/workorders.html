@@ -141,6 +141,22 @@
     const URGENCY_RANK = { 'חירום': 0, 'דחוף': 1, 'רגיל': 2 };
     let requests = [], findings = [], inspections = [], houses = [];
     let activeLead = REFER_TAB;
+
+    // ---- Field entry tabs (hub redesign) — role-conditional, appended in load() ----
+    // Roy (field_ops) + managers enter the pre-opening + emergency readiness checklists here; maintenance
+    // leads (רמי / צחי) enter today's preventive-daily checklist for their own houses. The server enforces
+    // the real role/scope gates — these tabs are display-only convenience.
+    const ROLE = String(window.__ROLE__ || '');
+    const isManagerRole = ['field_ops', 'ops_manager', 'ceo'].indexOf(ROLE) !== -1;
+    const isMaintenance = ROLE === 'maintenance';
+    const OPENING_TAB = 'מוכנות פתיחה', EMERGENCY_TAB = 'מוכנות חירום', DAILY_TAB = 'בדיקה יומית';
+    // Fixed daily preventive template — MIRROR of Code.gs PREVENTIVE_DAILY_TEMPLATE (the server validates
+    // every write against it). Kept inline so this page needs no manager-only managementData read.
+    const PREVENTIVE_DAILY_TEMPLATE = ['בדיקת דוד/גז', 'סבב מפגעים', 'תאורה', 'מים'];
+    const isDoneCell = (v) => v === true || v === 1 || ['TRUE', '1'].indexOf(String(v == null ? '' : v).trim().toUpperCase()) !== -1;
+    const todayIso = () => new Date().toISOString().slice(0, 10);
+    let tabList = TABS.slice();
+    let openingRows = [], emergencyRows = [], preventiveRows = [];
     // Per-lead filter for the open-tasks list, so a maintenance lead sees ONLY their own tasks
     // (רמי / צחי) instead of every lead's mixed together. '' = הכל (no filter). Mirrors
     // src/workorders.js filterByLead. Applied only on the refer + execution tabs (the external tab
@@ -171,6 +187,11 @@
         findings = d.findings || [];
         inspections = d.inspections || [];
         houses = d.houses || [];
+        // Append the role-specific field-entry tabs and fetch their data (separate role-gated reads, so the
+        // shared workorders pageData is never broadened for a role that can't read a checklist).
+        tabList = TABS.slice();
+        if (isManagerRole) { tabList.push(OPENING_TAB, EMERGENCY_TAB); await loadReadiness(); }
+        if (isMaintenance) { tabList.push(DAILY_TAB); await loadPreventive(); }
         renderTabs();
         renderLeadFilter();
         render();
@@ -179,8 +200,15 @@
       }
     }
 
+    async function fetchData(action) {
+      try { const j = await fetch(EXEC_URL + '?action=' + action).then(r => r.json()); return (j && j.ok && j.data) || []; }
+      catch (e) { return []; }
+    }
+    async function loadReadiness() { openingRows = await fetchData('openingChecklist'); emergencyRows = await fetchData('emergencyReadiness'); }
+    async function loadPreventive() { preventiveRows = await fetchData('preventiveDaily'); }
+
     function renderTabs() {
-      document.getElementById('leadTabs').innerHTML = TABS.map(l =>
+      document.getElementById('leadTabs').innerHTML = tabList.map(l =>
         `<button class="lead-tab ${l === activeLead ? 'active' : ''}" onclick="pickLead('${l}')">${l}</button>`).join('');
     }
     window.pickLead = (l) => { activeLead = l; renderTabs(); renderLeadFilter(); render(); };
@@ -205,8 +233,64 @@
     function render() {
       if (activeLead === EXTERNAL_TAB) return renderExternal();
       if (activeLead === EXEC_TAB) return renderExecution();
+      if (activeLead === OPENING_TAB) return renderReadinessEntry('opening', openingRows, 'מוכנות בתים לפתיחה', h => String(h.status) === 'pre-opening');
+      if (activeLead === EMERGENCY_TAB) return renderReadinessEntry('emergency', emergencyRows, 'מוכנות לשעת חירום', () => true);
+      if (activeLead === DAILY_TAB) return renderDailyEntry();
       return renderRefer();
     }
+
+    // ── Readiness entry (opening / emergency): tick items per house. Writes go through updateReadinessItem
+    //    (server enforces manager-tier). Rows come from the role-gated GET reads. ──
+    function renderReadinessEntry(board, rows, title, houseFilter) {
+      const byHouse = {};
+      (rows || []).forEach(r => { if (!r || !r.house) return; (byHouse[r.house] = byHouse[r.house] || []).push(r); });
+      const hs = houses.filter(houseFilter).map(h => h.name).filter(n => byHouse[n]);
+      const today = new Date().toLocaleDateString('he-IL');
+      if (!hs.length) { document.getElementById('out').innerHTML = `<div class="order-doc"><h2>${esc(title)}</h2><div class="head-meta">${today}</div><p>אין פריטים להצגה.</p></div>`; return; }
+      const blocks = hs.map(house => {
+        const items = byHouse[house];
+        const done = items.filter(it => isDoneCell(it.done)).length;
+        const rowsHtml = items.map(it => `<div class="task-row">
+          <label class="task-main" style="display:flex;gap:10px;align-items:center"><input type="checkbox" ${isDoneCell(it.done) ? 'checked' : ''} onchange="toggleReadiness('${esc(board)}','${esc(it.id)}',this.checked)">${esc(it.item)}</label>
+          <span class="save-flash">${it.date ? esc(it.date) : ''}${it.by ? ' · ' + esc(it.by) : ''}</span>
+        </div>`).join('');
+        return `<div class="order-house"><div class="order-house-name">${esc(house)} <span class="count-badge">${done}/${items.length}</span></div>${rowsHtml}</div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc"><h2>${esc(title)}</h2><div class="head-meta">הופק: ${today} · סימון פריטים כבוצעו</div>${blocks}</div>`;
+    }
+    window.toggleReadiness = async (board, id, done) => {
+      const j = await post('updateReadinessItem', { board, id, done });
+      if (j && j.ok) { const arr = board === 'opening' ? openingRows : emergencyRows; const r = arr.find(x => String(x.id) === String(id)); if (r) { r.done = done ? 'TRUE' : 'FALSE'; r.date = done ? todayIso() : ''; } render(); }
+      else alert((j && j.error) || 'שגיאה');
+    };
+
+    // ── Daily preventive entry (maintenance leads): today's fixed template per house (their own houses only,
+    //    scope-enforced server-side). Toggling writes a PreventiveDaily completion (server stamps date=today). ──
+    function renderDailyEntry() {
+      const today = todayIso();
+      const doneSet = {}; // house|item -> done for today
+      (preventiveRows || []).forEach(r => { if (r && String(r.date).slice(0, 10) === today && isDoneCell(r.done)) doneSet[String(r.house) + '|' + String(r.item)] = true; });
+      // Houses the lead may act on = houses present in their scoped preventive read, else all read houses.
+      const scoped = {}; (preventiveRows || []).forEach(r => { if (r && r.house) scoped[r.house] = true; });
+      const myHouses = houses.filter(h => Object.keys(scoped).length ? scoped[h.name] : true).map(h => h.name);
+      const list = (myHouses.length ? myHouses : houses.map(h => h.name));
+      const todayHe = new Date().toLocaleDateString('he-IL');
+      if (!list.length) { document.getElementById('out').innerHTML = `<div class="order-doc"><h2>בדיקה יומית</h2><div class="head-meta">${todayHe}</div><p>אין בתים.</p></div>`; return; }
+      const blocks = list.map(house => {
+        const rowsHtml = PREVENTIVE_DAILY_TEMPLATE.map(item => {
+          const isDone = !!doneSet[house + '|' + item];
+          return `<div class="task-row"><label class="task-main" style="display:flex;gap:10px;align-items:center"><input type="checkbox" ${isDone ? 'checked' : ''} onchange="togglePreventive('${esc(house)}','${esc(item)}',this.checked)">${esc(item)}</label></div>`;
+        }).join('');
+        const doneCount = PREVENTIVE_DAILY_TEMPLATE.filter(item => doneSet[house + '|' + item]).length;
+        return `<div class="order-house"><div class="order-house-name">${esc(house)} <span class="count-badge">${doneCount}/${PREVENTIVE_DAILY_TEMPLATE.length}</span></div>${rowsHtml}</div>`;
+      }).join('');
+      document.getElementById('out').innerHTML = `<div class="order-doc"><h2>בדיקה יומית — <span dir="ltr">${todayHe}</span></h2><div class="head-meta">בדיקת תחזוקה מונעת יומית לבתים שלך</div>${blocks}</div>`;
+    }
+    window.togglePreventive = async (house, item, done) => {
+      const j = await post('updatePreventiveItem', { house, item, done });
+      if (j && j.ok) { preventiveRows.push({ house, date: todayIso(), item, done: done ? 'TRUE' : 'FALSE', by: '' }); render(); }
+      else alert((j && j.error) || 'שגיאה');
+    };
 
     // A live task = referred to a lead (assigned_to set), not done (not הושלם/סגור) and not marked בוצע.
     const DONE_STATUSES = ['הושלם', 'סגור'];

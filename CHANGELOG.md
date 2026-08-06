@@ -3,6 +3,52 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — /management redesigned as a HUB + topic views, and two new field checklists
+
+**Why.** Olga's one long /management page became a **dashboard hub**: a compact KPI/gauge summary per topic,
+each opening its own view with **client-side switching (no reload)**. Two field-side checklists were added so
+the data behind the hub is entered by the people who own it.
+
+**1. Hub layout.** `/management` opens as a grid of topic cards (each shows a headline KPI): **SLA וליקויים**,
+**עמידה בתקציב**, **מוכנות בתים לפתיחה**, **מוכנות לשעת חירום**, **תחזוקה מונעת**, **מעקב הדרכות**. Clicking a
+card switches to that topic's full view (a "← חזרה למרכז" button returns) — all from ONE `managementData` load,
+no re-fetch. (אירועים חריגים was already gone; confirmed absent.)
+
+**2. עמידה בתקציב.** Per house: **actual spend = completed/closed `actual_cost`** for the selected month vs the
+budget from the existing `Budgets` sheet, shown as a bar + % used. UI note that food spend arrives later from
+the Kitchen digest (not wired). `budgetAdherenceByHouse` / `budgetTotalPercent` (pure, tested).
+
+**3. מוכנות בתים לפתיחה.** Data ENTRY moved to **Roy (field_ops)** — a new tab in `/workorders` with a **fixed
+template per pre-opening house** (`ריהוט`, `מכשירי חשמל`, `חיבור תשתיות`, `ציוד בטיחות`, `מסמכי רישוי`, `ניקיון`,
+`מפתחות`), seeded into `OpeningChecklist` (idempotent). Olga's hub view is **read-only completion %**.
+
+**4. מוכנות לשעת חירום.** Per-house `EmergencyReadiness` checklist, now **editable by field_ops + ops_manager**
+(field_ops from `/workorders`, ops_manager from the hub). Olga's hub shows **% ready per house**.
+
+**5. תחזוקה מונעת → daily checklist.** NEW sheet **`PreventiveDaily`** (`house, date, item, done, by`). A short
+fixed daily template (`בדיקת דוד/גז`, `סבב מפגעים`, `תאורה`, `מים`) is entered by the maintenance leads (רמי /
+צחי) from a `/workorders` tab — **scoped to their own houses, today's date server-stamped**. Olga's view shows
+completion per house per day (last 7 days). The MaintenancePlan panel is kept alongside it.
+
+**6. מעקב הדרכות** (rename of עמידה באמות מידה). New sheet **`Trainings`** (`id, topic, house, date, attended,
+by`) — MANUAL entry for now (a later increment feeds it from the Coordinators digest; NOT wired). The panel
+lists trainings per house with **delete (confirm + audit-logged)**, the same behavior the compliance panel had.
+
+**Role gates.** Hub + `deleteTraining` + `deleteCompliance` are exec-only (ops_manager + ceo). The readiness
+writes are now manager-tier (field_ops included). `updatePreventiveItem` is allowed for maintenance (own houses,
+enforced by `houseInScope`) + managers; the item must be in the fixed template; the date is server-stamped —
+enforced at the Node gateway AND independently in Code.gs. Reads: `preventiveDaily` is maintenance+manager and
+scope-filtered like requests; `openingChecklist` / `emergencyReadiness` / `trainings` are manager-tier.
+
+**⚠️ After merge:** re-run **`setupSheet()` once** — it adds `PreventiveDaily` + `Trainings` and seeds the
+`OpeningChecklist` template (idempotent; existing data untouched). Apps Script deploys via clasp CI.
+
+**Tests.** Pure logic (budget %, readiness %, preventive completion, trainings) in `management.test.js`; the real
+Code.gs handlers (preventive scope + date-stamp + upsert, training delete+audit, re-gated readiness) in
+`management-handler.test.js`; gateway role gates in `management-writes.test.js`; template-seed idempotency in
+`setup-seeds.test.js`; and the read/write matrix in `access.test.js`. Both HTML pages render-smoked headless
+(hub + every topic view; all three /workorders entry tabs). `node --test` green (**591 tests**). No secrets.
+
 ## [Unreleased] — ci — post-deploy verification so a green clasp deploy can never hide a stale production
 
 **Why.** Production symptoms (dashboard hangs on `טוען דרישות`, approve/reject dead, recently merged

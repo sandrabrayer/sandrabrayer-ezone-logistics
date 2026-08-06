@@ -119,8 +119,82 @@ export function readinessByHouse(rows, houses) {
   return order.map((k) => byHouse[k]);
 }
 
+// ---- Budget adherence (עמידה בתקציב) ----
+// Actual spend per house = sum of actual_cost over COMPLETED/CLOSED requests (money actually spent). Budget
+// per house comes from the Budgets sheet (passed as {house: amount}, derived server-side). Only houses with
+// a positive budget appear. percentUsed rounded; over = spend past budget. Worst (highest %) first.
+const COMPLETED_STATUSES = [STATUSES.COMPLETED, STATUSES.CLOSED];
+export function budgetAdherenceByHouse(requests, budgetByHouse) {
+  const spend = {};
+  (requests || []).forEach((r) => {
+    if (!r || COMPLETED_STATUSES.indexOf(String(r.status)) === -1) return;
+    const a = Number(r.actual_cost);
+    if (!isFinite(a) || a <= 0) return;
+    const h = String(r.house || ''); if (!h) return;
+    spend[h] = (spend[h] || 0) + a;
+  });
+  const out = [];
+  Object.keys(budgetByHouse || {}).forEach((house) => {
+    const budget = Number(budgetByHouse[house]);
+    if (!isFinite(budget) || budget <= 0) return;
+    const actual = spend[house] || 0;
+    out.push({ house, budget, actual, remaining: budget - actual, percentUsed: Math.round((100 * actual) / budget), over: actual > budget });
+  });
+  out.sort((a, b) => b.percentUsed - a.percentUsed || String(a.house).localeCompare(String(b.house), 'he'));
+  return out;
+}
+
+// Aggregate budget utilization across houses (the hub KPI). null when no positive budget is defined.
+export function budgetTotalPercent(rows) {
+  let b = 0, a = 0;
+  (rows || []).forEach((r) => { b += Number(r.budget) || 0; a += Number(r.actual) || 0; });
+  return b > 0 ? Math.round((100 * a) / b) : null;
+}
+
+// Completion % of a readiness group ({ total, doneCount }); null when there are no items.
+export function readinessPercent(group) {
+  return group && group.total > 0 ? Math.round((100 * group.doneCount) / group.total) : null;
+}
+
+// Average readiness % across houses (hub KPI); null when no house has any items.
+export function readinessAveragePercent(groups) {
+  const pcts = (groups || []).map((g) => readinessPercent(g)).filter((p) => p != null);
+  if (!pcts.length) return null;
+  return Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
+}
+
+// PreventiveDaily completion: per house, per date, how many distinct template items were done. total is the
+// template length. `dates` is the list of YYYY-MM-DD to report (e.g. the last 7 days). Rows for unmapped
+// houses are ignored.
+export function preventiveCompletion(rows, template, houses, dates) {
+  const total = (template || []).length;
+  const done = {}; // 'house|date' -> Set(items)
+  (rows || []).forEach((r) => {
+    if (!r || !r.house || !r.date || !isDoneCell(r.done)) return;
+    const k = String(r.house) + '|' + String(r.date).slice(0, 10);
+    (done[k] || (done[k] = new Set())).add(String(r.item));
+  });
+  return (houses || []).map((h) => ({
+    house: h.name,
+    days: (dates || []).map((d) => ({ date: d, doneCount: (done[String(h.name) + '|' + d] || new Set()).size, total })),
+  }));
+}
+
+// Trainings (מעקב הדרכות) grouped by house, newest-first. Rows whose house is not in `houses` are omitted.
+export function trainingsByHouse(rows, houses) {
+  const byHouse = {}, order = [];
+  (houses || []).forEach((h) => { if (h && h.name && !byHouse[h.name]) { byHouse[h.name] = { house: h.name, items: [] }; order.push(h.name); } });
+  (rows || []).forEach((r) => {
+    if (!r || !r.house) return;
+    const b = byHouse[r.house]; if (!b) return;
+    b.items.push({ id: r.id, topic: r.topic || '', date: r.date || '', attended: r.attended || '', by: r.by || '' });
+  });
+  order.forEach((k) => byHouse[k].items.sort((a, b) => String(b.date).localeCompare(String(a.date))));
+  return order.map((k) => byHouse[k]);
+}
+
 // The whole screen payload built from owned arrays. `now` is passed in (deterministic + testable).
-// budget / compliance / maintenance are computed server-side and merged by the caller — not here.
+// budget / maintenance are computed server-side and merged by the caller — not here.
 export function buildManagementSummary(data, now) {
   const d = data || {};
   const houses = d.houses || [];

@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {
   buildManagementSummary, requestsPanel, recurringDefectsFromRequests, readinessByHouse, isDoneCell,
   RECURRENCE_WINDOW_DAYS, RECURRENCE_MIN,
+  budgetAdherenceByHouse, budgetTotalPercent, readinessPercent, readinessAveragePercent,
+  preventiveCompletion, trainingsByHouse,
 } from '../src/management.js';
 import { canManage, ROLE } from '../src/roles.js';
 
@@ -152,4 +154,79 @@ test('canManage: ops_manager and ceo pass; field_ops, coordinator, maintenance a
   assert.equal(canManage(ROLE.FIELD_OPS), false);
   assert.equal(canManage(ROLE.COORDINATOR), false);
   assert.equal(canManage(ROLE.MAINTENANCE), false);
+});
+
+// ── Budget adherence (עמידה בתקציב): actual = completed/closed actual_cost vs Budgets ──
+
+test('budgetAdherenceByHouse: sums completed/closed actual_cost per house vs budget; % + over', () => {
+  const requests = [
+    { house: 'א', status: 'הושלם', actual_cost: 600 },
+    { house: 'א', status: 'סגור', actual_cost: 600 },
+    { house: 'א', status: 'בביצוע', actual_cost: 999 }, // not completed → ignored
+    { house: 'ב', status: 'הושלם', actual_cost: 300 },
+    { house: 'ג', status: 'הושלם', actual_cost: 100 },  // no budget row → omitted
+  ];
+  const budgetByHouse = { 'א': 1000, 'ב': 1000 };
+  const rows = budgetAdherenceByHouse(requests, budgetByHouse);
+  assert.deepEqual(rows.map(r => [r.house, r.actual, r.percentUsed, r.over]), [
+    ['א', 1200, 120, true],   // worst first
+    ['ב', 300, 30, false],
+  ]);
+  assert.equal(rows.find(r => r.house === 'ב').remaining, 700);
+});
+
+test('budgetAdherenceByHouse: houses with no positive budget are excluded; non-numeric spend ignored', () => {
+  const rows = budgetAdherenceByHouse(
+    [{ house: 'א', status: 'הושלם', actual_cost: '' }, { house: 'א', status: 'הושלם', actual_cost: 'x' }],
+    { 'א': 0, 'ב': 500 });
+  assert.deepEqual(rows.map(r => r.house), ['ב']); // 'א' budget 0 excluded; 'ב' has 0 spend
+  assert.equal(rows[0].actual, 0);
+  assert.equal(rows[0].percentUsed, 0);
+});
+
+test('budgetTotalPercent: aggregate utilization; null when no budget', () => {
+  assert.equal(budgetTotalPercent([{ budget: 1000, actual: 500 }, { budget: 1000, actual: 500 }]), 50);
+  assert.equal(budgetTotalPercent([]), null);
+});
+
+// ── Readiness percentages ──
+
+test('readinessPercent + average', () => {
+  assert.equal(readinessPercent({ total: 4, doneCount: 1 }), 25);
+  assert.equal(readinessPercent({ total: 0, doneCount: 0 }), null);
+  assert.equal(readinessAveragePercent([{ total: 4, doneCount: 2 }, { total: 2, doneCount: 2 }]), 75); // 50 + 100 / 2
+  assert.equal(readinessAveragePercent([{ total: 0, doneCount: 0 }]), null);
+});
+
+// ── PreventiveDaily completion (per house per day) ──
+
+test('preventiveCompletion: distinct done template items per house per date; template length is the total', () => {
+  const template = ['a', 'b', 'c'];
+  const houses = [{ name: 'א' }, { name: 'ב' }];
+  const rows = [
+    { house: 'א', date: '2026-02-14', item: 'a', done: 'TRUE' },
+    { house: 'א', date: '2026-02-14', item: 'b', done: 'TRUE' },
+    { house: 'א', date: '2026-02-14', item: 'a', done: 'TRUE' }, // dup item — counted once
+    { house: 'א', date: '2026-02-13', item: 'a', done: 'FALSE' }, // not done
+    { house: 'ב', date: '2026-02-14', item: 'a', done: 'TRUE' },
+  ];
+  const out = preventiveCompletion(rows, template, houses, ['2026-02-13', '2026-02-14']);
+  const a = out.find(h => h.house === 'א');
+  assert.deepEqual(a.days.map(d => [d.date, d.doneCount, d.total]), [['2026-02-13', 0, 3], ['2026-02-14', 2, 3]]);
+  assert.equal(out.find(h => h.house === 'ב').days[1].doneCount, 1);
+});
+
+// ── Trainings grouping (מעקב הדרכות) ──
+
+test('trainingsByHouse: grouped per house, newest-first; unmapped house omitted', () => {
+  const houses = [{ name: 'א' }, { name: 'ב' }];
+  const rows = [
+    { id: 't1', house: 'א', topic: 'בטיחות', date: '2026-01-10', attended: 'צוות', by: 'אולגה' },
+    { id: 't2', house: 'א', topic: 'עזרה ראשונה', date: '2026-02-01', attended: 'מדריכים', by: 'אולגה' },
+    { id: 't3', house: 'לא-במיפוי', topic: 'x', date: '2026-02-02' },
+  ];
+  const out = trainingsByHouse(rows, houses);
+  assert.deepEqual(out.map(h => h.house), ['א', 'ב']);
+  assert.deepEqual(out.find(h => h.house === 'א').items.map(i => i.id), ['t2', 't1']); // newest first
+  assert.equal(out.find(h => h.house === 'ב').items.length, 0);
 });

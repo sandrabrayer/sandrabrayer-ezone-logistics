@@ -83,20 +83,53 @@ var HEADERS = {
     'description', 'immediate_action', 'root_cause', 'lessons', 'corrective_request_id',
     'status', 'closed_at', 'notes',
   ],
-  // OpeningChecklist (PR B) — a LOGISTICS-owned pre-opening readiness checklist, one row per (house,
-  // item). Feeds the /management "מוכנות בתים לפתיחה" panel. Created EMPTY by setupSheet(); Logistics adds
-  // items per pre-opening house (הפרדס / שדה אליעזר) via the screen. done = TRUE/FALSE; date/by stamped when
-  // ticked. house = canonical display name. Append-only from the UI; id targets an in-place update/delete.
+  // OpeningChecklist (PR B; template-seeded in the hub redesign) — a LOGISTICS-owned pre-opening readiness
+  // checklist, one row per (house, item). Feeds the /management "מוכנות בתים לפתיחה" panel (read-only %) and
+  // the ENTRY tab in Roy's /workorders view (field_ops edits done/date/by). setupSheet() SEEDS a FIXED
+  // template per PRE-OPENING house (idempotent — only when empty). house = canonical display name.
   OpeningChecklist: ['id', 'house', 'item', 'done', 'date', 'by'],
   // EmergencyReadiness (PR B) — a per-house emergency-preparedness checklist (generator/gas/water/first-aid/
-  // …). Feeds the /management "בקרת מוכנות לזמן חירום" panel. setupSheet() SEEDS a default item set per house
-  // (idempotent — only when empty); the list is editable from the screen (add / tick / delete). Same shape
-  // and semantics as OpeningChecklist.
+  // …). Feeds the /management "מוכנות לשעת חירום" panel (% ready) and is editable by field_ops + ops_manager.
+  // setupSheet() SEEDS a default item set per house (idempotent — only when empty). Same shape as opening.
   EmergencyReadiness: ['id', 'house', 'item', 'done', 'date', 'by'],
+  // PreventiveDaily (hub redesign) — a DAILY preventive-maintenance checklist for the maintenance leads
+  // (רמי / צחי). One row per (house, date, item) COMPLETION — written from the /workorders "בדיקה יומית" tab,
+  // scoped to the lead's own houses and today's date (server-stamped). The daily TEMPLATE is a short fixed
+  // list (PREVENTIVE_DAILY_TEMPLATE, mirrored in Code.gs); this sheet stores only completions. Olga's hub
+  // shows completion per house per day (last 7 days). Created EMPTY (completions accrue). done TRUE/FALSE.
+  PreventiveDaily: ['house', 'date', 'item', 'done', 'by'],
+  // Trainings (hub redesign — "מעקב הדרכות", the rename of עמידה באמות מידה) — a training-tracking log:
+  // one row per training session. MANUAL entry in the Sheet for now; a later increment feeds it from the
+  // Coordinators app via digest (NOT wired here). The /management panel lists rows per house and supports
+  // delete (with confirm, audit-logged). Created EMPTY. attended = free text (who attended); by = recorder.
+  Trainings: ['id', 'topic', 'house', 'date', 'attended', 'by'],
 };
 
 // Default emergency-preparedness items seeded per house (editable from the screen afterwards).
 var DEFAULT_EMERGENCY_ITEMS = ['גנרטור', 'גז', 'מים', 'ערכת עזרה ראשונה', 'מטפי כיבוי אש', 'תאורת חירום'];
+
+// Fixed pre-opening checklist template, seeded once per PRE-OPENING house (status 'pre-opening'). Editable
+// in-sheet + toggled from Roy's /workorders entry tab. Mirrored (as validation) by Code.gs OPENING_TEMPLATE.
+var OPENING_TEMPLATE = ['ריהוט', 'מכשירי חשמל', 'חיבור תשתיות (מים/חשמל/גז)', 'ציוד בטיחות', 'מסמכי רישוי', 'ניקיון', 'מפתחות'];
+
+// Fixed daily preventive-maintenance template (kept short; editable later). Mirrored by Code.gs
+// PREVENTIVE_DAILY_TEMPLATE, which validates every write against it.
+var PREVENTIVE_DAILY_TEMPLATE = ['בדיקת דוד/גז', 'סבב מפגעים', 'תאורה', 'מים'];
+
+// Build the OpeningChecklist seed: one row per (pre-opening house, template item). ids 'OPN-SEED-####'.
+function buildOpeningChecklistSeed_() {
+  var rows = [];
+  var n = 0;
+  for (var h = 0; h < SEED_HOUSES.length; h++) {
+    if (String(SEED_HOUSES[h][3]) !== 'pre-opening') continue; // status column
+    var houseName = SEED_HOUSES[h][0];
+    for (var i = 0; i < OPENING_TEMPLATE.length; i++) {
+      n++;
+      rows.push(['OPN-SEED-' + String(n).padStart(4, '0'), houseName, OPENING_TEMPLATE[i], 'FALSE', '', '']);
+    }
+  }
+  return rows;
+}
 
 // Build the EmergencyReadiness seed: one row per (house, default item), across every seeded house.
 // ids are stable + collision-free with runtime genId_ (which stamps a 14-digit time) — 'EMR-SEED-####'.
@@ -261,8 +294,10 @@ function setupSheet() {
   seedIfEmpty_(ss.getSheetByName('Technicians'), SEED_TECHNICIANS);
   seedIfEmpty_(ss.getSheetByName('ChecklistItems'), SEED_CHECKLIST);
   seedIfEmpty_(ss.getSheetByName('InventoryItems'), SEED_INVENTORY_ITEMS);
-  // OpeningChecklist stays EMPTY (Logistics fills it per pre-opening house from the screen);
-  // EmergencyReadiness is seeded with the default item set per house. Both are seed-if-empty → idempotent.
+  // OpeningChecklist is seeded with the FIXED pre-opening template per pre-opening house; EmergencyReadiness
+  // with the default item set per house. Both are seed-if-empty → idempotent (a re-run never duplicates).
+  // PreventiveDaily + Trainings stay EMPTY (completions / manual log accrue at runtime).
+  seedIfEmpty_(ss.getSheetByName('OpeningChecklist'), buildOpeningChecklistSeed_());
   seedIfEmpty_(ss.getSheetByName('EmergencyReadiness'), buildEmergencyReadinessSeed_());
 
   // Config + Users are upserted by key/name (NOT seed-if-empty) so re-running setupSheet() after

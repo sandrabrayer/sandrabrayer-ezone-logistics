@@ -1,7 +1,8 @@
-// test/management-writes.test.js — the /management write actions added in PR B (readiness checklists +
-// compliance delete) are EXEC-ONLY (ops_manager + ceo), enforced at the Node gateway BEFORE any upstream
-// call — same posture as managementData. Real gateway + a fake Apps Script upstream that records forwards
-// (mirrors staff-tiers.test.js).
+// test/management-writes.test.js — the write-action role gates at the Node gateway after the hub redesign.
+// Real gateway + a fake Apps Script upstream that records forwards (mirrors staff-tiers.test.js). Tiers:
+//   • EXEC-ONLY (ops_manager + ceo): deleteCompliance, deleteTraining.
+//   • MANAGER-TIER (field_ops + ops_manager + ceo): addReadinessItem / updateReadinessItem / deleteReadinessItem.
+//   • LEADS + managers: updatePreventiveItem (maintenance may write; coordinator may not).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -14,6 +15,7 @@ const USERS = [
   { name: 'אולגה', role: 'ops_manager', house: '', active: 'TRUE', pin_hash: hashPin('olga-password') },
   { name: 'רועי',  role: 'field_ops',   house: '', active: 'TRUE', pin_hash: hashPin('roy-password') },
   { name: 'רמי',   role: 'maintenance', house: 'sharon', active: 'TRUE', pin_hash: '' },
+  { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני', active: 'TRUE', pin_hash: '' },
 ];
 
 const forwarded = [];
@@ -58,37 +60,51 @@ async function action(token, act, payload) {
   return { status: r.status };
 }
 
-const MANAGE_ONLY = ['addReadinessItem', 'updateReadinessItem', 'deleteReadinessItem', 'deleteCompliance'];
+const EXEC_ONLY = ['deleteCompliance', 'deleteTraining'];
+const READINESS = ['addReadinessItem', 'updateReadinessItem', 'deleteReadinessItem'];
 
-test('ops_manager: every management write is forwarded (200) with the real token', async () => {
+test('EXEC-ONLY writes: ops_manager forwarded (200) with real token; field_ops & tier-B → 403, nothing forwarded', async () => {
   forwarded.length = 0;
-  const { token } = await login('אולגה', 'olga-password');
-  for (const act of MANAGE_ONLY) {
-    const { status } = await action(token, act, { board: 'opening', house: 'h', item: 'i', id: 'X' });
-    assert.equal(status, 200, `${act} must be forwarded for ops_manager`);
-  }
-  assert.equal(forwarded.length, MANAGE_ONLY.length);
+  const olga = (await login('אולגה', 'olga-password')).token;
+  for (const act of EXEC_ONLY) assert.equal((await action(olga, act, { id: 'X' })).status, 200, `${act} ops_manager`);
   for (const f of forwarded) assert.equal(verifyToken(SECRET, f.token).role, 'ops_manager');
-});
-
-test('field_ops (manager tier for dispatch, NOT exec) is refused every management write → 403, no upstream', async () => {
   forwarded.length = 0;
-  const { token } = await login('רועי', 'roy-password');
-  for (const act of MANAGE_ONLY) {
-    assert.equal((await action(token, act, { board: 'opening', id: 'X' })).status, 403, `${act} must be 403 for field_ops`);
+  const roy = (await login('רועי', 'roy-password')).token;      // field_ops — NOT an exec
+  const rami = (await login('רמי', APP_PIN)).token;             // maintenance
+  for (const act of EXEC_ONLY) {
+    assert.equal((await action(roy, act, { id: 'X' })).status, 403, `${act} field_ops must be 403`);
+    assert.equal((await action(rami, act, { id: 'X' })).status, 403, `${act} maintenance must be 403`);
   }
   assert.equal(forwarded.length, 0, 'a refused exec write never reaches Apps Script');
 });
 
-test('tier-B (maintenance) is refused every management write → 403', async () => {
-  const { token } = await login('רמי', APP_PIN);
-  for (const act of MANAGE_ONLY) {
-    assert.equal((await action(token, act, { board: 'emergency', id: 'X' })).status, 403);
+test('MANAGER-TIER readiness writes: field_ops IS allowed (forwarded); coordinator & maintenance → 403', async () => {
+  forwarded.length = 0;
+  const roy = (await login('רועי', 'roy-password')).token;      // field_ops = manager tier
+  for (const act of READINESS) assert.equal((await action(roy, act, { board: 'opening', id: 'X', house: 'h', item: 'i' })).status, 200, `${act} field_ops`);
+  assert.equal(forwarded.length, READINESS.length, 'field_ops readiness writes reach Apps Script');
+  forwarded.length = 0;
+  const coord = (await login('שירה', APP_PIN)).token;           // coordinator
+  const rami = (await login('רמי', APP_PIN)).token;             // maintenance
+  for (const act of READINESS) {
+    assert.equal((await action(coord, act, { board: 'opening', id: 'X' })).status, 403, `${act} coordinator must be 403`);
+    assert.equal((await action(rami, act, { board: 'opening', id: 'X' })).status, 403, `${act} maintenance must be 403`);
   }
+  assert.equal(forwarded.length, 0);
 });
 
-test('unauthenticated management writes → 401, nothing forwarded', async () => {
+test('updatePreventiveItem: maintenance AND managers may write; coordinator → 403', async () => {
   forwarded.length = 0;
-  for (const act of MANAGE_ONLY) assert.equal((await action('', act, {})).status, 401);
+  const rami = (await login('רמי', APP_PIN)).token;             // maintenance lead
+  const roy = (await login('רועי', 'roy-password')).token;      // manager
+  assert.equal((await action(rami, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'maintenance may write daily');
+  assert.equal((await action(roy, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'manager may write daily');
+  const coord = (await login('שירה', APP_PIN)).token;
+  assert.equal((await action(coord, 'updatePreventiveItem', { house: 'x', item: 'מים', done: true })).status, 403, 'coordinator may NOT write daily');
+});
+
+test('all management writes require a Bearer token → 401 when unauthenticated', async () => {
+  forwarded.length = 0;
+  for (const act of EXEC_ONLY.concat(READINESS, ['updatePreventiveItem'])) assert.equal((await action('', act, {})).status, 401);
   assert.equal(forwarded.length, 0);
 });

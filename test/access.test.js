@@ -137,3 +137,26 @@ test('existing exec/manager gates are NOT weakened by the early gate (management
   assert.equal(canWriteAction('maintenance', 'managementData'), false);
   assert.equal(canWriteAction('coordinator', 'updateEvent'), false);
 });
+
+// ── hub redesign: daily preventive checklist gates ──
+
+test('canWriteAction: maintenance may updatePreventiveItem (its own daily checklist) but nothing else new', () => {
+  assert.equal(canWriteAction('maintenance', 'updatePreventiveItem'), true);
+  assert.equal(canWriteAction('maintenance', 'createRequest'), true);
+  assert.equal(canWriteAction('maintenance', 'updateReadinessItem'), false); // readiness stays manager-tier
+  assert.equal(canWriteAction('maintenance', 'deleteTraining'), false);
+  assert.equal(canWriteAction('coordinator', 'updatePreventiveItem'), false);
+  // managers pass the early gate for any action (precise gate is in-handler)
+  for (const r of ['field_ops', 'ops_manager', 'ceo']) assert.equal(canWriteAction(r, 'updatePreventiveItem'), true);
+});
+
+test('canRead: preventiveDaily is readable by maintenance + managers; opening/emergency/trainings stay manager-tier', () => {
+  assert.equal(canRead('maintenance', 'preventiveDaily'), true);
+  for (const r of ['field_ops', 'ops_manager', 'ceo']) assert.equal(canRead(r, 'preventiveDaily'), true);
+  assert.equal(canRead('coordinator', 'preventiveDaily'), false);
+  for (const a of ['openingChecklist', 'emergencyReadiness', 'trainings']) {
+    assert.equal(canRead('field_ops', a), true, `field_ops reads ${a}`);
+    assert.equal(canRead('maintenance', a), false, `maintenance must NOT read ${a}`);
+    assert.equal(canRead('coordinator', a), false, `coordinator must NOT read ${a}`);
+  }
+});
