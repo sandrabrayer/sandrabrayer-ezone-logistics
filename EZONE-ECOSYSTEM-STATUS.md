@@ -156,7 +156,7 @@ every consumer breaks).
   both outpatient+therapists), CREATE_LEAD_SECRET (outpatient — set it to
   enable Dashboard→Outpatient lead handoff), DEBT_STATUS_SECRET,
   TREATMENT_PLANS_SECRET, OCCUPANCY_SECRET, OUTPATIENT_LEAD_SECRET,
-  WINBACK_SOURCE_SECRET, APP_PIN (Railway).
+  WINBACK_SOURCE_SECRET, SHARED_ACCESS_CODE (Railway — logistics shared login code; replaced APP_PIN).
 
 ## Known pitfalls (hard-won, extended July 4)
 

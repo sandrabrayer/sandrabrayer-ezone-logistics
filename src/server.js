@@ -15,7 +15,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
-import { signToken, verifyToken, checkPin, verifyPin, rosterProof } from './auth.js';
+import { signToken, verifyToken, checkPin } from './auth.js';
 import { ROLE, isManagerRole, houseInScope, canManage } from './roles.js';
 import { canRead, canWriteAction, canOpenPage, navByRole } from './access.js';
 
@@ -34,9 +34,18 @@ loadEnv();
 
 const PORT = process.env.PORT || 3000;
 const EXEC_URL = process.env.APPS_SCRIPT_EXEC_URL || '';
-const APP_PIN = process.env.APP_PIN || '';
+// ONE shared access code for the whole login roster (replaces the per-user pin_hash + the tier-B APP_PIN).
+// Trimmed so a trailing newline/space in the Railway variable can't make every login fail (a live-only
+// failure mode). Fail-closed: the server refuses to start if it is unset (see the startup block).
+const SHARED_ACCESS_CODE = (process.env.SHARED_ACCESS_CODE || '').trim();
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS) || 0;
+
+// Who may log into this (managers-oriented) app with the shared code = the active NON-coordinator roles.
+// Coordinators were removed from the app; the maintenance leads (רמי/צחי) keep login for their /workorders
+// preventive-daily entry. (To restrict to strictly manager-tier — field_ops/ops_manager/ceo — drop
+// 'maintenance' from this one set; nothing else changes.)
+const LOGIN_ROLES = new Set(['field_ops', 'ops_manager', 'ceo', 'maintenance']);
 
 const PUBLIC = join(__dirname, 'public');
 
@@ -60,8 +69,9 @@ const HEAD_INJECT =
 // FALLBACK login-roster names only. The picker is normally built from the LIVE active roster
 // (getLoginNames → doGet('users')); this hardcoded list is used solely when that read is unavailable
 // (a deploy-order window or an upstream outage) so the login page can never present an empty picker.
-// It mirrors the seeded SEED_USERS (setup.gs); a guard test asserts the two stay in sync.
-const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי', 'שירה', 'יעקב', 'אורן', 'אביב'];
+// It mirrors the LOGIN_ROLES (active, non-coordinator) seeded SEED_USERS (setup.gs); a guard test asserts
+// the two stay in sync. Coordinators are NOT here — they no longer log into this app.
+const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי'];
 // buildClientShim(names) → the injected <head> shim, with `names` as the login picker's roster. Built
 // per-request from the live active roster so the picker always reflects who can actually log in (a
 // renamed/added/deactivated user in the Users sheet is reflected within one micro-cache TTL) — no more
@@ -150,7 +160,7 @@ function buildClientShim(names) {
       var sel=el('select','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
       NAMES.forEach(function(n){var o=el('option',null,n);o.value=n;sel.appendChild(o);});
       var pin=el('input','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
-      pin.type='password';pin.setAttribute('autocomplete','off');pin.placeholder='סיסמה או קוד גישה';
+      pin.type='password';pin.setAttribute('autocomplete','off');pin.placeholder='קוד גישה';
       var btn=el('button','width:100%;min-height:44px;font-size:16px;font-weight:700;border:0;border-radius:8px;background:#00bfa5;color:#04150f;cursor:pointer','כניסה');
       var err=el('div','color:#ff8a80;font-size:.9rem;margin-top:10px;min-height:1.1em','');
       card.appendChild(h);card.appendChild(sel);card.appendChild(pin);card.appendChild(btn);card.appendChild(err);ov.appendChild(card);
@@ -302,7 +312,7 @@ function loginRosterNames(users) {
   const seen = new Set();
   const out = [];
   for (const u of users) {
-    if (!isActiveUser(u)) continue;
+    if (!isActiveUser(u) || !LOGIN_ROLES.has(String(u && u.role))) continue; // roster = active LOGIN_ROLES only
     const name = String((u && u.name) == null ? '' : u.name).trim();
     if (!name || seen.has(name)) continue;
     seen.add(name);
@@ -495,48 +505,46 @@ function authFromRequest(req) {
   return actor ? { actor, token } : null;
 }
 
-// Two access tiers (increment 31). tier A (רועי, אולגה) each have a personal password in the
-// Users.pin_hash column; tier B (coordinators + maintenance) share APP_PIN; סנדרה (ceo, no pin_hash)
-// and any manager without a pin_hash have NO login path. All failures return the SAME generic 401 —
-// never revealing which tier a name belongs to. The PIN/password is never logged.
+// Shared-code login (replaces the per-user pin_hash + tier-B APP_PIN scheme). Identity + role STILL come
+// from the SELECTED roster user (Users sheet); only the secret check is now one shared code for everyone
+// in the roster. This removes the fragile, live-only failure modes of the per-user path (see PR notes):
+// a SESSION_SECRET/roster-proof drift that strips pin_hash, an Apps-Script-vs-Node hashing mismatch, or a
+// stale/wrong stored hash. The roster is read PUBLICLY (no proof) — we no longer need pin_hash at all, so
+// login can't be broken by proof/secret drift. Names are matched TRIMMED (guards trailing-whitespace sheet
+// cells). All failures return the SAME generic 401. The code is never logged.
 async function handleLogin(req, res) {
   const ip = clientIp(req);
-  const generic401 = () => sendJson(res, 401, { ok: false, error: 'שם או סיסמה שגויים' });
+  const generic401 = () => sendJson(res, 401, { ok: false, error: 'שם או קוד שגויים' });
   if (!rateLimitLogin(ip)) {
     return sendJson(res, 429, { ok: false, error: 'יותר מדי ניסיונות. נסו שוב מאוחר יותר.' });
   }
   const body = await readJsonBody(req, 4096);
-  const name = (body && typeof body.name === 'string') ? body.name : '';
-  const pw = (body && body.pin != null) ? String(body.pin) : '';
+  const name = (body && typeof body.name === 'string') ? body.name.trim() : '';
+  const code = (body && body.pin != null) ? String(body.pin) : '';
 
-  // Read the roster WITH pin_hash via the server-to-server proof (Apps Script returns hashes only to
-  // this proof; public reads get them stripped).
-  const users = await fetchAppsScriptData('users', { auth: rosterProof(SESSION_SECRET) });
+  // PUBLIC roster read (no server-to-server proof needed now — pin_hash is irrelevant). name/role/active/
+  // house are all present. Roster = ACTIVE, LOGIN_ROLES users only; match by trimmed name.
+  const users = await fetchAppsScriptData('users');
   if (!users) { console.warn(`[login] roster unavailable for ${ip}`); return generic401(); }
-  const user = users.find((u) => String(u.name) === String(name) && isActiveUser(u));
+  const user = users.find((u) =>
+    String((u && u.name) == null ? '' : u.name).trim() === name &&
+    isActiveUser(u) && LOGIN_ROLES.has(String(u && u.role)));
 
-  let ok = false;
-  if (user) {
-    const pinHash = String(user.pin_hash || '');
-    if (pinHash) {
-      // tier A — verify against THIS user's personal password hash.
-      ok = verifyPin(pw, pinHash);
-    } else if (user.role === ROLE.COORDINATOR || user.role === ROLE.MAINTENANCE) {
-      // tier B — the shared PIN (only these roles; ceo/managers without a hash have no path).
-      ok = checkPin(pw, APP_PIN);
-    }
-  }
+  // ONE shared access code for the whole roster. Constant-time compare; fail-closed on an empty code or a
+  // name that is not an active roster user.
+  const ok = !!user && checkPin(code, SHARED_ACCESS_CODE);
   if (!ok) {
     console.warn(`[login] failed attempt from ${ip} for name=${JSON.stringify(name)}`);
     return generic401();
   }
 
-  const scope = String(user.house || ''); // '' for managers (all houses); house/cluster for tier B
-  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name, role: user.role, scope });
+  const name_ = String(user.name).trim();
+  const scope = String(user.house || ''); // '' for managers (all houses); cluster(s) for maintenance
+  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name: name_, role: user.role, scope });
   // role + scope are the user's OWN, non-secret facts — returned so the UI can adapt (e.g. lock the
   // request form to their house). They are never the security control: the server filters reads and
   // 403s out-of-scope writes regardless of what the browser does.
-  return sendJson(res, 200, { ok: true, token, name, role: user.role, scope, expiresInDays: SESSION_DAYS });
+  return sendJson(res, 200, { ok: true, token, name: name_, role: user.role, scope, expiresInDays: SESSION_DAYS });
 }
 
 // Read proxy — Bearer-gated + role/scope-enforced. Forwards an allowlisted set of query keys.
@@ -767,7 +775,7 @@ if (isMain) {
   if (SESSION_SECRET.length < 32) fatal('SESSION_SECRET must be at least 32 chars');
   if (!process.env.SESSION_DAYS || !(SESSION_DAYS > 0)) fatal('SESSION_DAYS is required (a positive number)');
   if (!EXEC_URL) fatal('APPS_SCRIPT_EXEC_URL is required');
-  if (!APP_PIN) fatal('APP_PIN is required');
+  if (!SHARED_ACCESS_CODE) fatal('SHARED_ACCESS_CODE is required (the shared login code; set it in Railway before deploy)');
 
   server.listen(PORT, () => {
     console.log(`EZone Logistics gateway on http://localhost:${PORT}`);
