@@ -296,13 +296,24 @@
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
-    // Roy approves alone — emergencies auto-approve; no Sandra tier.
+    // Mirror of chain B (src/approval.js / Code.gs whoApproves): emergency → 'auto' (no human approver);
+    // over the approval threshold → 'ops_manager' (Olga); otherwise → 'field_ops' (Roy). The SERVER is the
+    // authority — this drives the UI so Roy is never shown an approve button that would 403 above the threshold.
     function whoApproves(cost, urgency) {
       if (urgency === 'חירום') return 'auto';
-      return 'roy';
+      if (cost !== '' && cost != null && Number(cost) > Number(threshold)) return 'ops_manager';
+      return 'field_ops';
     }
-    function canApprove(approver, cost, urgency) {
-      return true;
+    function sessionRole() { return String(window.__ROLE__ || ''); }
+    function isExecUI() { return sessionRole() === 'ops_manager' || sessionRole() === 'ceo'; }
+    // Mirror of Code.gs actorMayApprove_ for the SESSION role: emergency (auto) → any dispatch-capable role;
+    // otherwise only the exact chain-B role, or the ceo. Governs whether אישור / לא אושר are shown or replaced.
+    function canApproveUI(r) {
+      const req = whoApproves(r.estimated_cost, r.urgency);
+      const role = sessionRole();
+      if (req === 'auto') return ['field_ops', 'ops_manager', 'ceo'].includes(role);
+      if (role === 'ceo') return true;
+      return role === req;
     }
 
     async function load() {
@@ -360,12 +371,12 @@
       const today = new Date().toISOString().slice(0, 10);
       const items = [];
 
-      // Requests awaiting THIS user's approval (by the §6 routing).
+      // Requests awaiting THIS SESSION's approval (chain B). Emergency (auto) needs no human approver, and a
+      // request routed above this role's tier (e.g. an over-threshold request for field_ops) is NOT theirs.
       const awaiting = reqs.filter(r => {
         if (![ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(r.status)) return false;
-        const w = whoApproves(r.estimated_cost, r.urgency);
-        if (w === 'auto') return false;
-        return w === 'sandra' ? u === 'sandra' : u === 'רועי';
+        if (whoApproves(r.estimated_cost, r.urgency) === 'auto') return false;
+        return canApproveUI(r);
       });
       if (awaiting.length) items.push(['act', awaiting.length, 'דרישות ממתינות לאישורך']);
 
@@ -550,8 +561,14 @@
       const s = r.status, id = r.id;
       const btns = [];
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
-        btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
-        btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
+        if (canApproveUI(r)) {
+          btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
+          btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
+        } else {
+          // Over the approval threshold and this session may not approve it (field_ops → routed to Olga).
+          // Show a clear, NON-clickable status instead of a button that would 403 on click.
+          btns.push('<button class="act" disabled title="דרישה מעל סף האישור — טעונה אישור מנהלת התפעול (אולגה)">ממתין לאישור אולגה</button>');
+        }
         btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
         btns.push(`<button class="act go" onclick="doAssign('${id}')">הועבר לביצוע</button>`);
@@ -573,7 +590,9 @@
           ? `<button class="act" onclick="doUnblock('${id}')">בטל חסימה</button>`
           : `<button class="act" onclick="doBlock('${id}')">חסום</button>`);
       }
-      if (who() === 'רועי') {
+      // Delete is destructive and EXEC-ONLY (ops_manager / ceo), mirroring Code.gs handleDeleteRequest_
+      // (isManagement_). field_ops/tier-B never see it — no delete button that would 403.
+      if (isExecUI()) {
         btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
       }
       return btns.join('');
@@ -586,7 +605,13 @@
         if (!json.ok) throw new Error(json.error || 'שגיאה');
         showMsg('ok', 'בוצע.');
         await load();
-      } catch (e) { showMsg('err', 'הפעולה נכשלה: ' + e.message); }
+      } catch (e) {
+        // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
+        // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
+        // role may not take (approve above threshold, delete), so this is a defensive fallback.
+        const raw = String((e && e.message) || '');
+        showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+      }
     }
 
     window.doApprove = (id) => post('approve', { id, by: who() });

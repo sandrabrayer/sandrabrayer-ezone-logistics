@@ -13,17 +13,21 @@ test('the five roles', () => {
   assert.ok(!isRole(''));
 });
 
-test('canApprove: any manager tier (field_ops/ops_manager/ceo) may approve ANY request; tier B never', () => {
-  // Roy operates the dashboard alone — the amount tier (requiredRole) no longer gates the approver, so a
-  // manager may approve regardless of which tier whoApproves() reported for the request.
-  for (const required of [ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO]) {
-    assert.equal(canApprove(ROLE.FIELD_OPS, required), true, `field_ops approves ${required}-tier`);
-    assert.equal(canApprove(ROLE.OPS_MANAGER, required), true, `ops_manager approves ${required}-tier`);
-    assert.equal(canApprove(ROLE.CEO, required), true, `ceo approves ${required}-tier`);
-    // coordinator / maintenance never approve, at any tier
-    assert.equal(canApprove(ROLE.COORDINATOR, required), false);
-    assert.equal(canApprove(ROLE.MAINTENANCE, required), false);
-  }
+test('canApprove: only the resolved role may approve; ceo may always approve', () => {
+  // required = field_ops
+  assert.equal(canApprove(ROLE.FIELD_OPS, ROLE.FIELD_OPS), true);
+  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.FIELD_OPS), false);
+  assert.equal(canApprove(ROLE.CEO, ROLE.FIELD_OPS), true); // ceo always
+  // required = ops_manager
+  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.OPS_MANAGER), true);
+  assert.equal(canApprove(ROLE.FIELD_OPS, ROLE.OPS_MANAGER), false);
+  assert.equal(canApprove(ROLE.CEO, ROLE.OPS_MANAGER), true); // ceo always
+  // required = ceo
+  assert.equal(canApprove(ROLE.CEO, ROLE.CEO), true);
+  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.CEO), false);
+  // coordinator / maintenance never approve
+  assert.equal(canApprove(ROLE.COORDINATOR, ROLE.FIELD_OPS), false);
+  assert.equal(canApprove(ROLE.MAINTENANCE, ROLE.OPS_MANAGER), false);
 });
 
 test('canDefer: field_ops / ops_manager / ceo only', () => {

@@ -7,19 +7,26 @@ All notable changes to EZone Logistics are documented here, per the project work
 
 Three production follow-ups after the deploy chain was confirmed current.
 
-**1. BUG — Roy (field_ops) can now FULLY operate the dashboard.** Two dashboard actions the UI offers Roy
-were refused server-side with Code.gs's `forbidden_()` ("Forbidden: role not authorized for this action"):
-- **approve / reject over ₪3000** — those route to `ops_manager` by amount, and `canApprove` required an
-  EXACT role match, so field_ops was refused. `canApprove` now grants the whole manager tier
-  (field_ops / ops_manager / ceo) authority over ANY request. `whoApproves`/`approvalRequired` are UNCHANGED
-  — the amount still drives the budget/reporting flag, it just no longer gates who may approve.
-- **delete a request** — the card shows מחיקה to Roy but `handleDeleteRequest_` gated `isManagement_`
-  (exec-only). It now gates `isManagerRole` (field_ops included); the /management-only deletes
-  (`deleteCompliance` / `deleteTraining`) stay `isManagement_`.
-- `src/roles.js` + `apps-script/Code.gs` (MIRROR:roles stays in sync). Tier B (coordinator/maintenance) is
-  still refused both. Tests: `roles.test.js` / `enforcement.test.js` updated to the new authority contract;
-  new `test/dashboard-field-ops.test.js` drives the REAL Code.gs handlers (field_ops approves >₪3000,
-  rejects, deletes; tier B refused).
+**1. BUG — the field_ops "Forbidden" banner, fixed in the UI (the ₪3000 approval control is UNCHANGED).**
+The chain-B gate is intentional and stays exactly as it was: field_ops (Roy) approves/rejects **only ≤ the
+`approval_threshold`; above it → ops_manager (Olga); ceo may always**. `canApprove` / `handleDeleteRequest_`
+(exec-only delete) are untouched on the server. The production banner ("הפעולה נכשלה — Forbidden: role not
+authorized…") did **not** come from a load-time action — an exhaustive trace confirms the dashboard's only
+load call is the `pageData` GET; every write is behind a click. It came from Roy **clicking אישור on an
+over-threshold request** (the client `whoApproves` was stale — "Roy approves alone", so the buttons showed
+regardless of amount), and the error banner never auto-clears, so it looked like it was there on load. Fix,
+all client-side (`src/dashboard.html`):
+- `whoApproves` now MIRRORS chain B (emergency → auto; over threshold → ops_manager; else field_ops).
+- On an over-threshold request a field_ops session sees a **disabled `ממתין לאישור אולגה`** instead of a
+  clickable אישור / לא אושר — no click-then-403. Execs (ops_manager/ceo) still see the real buttons.
+- The **delete** button is now exec-only in the UI too (`isExecUI`), matching the server `isManagement_`.
+- `post()` maps any residual permission error to a clean Hebrew "אין לך הרשאה לפעולה זו." — never the raw
+  upstream English.
+
+Tests: `roles.test.js` / `enforcement.test.js` keep the threshold-gate assertions (restored); new
+`test/dashboard-approve-gate.test.js` renders the real dashboard headless and asserts **no error banner on
+load**, the disabled `ממתין לאישור אולגה` for field_ops on an over-threshold request, real approve for a
+≤threshold one and for a ceo on both, and delete visible only to execs.
 
 **2. PERF (round-3) — short-TTL, write-invalidated cache for the hot reads.** Investigation (a
 call-counting probe against the real gateway) found the bundle path healthy — 1 call/page, never
@@ -50,7 +57,7 @@ Events sheet) is left dormant, not removed. `src/access.js` / `src/server.js` / 
 `src/dashboard.html`; tests: `access.test.js` / `access-server.test.js` / `nav-events.test.js` updated,
 new `test/dashboard-create.test.js`.
 
-`node --test` green (**601 tests**). No secrets; explicit-path adds.
+`node --test` green (**599 tests**). No secrets; explicit-path adds.
 
 ## [Unreleased] — /management redesigned as a HUB + topic views, and two new field checklists
 

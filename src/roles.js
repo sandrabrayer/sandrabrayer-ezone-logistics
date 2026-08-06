@@ -22,13 +22,11 @@ function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject authority: any manager-tier role (field_ops = Roy, ops_manager, ceo) may approve or
-// reject ANY request — Roy operates the dashboard alone, so the per-request amount tier no longer GATES
-// who may approve. requiredRole (the whoApproves() result) is retained so the approval_required flag
-// still marks over-threshold requests for budget/reporting, but it does not restrict the approver.
-// Tier B (coordinator / maintenance) never approves.
+// approve / reject: only the role that chain B resolves to FOR THAT REQUEST. The CEO may always
+// approve. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
 function canApprove(actorRole, requiredRole) {
-  return isManagerRole(actorRole);
+  if (actorRole === ROLE.CEO) return true;
+  return actorRole === requiredRole;
 }
 
 // defer: field_ops, ops_manager, ceo (a "this can wait" call, not the money decision).
