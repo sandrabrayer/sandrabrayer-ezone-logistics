@@ -587,6 +587,14 @@ async function handleData(req, res, url) {
       for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
       payload.data = payload.data.filter((r) =>
         houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
+    } else if (action === 'preventiveDaily' && !manager) {
+      // The daily preventive checklist is scoped for a maintenance lead exactly like requests: only rows for
+      // houses in their cluster scope. (canRead already refused every non-maintenance non-manager role.)
+      const houses = (await fetchAppsScriptData('houses')) || [];
+      const clusterOf = {};
+      for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
+      payload.data = payload.data.filter((r) =>
+        houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
     }
   }
   return sendJson(res, 200, payload);
@@ -594,7 +602,10 @@ async function handleData(req, res, url) {
 
 // Exec-only writes (ops_manager + ceo), beyond managementData/updateEvent: the /management readiness
 // checklists (opening / emergency) and the compliance-entry delete. Mirrored by canManage in Code.gs.
-const MANAGE_ONLY_ACTIONS = new Set(['addReadinessItem', 'updateReadinessItem', 'deleteReadinessItem', 'deleteCompliance']);
+// Exec-only writes (ops_manager + ceo): the training-log delete + the (legacy) compliance delete. The
+// readiness writes (add/update/deleteReadinessItem) are NO LONGER here — they moved to manager-tier
+// (field_ops edits the opening/emergency checklists from /workorders), gated by canWriteAction + Code.gs.
+const MANAGE_ONLY_ACTIONS = new Set(['deleteCompliance', 'deleteTraining']);
 
 // Write proxy — Bearer-gated. The actor is taken from the verified token (never the client body);
 // the token is forwarded so Code.gs verifies it independently and enforces the role rules.

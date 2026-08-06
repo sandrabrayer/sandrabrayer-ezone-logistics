@@ -324,7 +324,7 @@ var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
   if (role === 'coordinator') return action === 'createRequest' || action === 'createEvent';
-  if (role === 'maintenance') return action === 'createRequest';
+  if (role === 'maintenance') return action === 'createRequest' || action === 'updatePreventiveItem';
   return false;
 }
 // === MIRROR:access END ===
@@ -496,6 +496,13 @@ function doGet(e) {
     case 'inventoryItems':  result = readObjects_('InventoryItems'); break;
     case 'inventoryCounts': result = readObjects_('InventoryCounts'); break;
     case 'events':      result = readObjects_('Events'); break;
+    // Hub redesign — readiness + daily + training reads (used by the /workorders entry tabs; the Node proxy
+    // role-gates each: opening/emergency/trainings are manager-tier, preventiveDaily is maintenance+manager
+    // and scope-filtered like requests).
+    case 'openingChecklist':   result = readObjects_('OpeningChecklist'); break;
+    case 'emergencyReadiness': result = readObjects_('EmergencyReadiness'); break;
+    case 'preventiveDaily':    result = readObjects_('PreventiveDaily'); break;
+    case 'trainings':          result = readObjects_('Trainings'); break;
     // bundle (perf round-2): read MANY sheets in ONE execution → one Node→Apps Script round-trip (one 302
     // + one cold-start) for a page's whole initial load, instead of N. The Node proxy calls this with a
     // controlled `sheets` list and applies the SAME role gate + requests scope-filter it applies to the
@@ -598,6 +605,9 @@ function dispatchAction_(body, actor) {
     case 'updateReadinessItem': return handleUpdateReadinessItem_(body.payload || {}, actor);
     case 'deleteReadinessItem': return handleDeleteReadinessItem_(body.payload || {}, actor);
     case 'deleteCompliance':    return handleDeleteCompliance_(body.payload || {}, actor);
+    // Hub redesign — daily preventive checklist (leads, own houses) + training-log delete (exec).
+    case 'updatePreventiveItem': return handleUpdatePreventiveItem_(body.payload || {}, actor);
+    case 'deleteTraining':       return handleDeleteTraining_(body.payload || {}, actor);
     default:
       return jsonOut_({ ok: false, error: 'Unknown or unsupported action' });
   }
@@ -2264,7 +2274,7 @@ function deleteSheetRowById_(sheetName, id) {
 }
 
 function handleAddReadinessItem_(p, actor) {
-  if (!canManage(actor.role)) return forbidden_();
+  if (!isManagerRole(actor.role)) return forbidden_();
   var sheetName = readinessSheetName_(p.board);
   if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
   if (!p.house || !p.item) return jsonOut_({ ok: false, error: 'Missing house or item' });
@@ -2276,7 +2286,7 @@ function handleAddReadinessItem_(p, actor) {
 // Tick / untick an item. Ticking stamps today's date + the actor; unticking clears both. Actor from the
 // verified token, never the client body.
 function handleUpdateReadinessItem_(p, actor) {
-  if (!canManage(actor.role)) return forbidden_();
+  if (!isManagerRole(actor.role)) return forbidden_();
   var sheetName = readinessSheetName_(p.board);
   if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
   if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
@@ -2291,7 +2301,7 @@ function handleUpdateReadinessItem_(p, actor) {
 }
 
 function handleDeleteReadinessItem_(p, actor) {
-  if (!canManage(actor.role)) return forbidden_();
+  if (!isManagerRole(actor.role)) return forbidden_();
   var sheetName = readinessSheetName_(p.board);
   if (!sheetName) return jsonOut_({ ok: false, error: 'Invalid board' });
   if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
@@ -2320,26 +2330,101 @@ function handleDeleteCompliance_(p, actor) {
   return jsonOut_({ ok: false, error: 'Compliance item not found' });
 }
 
+// ===== PreventiveDaily — daily preventive checklist for the maintenance leads (hub redesign) =====
+// The daily TEMPLATE is a short fixed list; PreventiveDaily stores only COMPLETIONS keyed by (house, date,
+// item). Defined here (Code.gs is the runtime authority that validates every write) and mirrored in setup.gs.
+var PREVENTIVE_DAILY_TEMPLATE = ['בדיקת דוד/גז', 'סבב מפגעים', 'תאורה', 'מים'];
+
+function todayIso_() { return new Date().toISOString().slice(0, 10); }
+
+// Upsert a PreventiveDaily completion by the (house, date, item) composite: set done/by on an existing row,
+// else append. Returns true if it wrote.
+function upsertPreventiveDaily_(house, dateIso, item, done, by) {
+  var sheet = getSheet_('PreventiveDaily');
+  var data = sheet.getDataRange().getValues();
+  var h = data[0];
+  var hc = h.indexOf('house'), dc = h.indexOf('date'), ic = h.indexOf('item'), doneC = h.indexOf('done'), byC = h.indexOf('by');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][hc]) === String(house) && String(data[r][dc]) === String(dateIso) && String(data[r][ic]) === String(item)) {
+      sheet.getRange(r + 1, doneC + 1).setValue(done ? 'TRUE' : 'FALSE');
+      sheet.getRange(r + 1, byC + 1).setValue(by || '');
+      return true;
+    }
+  }
+  appendRow_('PreventiveDaily', { house: house, date: dateIso, item: item, done: done ? 'TRUE' : 'FALSE', by: by || '' });
+  return true;
+}
+
+// Tick a daily item. The maintenance lead may only write for a house in THEIR scope; managers for any house.
+// date is ALWAYS server-stamped to today (no backdating from the client). item must be in the fixed template.
+function handleUpdatePreventiveItem_(p, actor) {
+  var isLead = (actor.role === ROLE.MAINTENANCE);
+  if (!isLead && !isManagerRole(actor.role)) return forbidden_();
+  if (!p.house || !p.item) return jsonOut_({ ok: false, error: 'Missing house or item' });
+  if (PREVENTIVE_DAILY_TEMPLATE.indexOf(String(p.item)) === -1) return jsonOut_({ ok: false, error: 'Invalid item' });
+  if (isLead && !houseInScope(actor.role, actor.scope, p.house, getHouseCluster_(p.house))) return forbidden_();
+  var done = (p.done === true || String(p.done).toUpperCase() === 'TRUE');
+  upsertPreventiveDaily_(String(p.house), todayIso_(), String(p.item), done, actor.name);
+  return jsonOut_({ ok: true, done: done });
+}
+
+// מעקב הדרכות — delete a Trainings entry, AUDIT-LOGGED (manager-tier / exec only), mirroring the compliance
+// delete. The row is logged to AuditLog before removal so the deletion is never silent.
+function handleDeleteTraining_(p, actor) {
+  if (!canManage(actor.role)) return forbidden_();
+  if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
+  var sheet = getSheet_('Trainings');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idCol = headers.indexOf('id');
+  var topicCol = headers.indexOf('topic');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(p.id)) {
+      var topic = topicCol !== -1 ? data[r][topicCol] : '';
+      writeAuditEntry('TRAINING-' + p.id, '', 'נמחק', actor.name, 'הדרכה נמחקה: ' + topic);
+      sheet.deleteRow(r + 1);
+      return jsonOut_({ ok: true });
+    }
+  }
+  return jsonOut_({ ok: false, error: 'Training not found' });
+}
+
+// PreventiveDaily rows from the last `days` (inclusive of today), for Olga's completion view. Bounds the
+// payload so the log doesn't grow unbounded on the screen.
+function recentPreventiveDaily_(days) {
+  var rows = readObjects_('PreventiveDaily');
+  var cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - (days - 1));
+  var cutoffIso = cutoff.toISOString().slice(0, 10);
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var d = String(rows[i].date == null ? '' : rows[i].date).slice(0, 10);
+    if (d && d >= cutoffIso) out.push(rows[i]);
+  }
+  return out;
+}
+
 function handleManagementData_(p, actor) {
   if (!canManage(actor.role)) return forbidden_();
-  // PR B — the screen was trimmed to what Logistics OWNS a real source for. Removed from the payload:
-  // inspections/findings/inventory (no longer rendered), and the kitchen / coordinators / training / events
-  // panels (their data returns via their own increments). Each remaining server-derived panel is wrapped in
-  // safePanel_ so one panel's failure degrades to its own state, never the whole response.
+  // Hub redesign — Olga's screen is a HUB over topic panels, all built from Logistics-owned sources. Each
+  // server-derived panel is wrapped in safePanel_ so one panel's failure degrades to its own state, never
+  // the whole response. compliance (עמידה באמות מידה) is REPLACED by trainings (מעקב הדרכות).
   var requests = getRequests();
   return jsonOut_({
     ok: true,
     data: {
       requests: requests,
       houses: getHouses(),
-      // Logistics-owned readiness checklists (feed the pre-opening + emergency panels). Wrapped so a
-      // not-yet-run setupSheet() (missing sheet) degrades to an empty list, never a whole-screen error.
+      // Readiness checklists + the daily preventive log + the training log. Wrapped so a not-yet-run
+      // setupSheet() (missing sheet) degrades to an empty list, never a whole-screen error.
       openingChecklist: safePanel_('openingChecklist', function () { return readObjects_('OpeningChecklist'); }, []),
       emergencyReadiness: safePanel_('emergencyReadiness', function () { return readObjects_('EmergencyReadiness'); }, []),
-      // Financial + compliance + preventive-maintenance panels (html renders their rows as-is).
+      preventiveDaily: safePanel_('preventiveDaily', function () { return recentPreventiveDaily_(7); }, []),
+      preventiveTemplate: PREVENTIVE_DAILY_TEMPLATE,
+      trainings: safePanel_('trainings', function () { return readObjects_('Trainings'); }, []),
+      // Financial + preventive-maintenance-plan panels (html renders their rows as-is).
       budget: safePanel_('budget', function () { return readBudgetAdherence_(p && p.period, requests); }, null),
       maintenance: safePanel_('maintenance', readMaintenanceAdherence_, null),
-      compliance: safePanel_('compliance', readComplianceAdherence_, null),
     },
   });
 }

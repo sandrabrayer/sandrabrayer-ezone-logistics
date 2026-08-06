@@ -51,6 +51,8 @@ function activeSheets(overrides) {
     Compliance: sheetOf([['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active']]),
     OpeningChecklist: sheetOf([['id', 'house', 'item', 'done', 'date', 'by']]),
     EmergencyReadiness: sheetOf([['id', 'house', 'item', 'done', 'date', 'by']]),
+    PreventiveDaily: sheetOf([['house', 'date', 'item', 'done', 'by']]),
+    Trainings: sheetOf([['id', 'topic', 'house', 'date', 'attended', 'by']]),
   };
   return Object.assign(base, overrides || {});
 }
@@ -69,7 +71,7 @@ function loadHandler({ sheets, cacheService } = {}) {
     console,
   };
   const keys = Object.keys(sandbox);
-  const ret = 'return { handleManagementData_, safePanel_, handleAddReadinessItem_, handleUpdateReadinessItem_, handleDeleteReadinessItem_, handleDeleteCompliance_ };';
+  const ret = 'return { handleManagementData_, safePanel_, handleAddReadinessItem_, handleUpdateReadinessItem_, handleDeleteReadinessItem_, handleDeleteCompliance_, handleUpdatePreventiveItem_, handleDeleteTraining_, PREVENTIVE_DAILY_TEMPLATE };';
   const factory = new Function(...keys, CODE + '\n;' + ret);
   return { api: factory(...keys.map((k) => sandbox[k])), captured, sheetSet };
 }
@@ -83,15 +85,16 @@ function callManagement(opts, actor) {
 
 // ---- payload shape (PR B: trimmed) ----
 
-test('managementData returns ONLY the owned panels; removed panels are gone', () => {
+test('managementData returns ONLY the owned hub panels; removed panels are gone', () => {
   const { result } = callManagement();
   assert.equal(result.ok, true);
   const d = result.data;
   assert.ok(Array.isArray(d.requests) && Array.isArray(d.houses));
   assert.ok(Array.isArray(d.openingChecklist) && Array.isArray(d.emergencyReadiness));
-  assert.ok('budget' in d && 'maintenance' in d && 'compliance' in d);
-  // removed for good — no kitchen/coordinators/training/events/defect-closure/inspections in the payload
-  for (const k of ['kitchen', 'coordinators', 'training', 'events', 'inspections', 'findings', 'inventoryCounts']) {
+  assert.ok(Array.isArray(d.preventiveDaily) && Array.isArray(d.trainings) && Array.isArray(d.preventiveTemplate));
+  assert.ok('budget' in d && 'maintenance' in d);
+  // compliance was REPLACED by trainings (מעקב הדרכות); the digest/events panels are long gone
+  for (const k of ['compliance', 'kitchen', 'coordinators', 'training', 'events', 'inspections', 'findings', 'inventoryCounts']) {
     assert.equal(k in d, false, `${k} must no longer be sent to the screen`);
   }
 });
@@ -105,13 +108,14 @@ test('safePanel_ returns the producer value on success, and the fallback (logged
   assert.ok(captured.logs.some((l) => /panel "compliance" failed/.test(l) && /boom/.test(l)));
 });
 
-test('one panel failing (Compliance read throws) → ok:true, compliance null, everything else loads', () => {
-  const sheets = activeSheets({ Compliance: throwingSheet('Compliance read failed') });
+test('one panel failing (MaintenancePlan read throws) → ok:true, maintenance null, everything else loads', () => {
+  const sheets = activeSheets({ MaintenancePlan: throwingSheet('MaintenancePlan read failed') });
   const { result, logs } = callManagement({ sheets });
   assert.equal(result.ok, true);
-  assert.equal(result.data.compliance, null);
+  assert.equal(result.data.maintenance, null);
   assert.ok(Array.isArray(result.data.requests) && result.data.houses);
-  assert.ok(logs.some((l) => /panel "compliance" failed/.test(l)));
+  assert.ok(Array.isArray(result.data.trainings), 'trainings still loads');
+  assert.ok(logs.some((l) => /panel "maintenance" failed/.test(l)));
 });
 
 test('a missing readiness sheet degrades that list to [] (not a whole-screen error)', () => {
@@ -138,7 +142,8 @@ test('addReadinessItem: valid board+house+item appends a row; invalid board / no
   assert.equal(sheets.OpeningChecklist._data[1][1], 'שדה אליעזר'); // house col
   assert.equal(sheets.OpeningChecklist._data[1][3], 'FALSE');      // done defaults FALSE
   assert.equal(JSON.parse(api.handleAddReadinessItem_({ board: 'nope', house: 'h', item: 'i' }, OLGA)._text).ok, false);
-  assert.match(JSON.parse(api.handleAddReadinessItem_({ board: 'opening', house: 'h', item: 'i' }, { role: 'field_ops' })._text).error, /[Ff]orbidden/);
+  // readiness writes are manager-tier now (field_ops allowed); a coordinator is still refused.
+  assert.match(JSON.parse(api.handleAddReadinessItem_({ board: 'opening', house: 'h', item: 'i' }, { role: 'coordinator' })._text).error, /[Ff]orbidden/);
 });
 
 test('updateReadinessItem: ticking stamps done TRUE + today + the actor; unticking clears them', () => {
@@ -179,4 +184,88 @@ test('deleteCompliance removes the entry AND writes an audit row; non-manager re
   assert.equal(audit._data.length, 2);                        // header + 1 audit row
   assert.equal(audit._data[1][2], 'נמחק');                    // to_status
   assert.match(String(audit._data[1][5]), /רישיון עסק/);      // note carries the item name
+});
+
+// ---- re-gated readiness writes: manager-tier now includes field_ops (Roy edits opening/emergency) ----
+
+test('updateReadinessItem: field_ops (manager tier) may now tick — no longer exec-only', () => {
+  const sheets = activeSheets({ EmergencyReadiness: mutableSheet(['id', 'house', 'item', 'done', 'date', 'by'], [['E1', 'רמות השבים', 'גנרטור', 'FALSE', '', '']]) });
+  const { api } = loadHandler({ sheets });
+  const roy = { name: 'רועי', role: 'field_ops' };
+  const ok = JSON.parse(api.handleUpdateReadinessItem_({ board: 'emergency', id: 'E1', done: true }, roy)._text);
+  assert.equal(ok.ok, true);
+  assert.equal(sheets.EmergencyReadiness._data[1][5], 'רועי'); // by = the field_ops actor
+  // coordinator / maintenance are still refused (they never pass the Node canWriteAction gate either)
+  assert.match(JSON.parse(api.handleUpdateReadinessItem_({ board: 'emergency', id: 'E1', done: true }, { role: 'coordinator' })._text).error, /[Ff]orbidden/);
+});
+
+// ---- PreventiveDaily write: scoped to a maintenance lead's OWN houses; date server-stamped; item validated ----
+
+function housesWithClusters() {
+  return sheetOf([['name', 'status', 'cluster'], ['רמות השבים', 'open', 'sharon'], ['קיסריה עפרוני', 'open', 'caesarea']]);
+}
+const RAMI = { name: 'רמי', role: 'maintenance', scope: 'sharon' };
+
+test('updatePreventiveItem: a lead may write for a house IN their scope (date stamped today, by=actor)', () => {
+  const pd = mutableSheet(['house', 'date', 'item', 'done', 'by'], []);
+  const sheets = activeSheets({ Houses: housesWithClusters(), PreventiveDaily: pd });
+  const { api } = loadHandler({ sheets });
+  const item = api.PREVENTIVE_DAILY_TEMPLATE[0];
+  const ok = JSON.parse(api.handleUpdatePreventiveItem_({ house: 'רמות השבים', item: item, done: true }, RAMI)._text);
+  assert.equal(ok.ok, true);
+  assert.equal(pd._data.length, 2);                 // header + 1 completion
+  assert.equal(pd._data[1][0], 'רמות השבים');
+  assert.match(String(pd._data[1][1]), /^\d{4}-\d{2}-\d{2}$/); // date = today, server-stamped
+  assert.equal(pd._data[1][2], item);
+  assert.equal(pd._data[1][3], 'TRUE');
+  assert.equal(pd._data[1][4], 'רמי');              // by = actor from token
+});
+
+test('updatePreventiveItem: a lead is REFUSED a house OUTSIDE their scope (403), nothing written', () => {
+  const pd = mutableSheet(['house', 'date', 'item', 'done', 'by'], []);
+  const sheets = activeSheets({ Houses: housesWithClusters(), PreventiveDaily: pd });
+  const { api } = loadHandler({ sheets });
+  const res = JSON.parse(api.handleUpdatePreventiveItem_({ house: 'קיסריה עפרוני', item: api.PREVENTIVE_DAILY_TEMPLATE[0], done: true }, RAMI)._text);
+  assert.match(res.error, /[Ff]orbidden/);
+  assert.equal(pd._data.length, 1);                 // header only — nothing written
+});
+
+test('updatePreventiveItem: item must be in the fixed template; a manager may write any house', () => {
+  const pd = mutableSheet(['house', 'date', 'item', 'done', 'by'], []);
+  const sheets = activeSheets({ Houses: housesWithClusters(), PreventiveDaily: pd });
+  const { api } = loadHandler({ sheets });
+  assert.equal(JSON.parse(api.handleUpdatePreventiveItem_({ house: 'רמות השבים', item: 'לא בתבנית', done: true }, RAMI)._text).ok, false);
+  // a manager (ops_manager) may write for any house, unscoped
+  const ok = JSON.parse(api.handleUpdatePreventiveItem_({ house: 'קיסריה עפרוני', item: api.PREVENTIVE_DAILY_TEMPLATE[1], done: true }, OLGA)._text);
+  assert.equal(ok.ok, true);
+});
+
+test('updatePreventiveItem: a second write for the same (house,date,item) UPSERTS the same row', () => {
+  const pd = mutableSheet(['house', 'date', 'item', 'done', 'by'], []);
+  const sheets = activeSheets({ Houses: housesWithClusters(), PreventiveDaily: pd });
+  const { api } = loadHandler({ sheets });
+  const item = api.PREVENTIVE_DAILY_TEMPLATE[0];
+  api.handleUpdatePreventiveItem_({ house: 'רמות השבים', item: item, done: true }, RAMI);
+  api.handleUpdatePreventiveItem_({ house: 'רמות השבים', item: item, done: false }, RAMI);
+  assert.equal(pd._data.length, 2);        // still ONE completion row (upserted, not duplicated)
+  assert.equal(pd._data[1][3], 'FALSE');   // flipped to not-done
+});
+
+// ---- מעקב הדרכות: delete a training entry (exec-only), audit-logged ----
+
+test('deleteTraining removes the entry AND writes an audit row; non-manager refused', () => {
+  const audit = mutableSheet(['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'], []);
+  const sheets = activeSheets({
+    Trainings: mutableSheet(['id', 'topic', 'house', 'date', 'attended', 'by'], [['T1', 'בטיחות אש', 'רמות השבים', '2026-02-01', 'צוות', 'אולגה']]),
+    AuditLog: audit,
+  });
+  const { api } = loadHandler({ sheets });
+  assert.match(JSON.parse(api.handleDeleteTraining_({ id: 'T1' }, { role: 'field_ops' })._text).error, /[Ff]orbidden/);
+  assert.equal(sheets.Trainings._data.length, 2); // still there after the refused attempt
+  const ok = JSON.parse(api.handleDeleteTraining_({ id: 'T1' }, OLGA)._text);
+  assert.equal(ok.ok, true);
+  assert.equal(sheets.Trainings._data.length, 1);            // removed
+  assert.equal(audit._data.length, 2);                       // header + audit row
+  assert.equal(audit._data[1][2], 'נמחק');
+  assert.match(String(audit._data[1][5]), /בטיחות אש/);      // note carries the training topic
 });
