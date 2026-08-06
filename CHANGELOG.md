@@ -3,6 +3,35 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — ci — post-deploy verification so a green clasp deploy can never hide a stale production
+
+**Why.** Production symptoms (dashboard hangs on `טוען דרישות`, approve/reject dead, recently merged
+changes not visible) pointed at a stale live Apps Script. Investigation of the deploy chain found the
+opposite of "CI isn't deploying": the `Deploy Apps Script` workflow **did run and go green** on the only
+recent `apps-script/**` merge (PR #72, `Code.gs` + `setup.gs`); the `src/`-only merges (PR #71, #68) correctly
+triggered no deploy. The real gap is that the workflow trusted clasp's `Deployed …@<ver>` line and **never
+checked the live `/exec`** — so if `DEPLOYMENT_ID` names a *different* deployment than the one production calls
+(`APPS_SCRIPT_EXEC_URL`), CI stays green while the live `/exec` serves old code. A green deploy proved a
+redeploy happened, not that the new code is what browsers hit.
+
+**What changed — `.github/workflows/deploy-apps-script.yml`.**
+- New **post-deploy smoke step** hits the real `/exec` (the URL production uses) and asserts the **recent-only
+  `bundle` action** answers `{"ok":true,…}` with a `houses` key. Retries a few times (new versions take a few
+  seconds to propagate). It also probes the **baseline `users` action** (present on *every* version) so the
+  failure message can distinguish *"URL unreachable / wrong / not Anyone-access"* from *"URL works but the
+  deployment behind it is stale"* (the `DEPLOYMENT_ID` ↔ `APPS_SCRIPT_EXEC_URL` mismatch). Fails the workflow
+  loudly in either case — a deploy you can't verify no longer passes silently.
+- New **required secret `APPS_SCRIPT_EXEC_URL`** (the full live `/exec` URL — the same value already in
+  Railway) checked in the fail-loud-early secrets gate alongside `CLASPRC_JSON` / `DEPLOYMENT_ID`.
+
+**Docs.** `DEPLOY.md` documents the new secret and the verification, and states the invariant: `DEPLOYMENT_ID`
+must be the `AKfyc…` id *inside* `APPS_SCRIPT_EXEC_URL`, or CI goes green while production stays stale.
+
+**Not changed.** No app code, no `apps-script/**`, no `/exec` contract — CI + docs only. The frontend
+(dashboard UI, approve/reject buttons, `/management` hub) is served by **Railway from `src/`**, outside this
+workflow; if merged UI changes aren't visible, verify Railway is auto-deploying `main` (see the PR notes).
+`node --test` unaffected (**574 tests**, green); every workflow YAML still parses (`validate-workflows`).
+
 ## [Unreleased] — PR B: /management cleanup (Olga's screen) + inventory ownership move
 
 **Why.** The network-management screen had grown to include panels with no owned data source (kitchen /
