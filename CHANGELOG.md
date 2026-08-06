@@ -3,6 +3,58 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — deploy provenance — /version on both legs, self-verifying deploys, commit-stamped SW cache
+
+**Why.** The app's failure history is **version mismatch** across three independent deploy legs (Railway
+Node / clasp Apps Script / service-worker cache). This makes the live version of each leg **provable at a
+glance** and makes every deploy **self-verifying**, so a green deploy can't hide a stale leg.
+
+**Live diagnosis at the time of this change (evidence, no live curl needed).**
+- **Apps Script (clasp) leg = green + current with `main`.** The #73-merge deploy run (`69ac46de`, 10:10)
+  concluded **success**, and its post-deploy step probes the live `/exec` for the recent-only `bundle`
+  action (fails the run otherwise) → new code was live. `git diff 69ac46de..main -- apps-script/` is
+  **empty** → `Code.gs` is byte-identical to `main`; no `apps-script/**` has merged since. So the clasp leg
+  is **not** the mismatch.
+- **Node (Railway) leg = unverifiable from the agent sandbox.** The public app URL resolves, but this
+  environment's **egress policy denies `ezone-logistics.up.railway.app`** (proxy 403 on CONNECT — must not
+  be routed around). So the Node-leg live check is wired into **CI** (a GitHub runner can reach Railway)
+  instead of curled by hand.
+- **Service worker** had a hardcoded `CACHE='ezone-logistics-v3'` — no per-deploy invalidation.
+
+**1. Version truth.**
+- **Node `GET /version`** (unauthenticated, non-secret) → `{ node:{ commit, builtAt }, appsScript:{ commit } }`.
+  `node.commit` = `RAILWAY_GIT_COMMIT_SHA` (injected by Railway at build; `unknown` locally); `builtAt` =
+  instance boot time; `appsScript.commit` = the live `/exec` `action=version`, cached ~60s (`unreachable`
+  if `/exec` is down — never throws).
+- **Apps Script `action=version`** → `{ commit: DEPLOY_COMMIT }`. `DEPLOY_COMMIT` defaults to `'DEV'`; the
+  clasp workflow **stamps `GITHUB_SHA`** into it right before `clasp push`.
+- **Footer** on every page (incl. login): a small gray `node <sha> · gs <sha>`, injected by the auth shim
+  from `/version` (`pointer-events:none`, never blocks the UI).
+
+**2. Self-verifying deploys.**
+- **Railway leg** — new **`verify-live.yml`**: on push to `main` (and on-demand) it polls the live
+  `/version` until `node.commit == GITHUB_SHA`, then runs `smoke-live.js`; fails (with a Railway-stale /
+  crash-loop hint) if it never matches. `smoke-live.js` gains a `/version` check gated on `EXPECTED_COMMIT`.
+  The app URL defaults to the public Railway host (override via an `APP_URL` repo variable).
+- **clasp leg** — `deploy-apps-script.yml` now **stamps** the SHA into `Code.gs` and its post-deploy step
+  asserts the live `action=version == GITHUB_SHA` (strongest check), keeping `bundle`/`users` as
+  diagnostics. The `APPS_SCRIPT_EXEC_URL` **secret** is already required by the workflow's secret gate — it
+  stays a secret (never pasted into a PR).
+- **Service worker** — Node **stamps the running commit** into the SW cache name at serve time
+  (`ezone-logistics-<commit>`), so every deploy changes it → the SW's `activate()` purges all prior caches
+  → returning visitors and incognito first-loads both get fresh documents.
+
+**Tests.** New `test/version.test.js` (6): `/version` returns both legs + `builtAt` and is `no-store`;
+`appsScript` degrades to `unreachable`; `/sw.js` carries `ezone-logistics-<commit>` (v3 replaced); the shim
+footer + a served page read `/version`; and the real `Code.gs` `doGet('version')` returns `DEPLOY_COMMIT`
+(`DEV` before CI stamps it). Both edited/added workflows pass the `pyyaml` validator. `node --test` green
+(**594 tests**). No secrets in the repo.
+
+**Definition of done (fills after this merges + both deploys run).** `deploy-apps-script.yml` proves the
+Apps Script leg (`action=version == merge SHA`); `verify-live.yml` proves the Node leg
+(`/version node.commit == merge SHA`); the SW cache name proves itself (`/sw.js` carries the commit). The
+`/version` footer lets anyone confirm all three match `main` at a glance.
+
 ## [Unreleased] — login — ONE shared access code (replaces per-user pin_hash + tier-B APP_PIN)
 
 **Why.** The per-user login kept failing in production ("שם או קוד שגויים" for רועי with the correct code)

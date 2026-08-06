@@ -47,6 +47,13 @@ const SESSION_DAYS = Number(process.env.SESSION_DAYS) || 0;
 // 'maintenance' from this one set; nothing else changes.)
 const LOGIN_ROLES = new Set(['field_ops', 'ops_manager', 'ceo', 'maintenance']);
 
+// ---- version truth (deploy provenance) ----
+// COMMIT: the git SHA this Node build was deployed from. Railway injects RAILWAY_GIT_COMMIT_SHA into the
+// container at build/run time; 'unknown' locally. Surfaced at GET /version and stamped into the service-
+// worker cache name so every deploy self-invalidates. BOOT_AT: when THIS instance started (≈ deploy time).
+const COMMIT = (process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown').trim() || 'unknown';
+const BOOT_AT = new Date().toISOString();
+
 const PUBLIC = join(__dirname, 'public');
 
 const HEAD_INJECT =
@@ -151,6 +158,22 @@ function buildClientShim(names) {
     }
     if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
   }
+  // Version footer — small gray text on EVERY page (incl. the login screen), so anyone can see at a glance
+  // which commit is live on each leg: Node (Railway) and Apps Script (Sheets backend). Non-secret; fetched
+  // from /version. pointer-events:none so it never blocks the UI.
+  function mountVersion(){
+    function m(){
+      if(!document.body||document.getElementById('ezone-ver'))return;
+      var v=el('div','position:fixed;bottom:12px;inset-inline-end:12px;z-index:99997;font-family:system-ui,Arial,sans-serif;font-size:11px;line-height:1.3;color:#7a8794;direction:ltr;opacity:.75;pointer-events:none;text-align:end','…');
+      v.id='ezone-ver';document.body.appendChild(v);
+      origFetch('/version').then(function(r){return r.json();}).then(function(j){
+        var n=String((j&&j.node&&j.node.commit)||'?').slice(0,7),g=String((j&&j.appsScript&&j.appsScript.commit)||'?').slice(0,7);
+        v.textContent='node '+n+' · gs '+g;
+      }).catch(function(){v.textContent='node ? · gs ?';});
+    }
+    if(document.body)m();else document.addEventListener('DOMContentLoaded',m);
+  }
+  mountVersion();
   if(_boot){mountSignOut();mountNav();}
   function doLogin(){return new Promise(function(resolve){
     function mount(){
@@ -337,6 +360,19 @@ async function fetchAppsScriptData(action, extra) {
     return null;
   }
 }
+
+// The live Apps Script deploy commit (action=version → { commit }), cached ~60s so /version and the page
+// footer don't hit /exec on every request. 'unreachable' when the /exec can't be reached (never throws).
+let _asVersion = { at: 0, commit: null };
+async function appsScriptCommit() {
+  const now = Date.now();
+  if (_asVersion.commit != null && (now - _asVersion.at) < 60000) return _asVersion.commit;
+  const data = await fetchAppsScriptData('version'); // null on unreachable / unknown-action (older deploy)
+  const commit = (data && data.commit) ? String(data.commit) : (data == null ? 'unreachable' : 'unknown');
+  _asVersion = { at: now, commit };
+  return commit;
+}
+function _resetVersionCache() { _asVersion = { at: 0, commit: null }; } // test hook
 
 // ---- Node micro-cache for STABLE reference reads (perf round-2) ----
 // houses/config/technicians change rarely and are fetched on nearly every page load. Cache them in
@@ -702,6 +738,12 @@ export async function requestHandler(req, res) {
   if (path === '/api/data' && req.method === 'GET') return handleData(req, res, url);
   if (path === '/api/action' && req.method === 'POST') return handleAction(req, res);
   if (path === '/api/health') return sendJson(res, 200, { ok: true, ts: Date.now() });
+  // Version truth: the git SHA live on each leg. Non-secret; no auth. node = THIS Railway build
+  // (RAILWAY_GIT_COMMIT_SHA); appsScript = the live /exec's action=version (cached ~60s). The footer + the
+  // post-deploy CI checks read this to prove the live legs match the merge SHA.
+  if (path === '/version') {
+    return sendJson(res, 200, { node: { commit: COMMIT, builtAt: BOOT_AT }, appsScript: { commit: await appsScriptCommit() } });
+  }
   if (path.startsWith('/api/')) return sendJson(res, 404, { ok: false, error: 'not found' });
 
   // Static: brand PWA assets (manifest.json, sw.js, recoloured teal icons) from src/public/.
@@ -715,6 +757,12 @@ export async function requestHandler(req, res) {
     }
     const headers = { 'Content-Type': asset.type };
     if (asset.noCache) headers['Cache-Control'] = 'no-cache';
+    if (path === '/sw.js') {
+      // Stamp the running commit into the SW cache name so EVERY deploy changes it → the SW's activate()
+      // purges all prior caches → no returning visitor (or incognito first-load) is served a stale
+      // document after a deploy. sw.js is served no-cache, so the browser always re-reads this stamp.
+      body = Buffer.from(String(body).replace(/var CACHE = '[^']*';/, `var CACHE = 'ezone-logistics-${COMMIT}';`));
+    }
     res.writeHead(200, headers);
     return res.end(body);
   }
@@ -789,7 +837,7 @@ export { HTML_ROUTES as _HTML_ROUTES };
 // Exported so a test can run the shim in a sandbox and exercise the sign-out flow (clear + reload).
 export { CLIENT_SHIM as _CLIENT_SHIM };
 // Exported so tests can reset the Node micro-cache between cases (deterministic cache/TTL assertions).
-export { _resetNodeCache, PAGE_ACTIONS as _PAGE_ACTIONS };
+export { _resetNodeCache, _resetVersionCache, PAGE_ACTIONS as _PAGE_ACTIONS };
 // Exported for the login-roster tests: the shared active-user filter, the roster→names derivation, the
 // per-request shim builder, and the hardcoded fallback list (asserted in sync with the seed).
 export { isActiveUser, loginRosterNames, buildClientShim, getLoginNames, DEFAULT_LOGIN_NAMES as _DEFAULT_LOGIN_NAMES };

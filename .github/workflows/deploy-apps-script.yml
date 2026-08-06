@@ -76,6 +76,17 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))" \
             || { echo "::error::CLASPRC_JSON is not valid JSON. Re-run 'clasp login' locally and re-copy the whole ~/.clasprc.json into the secret. See DEPLOY.md."; exit 1; }
 
+      - name: Stamp the commit SHA into Code.gs (deploy provenance)
+        run: |
+          # Write the exact SHA being deployed into DEPLOY_COMMIT, so the live action=version returns it and
+          # the post-deploy check below can prove THIS commit is what production serves.
+          sed -i "s/var DEPLOY_COMMIT = '[^']*';/var DEPLOY_COMMIT = '${GITHUB_SHA}';/" apps-script/Code.gs
+          if ! grep -q "var DEPLOY_COMMIT = '${GITHUB_SHA}';" apps-script/Code.gs; then
+            echo "::error::Could not stamp DEPLOY_COMMIT into apps-script/Code.gs (the 'var DEPLOY_COMMIT = ...' line is missing or changed shape). Fix the marker line, then redeploy."
+            exit 1
+          fi
+          echo "Stamped DEPLOY_COMMIT = ${GITHUB_SHA}"
+
       - name: Push code to the Apps Script project
         run: clasp push -f
 
@@ -107,27 +118,33 @@ jobs:
           #   - action=users   → exists on EVERY published version (baseline: is the URL even reachable?)
           #   - action=bundle  → exists ONLY on the current Code.gs (recent-only: is the NEW code live?)
           # An older/other deployment answers bundle with {"ok":false,"error":"Unknown or missing action"}.
+          # The STRONGEST check: action=version returns the exact SHA CI just stamped + deployed. If it
+          # equals GITHUB_SHA, the deployment behind APPS_SCRIPT_EXEC_URL is provably THIS commit. bundle
+          # (recent-only) and users (baseline) are still probed to make a failure message actionable.
           url="$(printf '%s' "$APPS_SCRIPT_EXEC_URL" | tr -d '[:space:]')"
+          want="$(printf '%s' "$GITHUB_SHA" | tr -d '[:space:]')"
           probe() { curl -fsSL --max-time 25 "$1" 2>/dev/null; }
-          attempt=0; max=5; delay=3; base_ok=0; bundle=""
+          attempt=0; max=6; delay=3; base_ok=0; bundle_ok=0; ver=""
           while [ "$attempt" -lt "$max" ]; do
             attempt=$((attempt + 1))
-            bundle="$(probe "${url}?action=bundle&sheets=houses")"
-            if printf '%s' "$bundle" | grep -q '"ok":true' && printf '%s' "$bundle" | grep -q '"houses"'; then
-              echo "Post-deploy verification OK — live /exec answers the recent-only 'bundle' action (new Code.gs is live)."
+            ver="$(probe "${url}?action=version")"
+            if printf '%s' "$ver" | grep -q "\"commit\":\"${want}\""; then
+              echo "Post-deploy verification OK — live /exec action=version == ${want} (this exact commit is live)."
               exit 0
             fi
+            if printf '%s' "$(probe "${url}?action=bundle&sheets=houses")" | grep -q '"houses"'; then bundle_ok=1; fi
             if printf '%s' "$(probe "${url}?action=users")" | grep -q '"ok":true'; then base_ok=1; fi
-            echo "attempt ${attempt}/${max}: 'bundle' not confirmed live yet (new versions take a few seconds to propagate); retrying in ${delay}s…"
+            echo "attempt ${attempt}/${max}: action=version != ${want} yet (new versions take a few seconds to propagate); retrying in ${delay}s…"
             sleep "$delay"; delay=$((delay * 2))
           done
-          if [ "$base_ok" -eq 1 ]; then
-            echo "::error::LIVE /exec answers the baseline 'users' action but NOT the recent-only 'bundle' action. clasp reported 'Deployed', yet the deployment behind APPS_SCRIPT_EXEC_URL is STALE. Most likely DEPLOYMENT_ID names a DIFFERENT deployment than production calls (or APPS_SCRIPT_EXEC_URL is out of date). Fix: in the Apps Script editor → Manage deployments, confirm the deployment whose /exec URL equals APPS_SCRIPT_EXEC_URL, and set DEPLOYMENT_ID to THAT deployment's id. See DEPLOY.md."
+          obs="$(printf '%s' "$ver" | grep -oE '"commit":"[^"]*"' | head -1)"
+          if [ "$base_ok" -eq 1 ] || [ "$bundle_ok" -eq 1 ]; then
+            echo "::error::LIVE /exec is reachable but action=version is NOT ${want} (observed: ${obs:-none/older-deploy-without-version}). clasp reported 'Deployed', yet the deployment behind APPS_SCRIPT_EXEC_URL is STALE or names a DIFFERENT deployment than DEPLOYMENT_ID. Fix: in the Apps Script editor → Manage deployments, set DEPLOYMENT_ID to the deployment whose /exec URL equals APPS_SCRIPT_EXEC_URL. See DEPLOY.md."
           else
             echo "::error::LIVE /exec did not answer even the baseline 'users' action at APPS_SCRIPT_EXEC_URL. The URL is wrong/unreachable, or the Web App access is not 'Anyone' (anonymous). Fix APPS_SCRIPT_EXEC_URL (and the manifest access) — see DEPLOY.md."
           fi
-          echo "---- last bundle response (truncated) ----"
-          printf '%s\n' "$bundle" | head -c 500
+          echo "---- last version response (truncated) ----"
+          printf '%s\n' "$ver" | head -c 300
           exit 1
 
       - name: Remove credentials from the runner

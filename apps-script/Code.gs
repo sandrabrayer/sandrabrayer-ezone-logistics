@@ -15,6 +15,12 @@
  * guard test (test/mirror-drift.test.js) asserts the two copies stay logic-equivalent.
  */
 
+// Deploy provenance: the git SHA this Code.gs was deployed from. The Deploy Apps Script workflow REPLACES
+// the quoted value with ${GITHUB_SHA} right before `clasp push` (see deploy-apps-script.yml), so the live
+// action=version reflects exactly what CI deployed. 'DEV' when pushed by hand / running locally. Keep this
+// line's shape stable — the workflow matches /var DEPLOY_COMMIT = '[^']*';/.
+var DEPLOY_COMMIT = 'DEV';
+
 // ---- Coercion (mirror of src/config.js) ----
 var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days'];
 var BOOLEAN_KEYS = ['emergency_bypasses_approval'];
@@ -509,6 +515,11 @@ function doGet(e) {
     // individual reads. 'users' is deliberately NOT bundleable (it carries pin_hash + needs the roster
     // proof) — this returns raw read-sheets exactly like the individual doGet actions, and Node scopes.
     case 'bundle':      result = bundleRead_(e); break;
+    // Deploy provenance — the git SHA this live deployment was built from (CI-stamped). Non-secret, no
+    // auth; the Node /version endpoint and the post-deploy CI check read it to prove the live Apps Script
+    // matches the merge SHA. Present on every version from this commit forward (older deploys → unknown
+    // action, which the verifier treats as "stale/pre-version").
+    case 'version':     result = { commit: DEPLOY_COMMIT }; break;
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
   }

@@ -2,10 +2,13 @@
 // excluded from `npm test` (which runs only test/*.test.js) and must be run by hand after every merge:
 //
 //   APP_URL=https://<your-app> node test/smoke-live.js
+//   APP_URL=https://<your-app> EXPECTED_COMMIT=$GITHUB_SHA node test/smoke-live.js     # + version-match gate
 //   APP_URL=https://<your-app> SMOKE_USER='רועי' SMOKE_PIN='...' node test/smoke-live.js   # + authed read
 //
 // It verifies the ONE thing unit tests can't (they mock Apps Script): the whole live chain
-// browser → Node (Railway) → Apps Script /exec (302) → Sheets actually responds. Three checks:
+// browser → Node (Railway) → Apps Script /exec (302) → Sheets actually responds. Checks:
+//   0. GET /version     → 200; prints the live node + appsScript commits, and (with EXPECTED_COMMIT set)
+//                         FAILS unless the live Node build serves that exact commit (Railway not stale).
 //   1. GET /            → 200 and the login shim markup is present (the page can prompt for login).
 //   2. POST /api/login  → a proper JSON 401 for a bogus user (the whole Node→Apps Script auth path
 //                         responds with JSON — not a crash, hang, HTML error page, or 5xx).
@@ -17,6 +20,9 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '');
 const SMOKE_USER = process.env.SMOKE_USER || '';
 const SMOKE_PIN = process.env.SMOKE_PIN || '';
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS) || 20000;
+// When set (e.g. GITHUB_SHA in CI after a merge), the /version check FAILS unless the live Node build
+// serves this exact commit — proving Railway actually deployed it, not a stale build.
+const EXPECTED_COMMIT = (process.env.EXPECTED_COMMIT || '').trim();
 
 if (!APP_URL) {
   console.error('FAIL: APP_URL is required.\n  usage: APP_URL=https://<your-app> node test/smoke-live.js');
@@ -113,8 +119,28 @@ async function checkAuthedRead() {
   }
 }
 
+async function checkVersion() {
+  try {
+    const r = await req('/version', { headers: { Accept: 'application/json' } });
+    if (r.status !== 200) return fail(`GET /version returned ${r.status} (expected 200) — is this build post-version?`);
+    const j = JSON.parse(await r.text());
+    const node = j && j.node && j.node.commit ? String(j.node.commit) : '';
+    const gs = j && j.appsScript && j.appsScript.commit ? String(j.appsScript.commit) : '';
+    if (!node) return fail(`GET /version missing node.commit (got ${JSON.stringify(j).slice(0, 140)})`);
+    console.log(`INFO  live versions — node=${node}  appsScript=${gs}  builtAt=${(j.node && j.node.builtAt) || '?'}`);
+    if (EXPECTED_COMMIT) {
+      if (node === EXPECTED_COMMIT) return pass(`/version node.commit === EXPECTED_COMMIT (${EXPECTED_COMMIT}) — Railway serves this commit`);
+      return fail(`/version node.commit=${node} != EXPECTED_COMMIT=${EXPECTED_COMMIT} — Railway is STALE (not yet redeployed this commit, or the connected branch is wrong). See DEPLOY.md.`);
+    }
+    pass(`GET /version → 200 (node=${node}, appsScript=${gs}); set EXPECTED_COMMIT to assert an exact match`);
+  } catch (e) {
+    fail(`GET /version threw: ${e && e.message ? e.message : e}`);
+  }
+}
+
 (async () => {
   console.log(`smoke-live against ${APP_URL}`);
+  await checkVersion();
   await checkHome();
   await checkLogin401();
   await checkAuthedRead();
