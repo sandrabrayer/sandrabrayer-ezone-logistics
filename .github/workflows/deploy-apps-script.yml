@@ -45,6 +45,7 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+          APPS_SCRIPT_EXEC_URL: ${{ secrets.APPS_SCRIPT_EXEC_URL }}
         run: |
           missing=0
           if [ -z "$CLASPRC_JSON" ]; then
@@ -53,6 +54,10 @@ jobs:
           fi
           if [ -z "$DEPLOYMENT_ID" ]; then
             echo "::error::Missing secret DEPLOYMENT_ID. Apps Script editor → Deploy → Manage deployments → copy the deployment ID (starts with 'AKfyc'). See DEPLOY.md."
+            missing=1
+          fi
+          if [ -z "$APPS_SCRIPT_EXEC_URL" ]; then
+            echo "::error::Missing secret APPS_SCRIPT_EXEC_URL. This is the live Web App /exec URL (the SAME value Railway uses as APPS_SCRIPT_EXEC_URL). Post-deploy verification hits it to prove the live deployment actually serves the new code — without it a green deploy can hide a stale production. See DEPLOY.md."
             missing=1
           fi
           if [ "$missing" -ne 0 ]; then
@@ -90,6 +95,40 @@ jobs:
             exit 1
           fi
           echo "Redeploy confirmed — new version of the EXISTING deployment (same /exec URL)."
+
+      - name: Verify the LIVE /exec serves the new code (post-deploy smoke)
+        env:
+          APPS_SCRIPT_EXEC_URL: ${{ secrets.APPS_SCRIPT_EXEC_URL }}
+        run: |
+          # clasp printing "Deployed" only proves it redeployed the deployment named by DEPLOYMENT_ID.
+          # It does NOT prove that deployment is the one production actually calls. If DEPLOYMENT_ID and
+          # APPS_SCRIPT_EXEC_URL point at DIFFERENT deployments, CI stays green while production is stale.
+          # This step closes that gap by probing the REAL /exec (the same URL Railway uses):
+          #   - action=users   → exists on EVERY published version (baseline: is the URL even reachable?)
+          #   - action=bundle  → exists ONLY on the current Code.gs (recent-only: is the NEW code live?)
+          # An older/other deployment answers bundle with {"ok":false,"error":"Unknown or missing action"}.
+          url="$(printf '%s' "$APPS_SCRIPT_EXEC_URL" | tr -d '[:space:]')"
+          probe() { curl -fsSL --max-time 25 "$1" 2>/dev/null; }
+          attempt=0; max=5; delay=3; base_ok=0; bundle=""
+          while [ "$attempt" -lt "$max" ]; do
+            attempt=$((attempt + 1))
+            bundle="$(probe "${url}?action=bundle&sheets=houses")"
+            if printf '%s' "$bundle" | grep -q '"ok":true' && printf '%s' "$bundle" | grep -q '"houses"'; then
+              echo "Post-deploy verification OK — live /exec answers the recent-only 'bundle' action (new Code.gs is live)."
+              exit 0
+            fi
+            if printf '%s' "$(probe "${url}?action=users")" | grep -q '"ok":true'; then base_ok=1; fi
+            echo "attempt ${attempt}/${max}: 'bundle' not confirmed live yet (new versions take a few seconds to propagate); retrying in ${delay}s…"
+            sleep "$delay"; delay=$((delay * 2))
+          done
+          if [ "$base_ok" -eq 1 ]; then
+            echo "::error::LIVE /exec answers the baseline 'users' action but NOT the recent-only 'bundle' action. clasp reported 'Deployed', yet the deployment behind APPS_SCRIPT_EXEC_URL is STALE. Most likely DEPLOYMENT_ID names a DIFFERENT deployment than production calls (or APPS_SCRIPT_EXEC_URL is out of date). Fix: in the Apps Script editor → Manage deployments, confirm the deployment whose /exec URL equals APPS_SCRIPT_EXEC_URL, and set DEPLOYMENT_ID to THAT deployment's id. See DEPLOY.md."
+          else
+            echo "::error::LIVE /exec did not answer even the baseline 'users' action at APPS_SCRIPT_EXEC_URL. The URL is wrong/unreachable, or the Web App access is not 'Anyone' (anonymous). Fix APPS_SCRIPT_EXEC_URL (and the manifest access) — see DEPLOY.md."
+          fi
+          echo "---- last bundle response (truncated) ----"
+          printf '%s\n' "$bundle" | head -c 500
+          exit 1
 
       - name: Remove credentials from the runner
         if: always()
