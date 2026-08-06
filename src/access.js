@@ -1,12 +1,14 @@
 // access.js — role-based page + data-action visibility (owner's required model, increment 38).
 //
-// Owner's model:
-//   coordinator  → ONLY the new-request form (/) + their own house's request status (shown ON /), plus
-//                  event ENTRY (/events). No dashboard / inventory / reports / בקרה / משימות / management.
-//   maintenance  → unchanged from before this increment (the tier-B pages it already had).
-//   field_ops    → everything EXCEPT /management.
+// Owner's model (post nav-cleanup — Logistics is becoming managers-only):
+//   coordinator  → no nav tab (the standalone request form + /events were removed); '/' still serves so a
+//                  session lands on the root. Data gates (createRequest own-house scope) are unchanged.
+//   maintenance  → dashboard / workorders / inventory / inspection / reports (the tier-B pages it had; no /events).
+//   field_ops    → those same pages (everything EXCEPT /management); no standalone request form or /events.
 //   ops_manager  → everything, including /management.
 //   ceo          → everything, including /management.
+// Requests are now filed from the in-dashboard create modal, not a standalone דרישה חדשה page. אירועים
+// חריגים (/events) is removed entirely (nav + page + routes). '/' (index.html) stays as the root/login landing.
 //
 // Two enforcement layers use this module:
 //   1. SERVER-SIDE data gate (src/server.js): canRead() gates every doGet action by the session role;
@@ -58,27 +60,31 @@ function canRead(role, action) {
 
 // ---- Pages / nav (Node-only: the shim renders these and redirects) ----
 // The full ordered link set; each role gets a subset. Labels are the canonical Hebrew nav labels.
+// NAV cleanup (Logistics → managers-only): the standalone דרישה חדשה tab ('/') is GONE from the nav —
+// managers file requests from the in-dashboard create modal; '/' still serves the root/login landing.
+// אירועים חריגים ('/events') is removed entirely (nav + page + routes), matching its removal from /management.
 const NAV_ALL = [
-  { href: '/', label: 'דרישה חדשה' },
   { href: '/dashboard', label: 'דשבורד' },
   { href: '/workorders', label: 'משימות' },
   { href: '/inventory', label: 'מלאי' },
   { href: '/inspection', label: 'בקרה' },
   { href: '/reports', label: 'דוחות' },
-  { href: '/events', label: 'אירועים חריגים' },
   { href: '/management', label: 'ניהול תפעולי רשת' },
 ];
 const NAV_HREFS_BY_ROLE = {
-  coordinator: ['/', '/events'],
-  maintenance: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  field_ops: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events'],
+  // coordinator no longer has a nav tab here (דרישה חדשה + אירועים חריגים removed). '/' still serves, so a
+  // coordinator session lands on the root; retiring/re-homing the role is the separate architecture work.
+  coordinator: [],
+  maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
+  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
   ops_manager: NAV_ALL.map((l) => l.href),
   ceo: NAV_ALL.map((l) => l.href),
 };
 
-// Ordered [{href,label}] a role may open. Unknown/blank role → just the request form (fail closed).
+// Ordered [{href,label}] a role may open. Unknown/blank role → no nav (fail closed); '/' is the root/login
+// landing, owned by the shim's overlay, not a nav destination.
 function navLinksFor(role) {
-  const hrefs = NAV_HREFS_BY_ROLE[role] || ['/'];
+  const hrefs = NAV_HREFS_BY_ROLE[role] || [];
   return NAV_ALL.filter((l) => hrefs.indexOf(l.href) !== -1);
 }
 

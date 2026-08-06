@@ -99,8 +99,10 @@ test('updateEvent stays exec-only: field_ops → 403; ceo passes. createEvent bl
 test('HTML routes serve the shell (200) to any session — role enforcement is the data gate + nav redirect', async () => {
   // The document GET carries no token (navigation), so the shell is 200 for everyone; a disallowed role
   // is bounced client-side by the nav shim and gets 403 on every data call for that page.
-  for (const p of ['/', '/dashboard', '/management', '/events']) {
+  for (const p of ['/', '/dashboard', '/management']) {
     const r = await fetch(`${base}${p}`);
     assert.equal(r.status, 200, `${p} shell should serve`);
   }
+  // '/events' was removed (nav + page + route) — its shell no longer serves.
+  assert.equal((await fetch(`${base}/events`)).status, 404, '/events route is gone');
 });

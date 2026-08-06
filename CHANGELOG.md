@@ -3,6 +3,62 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — Task 1: field_ops dashboard 403 fix + perf round-3 cache + nav cleanup
+
+Three production follow-ups after the deploy chain was confirmed current.
+
+**1. BUG — the field_ops "Forbidden" banner, fixed in the UI (the ₪3000 approval control is UNCHANGED).**
+The chain-B gate is intentional and stays exactly as it was: field_ops (Roy) approves/rejects **only ≤ the
+`approval_threshold`; above it → ops_manager (Olga); ceo may always**. `canApprove` / `handleDeleteRequest_`
+(exec-only delete) are untouched on the server. The production banner ("הפעולה נכשלה — Forbidden: role not
+authorized…") did **not** come from a load-time action — an exhaustive trace confirms the dashboard's only
+load call is the `pageData` GET; every write is behind a click. It came from Roy **clicking אישור on an
+over-threshold request** (the client `whoApproves` was stale — "Roy approves alone", so the buttons showed
+regardless of amount), and the error banner never auto-clears, so it looked like it was there on load. Fix,
+all client-side (`src/dashboard.html`):
+- `whoApproves` now MIRRORS chain B (emergency → auto; over threshold → ops_manager; else field_ops).
+- On an over-threshold request a field_ops session sees a **disabled `ממתין לאישור אולגה`** instead of a
+  clickable אישור / לא אושר — no click-then-403. Execs (ops_manager/ceo) still see the real buttons.
+- The **delete** button is now exec-only in the UI too (`isExecUI`), matching the server `isManagement_`.
+- `post()` maps any residual permission error to a clean Hebrew "אין לך הרשאה לפעולה זו." — never the raw
+  upstream English.
+
+Tests: `roles.test.js` / `enforcement.test.js` keep the threshold-gate assertions (restored); new
+`test/dashboard-approve-gate.test.js` renders the real dashboard headless and asserts **no error banner on
+load**, the disabled `ממתין לאישור אולגה` for field_ops on an over-threshold request, real approve for a
+≤threshold one and for a ceo on both, and delete visible only to execs.
+
+**2. PERF (round-3) — short-TTL, write-invalidated cache for the hot reads.** Investigation (a
+call-counting probe against the real gateway) found the bundle path healthy — 1 call/page, never
+`degraded` — but the micro-cache only trimmed the bundle payload; every tab switch still made **1 blocking
+`/exec` round-trip** because `requests`/`findings`/`inspections` were never cached. Added an ~8s cache for
+those, INVALIDATED on every write (`handleAction`), so a burst of tab switches reuses one read while a
+write still forces fresh data. The per-role scope filter STILL runs on a cache hit (a cached raw `requests`
+list is never returned unscoped to tier B). Numbers, one manager session (login → dashboard → workorders →
+inventory → reports → dashboard → approve):
+
+| | before | after |
+| --- | --- | --- |
+| repeat dashboard load | 1 `/exec` call | **0** |
+| tab switch (workorders/reports/back) | 1 call each | **0** each |
+| total `/exec` GETs in the walk | **9** | **5** |
+| post-write reload | refetches | **still refetches (freshness kept)** |
+
+At live Apps Script latency (~1–3s/call incl. 302 + cold start) that turns multi-second tab switches into
+instant ones. `src/server.js`; tests in `pagedata.test.js` (cache hit, write-invalidation, scope-filter-on-hit).
+
+**3. NAV cleanup (Logistics → managers-only).** The standalone **דרישה חדשה** tab is removed from the nav;
+managers file requests from a new **in-dashboard create modal** (button + modal on `/dashboard`;
+`created_by` is stamped from the token, never the client). **אירועים חריגים** (`/events`) is removed
+entirely — nav link, the `events.html` page, the HTML route, and the service-worker route. `'/'` (index.html)
+is kept AS-IS as the root/login landing (the entry-flow/root rework is the separate architecture session).
+The events **backend** (createEvent/updateEvent handlers, the `MIRROR:events` logic in `src/events.js`, the
+Events sheet) is left dormant, not removed. `src/access.js` / `src/server.js` / `src/public/sw.js` /
+`src/dashboard.html`; tests: `access.test.js` / `access-server.test.js` / `nav-events.test.js` updated,
+new `test/dashboard-create.test.js`.
+
+`node --test` green (**599 tests**). No secrets; explicit-path adds.
+
 ## [Unreleased] — /management redesigned as a HUB + topic views, and two new field checklists
 
 **Why.** Olga's one long /management page became a **dashboard hub**: a compact KPI/gauge summary per topic,

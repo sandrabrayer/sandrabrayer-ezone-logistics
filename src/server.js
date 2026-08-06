@@ -122,7 +122,7 @@ function buildClientShim(names) {
   // action). The static per-page .nav markup is replaced wholesale so every page shows exactly the
   // permitted set — no per-page edits, and a restricted role never briefly sees links it can't open.
   function norm(p){p=String(p||'/');var q=p.indexOf('?');if(q!==-1)p=p.slice(0,q);if(p==='/index.html'||p==='/index')return '/';p=p.replace(/\\.html$/,'');return p===''?'/':p;}
-  function navLinks(){var r=String(window.__ROLE__||'');return NAV_BY_ROLE[r]||[{href:'/',label:'דרישה חדשה'}];}
+  function navLinks(){var r=String(window.__ROLE__||'');return NAV_BY_ROLE[r]||[];}
   function allowedHere(){var here=norm(location.pathname);return navLinks().some(function(l){return l.href===here;});}
   function mountNav(){
     function m(){
@@ -213,7 +213,6 @@ const HTML_ROUTES = {
   '/reports': 'reports.html', '/reports.html': 'reports.html',
   '/workorders': 'workorders.html', '/workorders.html': 'workorders.html',
   '/management': 'management.html', '/management.html': 'management.html',
-  '/events': 'events.html', '/events.html': 'events.html',
 };
 
 function notFound(res) {
@@ -337,7 +336,23 @@ async function fetchAppsScriptData(action, extra) {
 // built-in fetch/undici already keeps Node→Apps Script connections alive by default, so no Agent change.)
 const NODE_CACHEABLE = new Set(['houses', 'config', 'technicians']);
 const NODE_CACHE_TTL_MS = 120000;
+// Dynamic reads (perf round-3): the dashboard/workorders HOT sheets that change on writes. Measured, the
+// old design fetched these on EVERY tab switch — one blocking Apps Script round-trip (302 + cold start,
+// ~1–3s live) per page. They get a SHORT TTL so a burst of tab switches reuses one read, and — unlike the
+// stable sheets — the cache is INVALIDATED on every write (handleAction), so the reload a write triggers is
+// always fresh. Cross-instance/other-user staleness is bounded to the short TTL. NEVER cache `users` (auth
+// roster / holds pin_hash) — it is not in either set. The per-role scope filter still runs on a cache HIT
+// (see handleData/handlePageData), so a cached raw `requests` list is never returned unscoped to tier B.
+const DYNAMIC_CACHEABLE = new Set(['requests', 'findings', 'inspections']);
+const DYNAMIC_CACHE_TTL_MS = 8000;
 const nodeCache = new Map(); // action -> { value, exp }
+
+function cacheTtl(action) {
+  if (NODE_CACHEABLE.has(action)) return NODE_CACHE_TTL_MS;
+  if (DYNAMIC_CACHEABLE.has(action)) return DYNAMIC_CACHE_TTL_MS;
+  return 0; // not cacheable (users/etc.)
+}
+function isCacheable(action) { return cacheTtl(action) > 0; }
 
 function nodeCacheGet(action) {
   const e = nodeCache.get(action);
@@ -346,8 +361,14 @@ function nodeCacheGet(action) {
   return null;
 }
 function nodeCachePut(action, value) {
-  if (!NODE_CACHEABLE.has(action)) return; // hard guard: never users/requests/etc.
-  nodeCache.set(action, { value, exp: Date.now() + NODE_CACHE_TTL_MS });
+  const ttl = cacheTtl(action);
+  if (!ttl) return; // hard guard: never users/etc.
+  nodeCache.set(action, { value, exp: Date.now() + ttl });
+}
+// Drop the short-TTL dynamic reads so the next read reflects a just-committed write immediately. The
+// stable reference sheets (houses/config/technicians) are untouched — a write never changes them.
+function invalidateDynamicCache() {
+  for (const a of DYNAMIC_CACHEABLE) nodeCache.delete(a);
 }
 function _resetNodeCache() { nodeCache.clear(); loginNamesCache = null; }
 
@@ -424,8 +445,8 @@ async function handlePageData(res, actor, page) {
   const data = {};
   const toFetch = [];
   for (const a of actions) {
-    const cached = NODE_CACHEABLE.has(a) ? nodeCacheGet(a) : null;
-    if (cached) data[a] = cached; else toFetch.push(a);
+    const cached = isCacheable(a) ? nodeCacheGet(a) : null;
+    if (cached !== null) data[a] = cached; else toFetch.push(a);
   }
   // `degraded` is set when this request had to take the individual-read FALLBACK because the live Apps
   // Script did not answer `bundle`. It is surfaced on the 200 response (and warn-logged) so a stale
@@ -543,29 +564,32 @@ async function handleData(req, res, url) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
 
-  // Stable reference reads (houses/config/technicians) are served from the Node micro-cache so tab
-  // switches skip the Apps Script hop. Never users/requests (not in NODE_CACHEABLE).
-  if (NODE_CACHEABLE.has(action)) {
+  // Node micro-cache: stable reference sheets (120s) + hot dynamic sheets (short TTL, write-invalidated) are
+  // served from process memory so tab switches skip the Apps Script hop. A cache HIT falls THROUGH to the
+  // per-action post-processing below (scope filter / secret hygiene) — so a cached raw `requests` list is
+  // never returned unscoped to tier B. `users` is in neither set and always reads live.
+  let payload = null;
+  if (isCacheable(action)) {
     const hit = nodeCacheGet(action);
-    if (hit !== null) return sendJson(res, 200, { ok: true, data: hit });
+    if (hit !== null) payload = { ok: true, data: hit };
   }
 
-  const qs = new URLSearchParams();
-  for (const [k, v] of url.searchParams.entries()) {
-    if (ALLOWED_QUERY_KEYS.has(k)) qs.set(k, v);
-  }
-  const target = `${EXEC_URL}${qs.toString() ? `?${qs.toString()}` : ''}`;
-  let payload;
-  try {
-    const upstream = await fetch(target, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
-    payload = await upstream.json();
-  } catch (err) {
-    return sendJson(res, 502, { ok: false, error: 'upstream_error' });
-  }
-
-  // Populate the micro-cache for stable reads on a successful upstream response.
-  if (NODE_CACHEABLE.has(action) && payload && payload.ok && 'data' in payload) {
-    nodeCachePut(action, payload.data);
+  if (!payload) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of url.searchParams.entries()) {
+      if (ALLOWED_QUERY_KEYS.has(k)) qs.set(k, v);
+    }
+    const target = `${EXEC_URL}${qs.toString() ? `?${qs.toString()}` : ''}`;
+    try {
+      const upstream = await fetch(target, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
+      payload = await upstream.json();
+    } catch (err) {
+      return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+    }
+    // Populate the cache (stable or dynamic) on a successful upstream response.
+    if (isCacheable(action) && payload && payload.ok && 'data' in payload) {
+      nodeCachePut(action, payload.data);
+    }
   }
 
   // Post-process per action for scope/secret hygiene.
@@ -651,6 +675,9 @@ async function handleAction(req, res) {
       body: upstreamBody,
     });
     const text = await upstream.text();
+    // A write may have changed requests/findings/inspections — drop the short-TTL dynamic cache so the
+    // reload the client fires next reflects the write immediately (post-write freshness on this instance).
+    if (upstream.status < 300) invalidateDynamicCache();
     res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json', 'Cache-Control': 'no-store' });
     res.end(text);
   } catch (err) {

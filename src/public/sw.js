@@ -60,6 +60,7 @@ var DOCUMENT_ROUTES = [
   '/workorders', '/workorders.html',
   '/management', '/management.html',
 ];
+// Note: '/events' (אירועים חריגים) was removed from the app; no route entry remains.
 function isNetworkFirst(url) {
   return DOCUMENT_ROUTES.indexOf(url.pathname) !== -1;
 }

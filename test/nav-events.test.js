@@ -1,8 +1,7 @@
-// test/nav-events.test.js — the /events nav link ("אירועים חריגים") in the role-based nav the auth shim
-// now renders (increment 38). The shim rebuilds .nav from NAV_BY_ROLE for the session role and only shows
-// links the role may open; it is DISPLAY-ONLY (server + Code.gs enforce the real rules). Here we drive the
-// real injected shim in a DOM sandbox, ON A PAGE EACH ROLE MAY OPEN, and assert the /events link appears
-// for reporters (coordinator/field_ops/ops_manager/ceo) and is absent for maintenance and logged-out.
+// test/nav-events.test.js — guards the NAV CLEANUP: the "אירועים חריגים" (/events) link and the standalone
+// "דרישה חדשה" (/) link were REMOVED from the role-based nav the auth shim renders. This drives the real
+// injected shim in a DOM sandbox and asserts neither link appears for ANY role, and that the shim's
+// redirect behavior (bouncing a role off a page it may not open, never off '/') is unchanged.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -40,35 +39,38 @@ function runShim(role, pathname) {
   const code = _CLIENT_SHIM.replace(/^<script>/, '').replace(/<\/script>$/, '');
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox);
-  return nav.querySelector('a[href="/events"]');
+  return nav; // inspect nav.children for rendered links
 }
+const hrefs = (nav) => nav.children.filter((c) => c.tagName === 'a').map((a) => a.getAttribute('href'));
 
-// Each role is tested on a page IT MAY OPEN (else the shim redirects and renders no nav).
-test('every reporting role (coordinator, field_ops, ops_manager, ceo) sees the "אירועים חריגים" nav link', () => {
-  const onPage = { coordinator: '/', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
-  for (const role of ['coordinator', 'field_ops', 'ops_manager', 'ceo']) {
-    const link = runShim(role, onPage[role]);
-    assert.ok(link, `${role} must see the /events nav link`);
-    assert.equal(link.textContent, 'אירועים חריגים');
-    assert.equal(link.getAttribute('href'), '/events');
+// Each role is checked on a page IT MAY OPEN (else the shim redirects and renders no nav).
+test('NO role sees the removed "אירועים חריגים" (/events) or "דרישה חדשה" (/) nav links', () => {
+  const onPage = { coordinator: '/', maintenance: '/dashboard', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
+  for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo']) {
+    const nav = runShim(role, onPage[role]);
+    assert.equal(nav.querySelector('a[href="/events"]'), null, `${role} must NOT see the removed /events link`);
+    assert.equal(nav.querySelector('a[href="/"]'), null, `${role} must NOT see a standalone / (request form) link`);
   }
 });
 
-test('maintenance does NOT see the /events nav link (on a page it may open)', () => {
-  assert.equal(runShim('maintenance', '/dashboard'), null);
+test('managers still see their real nav pages (dashboard…management); the removal did not blank the nav', () => {
+  const nav = runShim('ops_manager', '/dashboard');
+  const got = hrefs(nav);
+  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management']);
 });
 
-test('logged-out (no session) → no /events nav link', () => {
-  assert.equal(runShim('', '/'), null);
+test('field_ops nav excludes /management, /events and / ', () => {
+  const got = hrefs(runShim('field_ops', '/dashboard'));
+  assert.ok(!got.includes('/management') && !got.includes('/events') && !got.includes('/'));
+  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
 });
 
-test('on the /events page the link is marked active', () => {
-  const link = runShim('coordinator', '/events');
-  assert.ok(link);
-  assert.equal(link.className, 'active');
+test('logged-out (no session) → no nav links at all', () => {
+  assert.deepEqual(hrefs(runShim('', '/')), []);
 });
 
-// The shim REDIRECTS a role away from a page it may not open (coordinator landing on /dashboard).
+// The shim REDIRECTS a role away from a page it may not open (coordinator landing on /dashboard), but
+// never off '/' (the root/login landing). Unchanged by the cleanup.
 function runShimCapturingRedirect(role, pathname) {
   const store = { ezone_session: JSON.stringify({ token: 'T', role, scope: '', exp: Date.now() + 30 * 864e5 }) };
   const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
@@ -96,7 +98,7 @@ test('field_ops on /management is redirected to / (management is exec-only)', ()
   assert.equal(replacedTo, '/');
 });
 
-test('an allowed page is NOT redirected (coordinator on /)', () => {
+test('an allowed landing is NOT redirected (coordinator on /)', () => {
   const { replacedTo } = runShimCapturingRedirect('coordinator', '/');
   assert.equal(replacedTo, null);
 });

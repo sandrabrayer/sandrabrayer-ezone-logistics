@@ -10,16 +10,17 @@ import {
 import { ROLE } from '../src/roles.js';
 
 const ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO];
-const ALL_PAGES = ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events', '/management'];
+// Nav-cleanup: the standalone '/' (דרישה חדשה) and '/events' (אירועים חריגים) are no longer nav pages.
+const ALL_PAGES = ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management'];
 const READS = ['houses', 'config', 'requests', 'users', 'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts', 'events'];
 const WRITES = ['createRequest', 'createEvent', 'updateEvent', 'managementData', 'approve', 'reject', 'defer', 'assign', 'setStatus', 'setExecution', 'setBlocked', 'createInspection', 'addFinding', 'confirmFinding', 'deleteRequest', 'editRequest', 'submitInventory'];
 
 // ---- PAGE ACCESS MATRIX (role × each page: allowed/denied) ----
 
 const PAGE_EXPECT = {
-  coordinator: ['/', '/events'],
-  maintenance: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  field_ops: ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events'],
+  coordinator: [],
+  maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
+  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
   ops_manager: ALL_PAGES.slice(),
   ceo: ALL_PAGES.slice(),
 };
@@ -33,46 +34,45 @@ for (const role of ROLES) {
   });
 }
 
-test('coordinator opens ONLY the request form and events (no dashboard/inventory/reports/בקרה/משימות/management)', () => {
-  assert.equal(canOpenPage('coordinator', '/'), true);
-  assert.equal(canOpenPage('coordinator', '/events'), true);
-  for (const p of ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management']) {
-    assert.equal(canOpenPage('coordinator', p), false, `coordinator must not open ${p}`);
+test('coordinator has NO nav pages after the cleanup (request form + events removed)', () => {
+  // '/' still SERVES as the root/login landing, but it is no longer a nav destination for any role.
+  for (const p of ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management', '/events', '/']) {
+    assert.equal(canOpenPage('coordinator', p), false, `coordinator has no nav page ${p}`);
   }
 });
 
-test('field_ops sees everything EXCEPT /management; execs see /management too', () => {
+test('field_ops sees every nav page EXCEPT /management; execs see /management too', () => {
   for (const p of ALL_PAGES.filter((x) => x !== '/management')) assert.equal(canOpenPage('field_ops', p), true);
   assert.equal(canOpenPage('field_ops', '/management'), false);
   assert.equal(canOpenPage('ops_manager', '/management'), true);
   assert.equal(canOpenPage('ceo', '/management'), true);
+  // the removed pages are nav destinations for NO role
+  for (const role of ROLES) { assert.equal(canOpenPage(role, '/events'), false); assert.equal(canOpenPage(role, '/'), false); }
 });
 
-test('canOpenPage normalizes .html and /index forms', () => {
-  assert.equal(canOpenPage('coordinator', '/index.html'), true);
-  assert.equal(canOpenPage('coordinator', '/events.html'), true);
+test('canOpenPage normalizes .html forms', () => {
+  assert.equal(canOpenPage('field_ops', '/dashboard.html'), true);
   assert.equal(canOpenPage('coordinator', '/dashboard.html'), false);
   assert.equal(canOpenPage('field_ops', '/reports.html'), true);
-  assert.equal(canonicalPath('/events.html?x=1'), '/events');
+  assert.equal(canonicalPath('/reports.html?x=1'), '/reports');
 });
 
-test('unknown / blank role fails closed to just the request form', () => {
-  assert.equal(canOpenPage('', '/'), true);
+test('unknown / blank role fails closed to NO nav pages', () => {
   assert.equal(canOpenPage('nonsense', '/dashboard'), false);
-  assert.deepEqual(navLinksFor('nonsense').map((l) => l.href), ['/']);
+  assert.deepEqual(navLinksFor('nonsense').map((l) => l.href), []);
 });
 
 // ---- NAV MATRIX (shim renders exactly these, in order) ----
 
 test('navByRole renders exactly the permitted links, in canonical order', () => {
   const nav = navByRole();
-  assert.deepEqual(nav.coordinator.map((l) => l.href), ['/', '/events']);
-  assert.deepEqual(nav.coordinator.map((l) => l.label), ['דרישה חדשה', 'אירועים חריגים']);
-  assert.deepEqual(nav.field_ops.map((l) => l.href), ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/events']);
+  assert.deepEqual(nav.coordinator.map((l) => l.href), [], 'coordinator has no nav tab (request form + events removed)');
+  assert.deepEqual(nav.field_ops.map((l) => l.href), ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
   assert.ok(!nav.field_ops.some((l) => l.href === '/management'), 'field_ops nav has no management link');
+  assert.ok(!Object.values(nav).some((links) => links.some((l) => l.href === '/events' || l.href === '/')), 'no role has a /events or / nav link');
   assert.deepEqual(nav.ops_manager.map((l) => l.href), ALL_PAGES);
   assert.deepEqual(nav.ceo.map((l) => l.href), ALL_PAGES);
-  assert.deepEqual(nav.maintenance.map((l) => l.href), ['/', '/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
+  assert.deepEqual(nav.maintenance.map((l) => l.href), ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
 });
 
 test('nav visibility exactly matches page access for every role (link ⇔ openable)', () => {

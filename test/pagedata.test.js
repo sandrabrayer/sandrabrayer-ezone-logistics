@@ -1,7 +1,9 @@
-// test/pagedata.test.js — the aggregated per-page read (perf round-2) + the Node micro-cache. A mock
-// Apps Script upstream lets us COUNT Node→upstream round-trips (the ~1-3s-each cost) and assert the
-// role gate + scoping match the individual reads exactly, that stable reads are cached, and that users
-// and requests are NEVER cached.
+// test/pagedata.test.js — the aggregated per-page read (perf round-2) + the Node micro-cache (round-2 stable
+// sheets + round-3 short-TTL dynamic sheets). A mock Apps Script upstream lets us COUNT Node→upstream
+// round-trips (the ~1-3s-each cost) and assert the role gate + scoping match the individual reads exactly,
+// that stable reads are cached (120s), that the HOT dynamic reads (requests/findings/inspections) are
+// cached for a short TTL and INVALIDATED on every write (so a post-write read is fresh) while the per-role
+// scope filter STILL runs on a cache hit, and that `users` is NEVER cached.
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -124,6 +126,7 @@ test('LOGIN is independent of the new code: bogus login still returns JSON 401 e
 const tok = (role) => signToken(SECRET, 7, { name: role, role, scope: role === 'coordinator' ? 'רמות השבים' : '' });
 const pageData = (page, role, hdr) => fetch(`${base}/api/data?action=pageData&page=${page}`, { headers: hdr === null ? {} : { Authorization: `Bearer ${tok(role)}` } });
 const read = (action, role) => fetch(`${base}/api/data?action=${action}`, { headers: { Authorization: `Bearer ${tok(role)}` } });
+const write = (act, role) => fetch(`${base}/api/action`, { method: 'POST', headers: { Authorization: `Bearer ${tok(role)}`, 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: act, payload: {} }) });
 const countAction = (a) => hits.filter((h) => h.action === a).length;
 
 // ---- auth + shape ----
@@ -154,20 +157,18 @@ test('MEASURE: a dashboard load is 1 upstream round-trip (was 5 individual reads
   assert.equal(roundTrips, 1, `dashboard: ${roundTrips} upstream round-trip(s) via pageData (individual reads were 5)`);
 });
 
-test('MEASURE: warm cache — houses/config served from Node memory, bundle shrinks; tab switch reuses them', async () => {
+test('MEASURE: a repeat dashboard load within the dynamic TTL makes ZERO upstream calls (round-3)', async () => {
   await pageData('dashboard', 'ceo');                 // cold: bundle all 5
-  const coldSheets = hits.find((h) => h.action === 'bundle').sheets.split(',').sort();
-  assert.deepEqual(coldSheets, ['config', 'findings', 'houses', 'inspections', 'requests']);
+  const cold = hits.find((h) => h.action === 'bundle');
+  assert.deepEqual(cold.sheets.split(',').sort(), ['config', 'findings', 'houses', 'inspections', 'requests']);
   hits = [];
-  await pageData('dashboard', 'ceo');                 // warm: houses+config from Node cache
-  const warm = hits.find((h) => h.action === 'bundle');
-  assert.ok(!warm.sheets.split(',').includes('houses'), 'houses served from Node cache (not re-fetched)');
-  assert.ok(!warm.sheets.split(',').includes('config'), 'config served from Node cache');
+  await pageData('dashboard', 'ceo');                 // warm: stable (houses/config) + dynamic (requests/findings/inspections) all cached
+  assert.equal(hits.length, 0, 'a repeat dashboard load within the TTL is served ENTIRELY from cache — no Apps Script hop');
   hits = [];
-  await pageData('inventory', 'ceo');                 // tab switch: houses already cached
+  await pageData('inventory', 'ceo');                 // tab switch: houses cached; the inventory sheets are not dynamic-cached
   const inv = hits.find((h) => h.action === 'bundle');
-  assert.ok(!inv.sheets.split(',').includes('houses'), 'tab switch reuses cached houses — no Apps Script hop for it');
-  assert.deepEqual(inv.sheets.split(',').sort(), ['inventoryCounts', 'inventoryItems']);
+  assert.ok(inv && !inv.sheets.split(',').includes('houses'), 'tab switch reuses cached houses — no hop for it');
+  assert.deepEqual(inv.sheets.split(',').sort(), ['inventoryCounts', 'inventoryItems'], 'only the not-cached inventory sheets are fetched');
 });
 
 // ---- role gate (identical to the individual reads) ----
@@ -209,10 +210,29 @@ test('Node cache NEVER caches users: two roster reads both hit upstream', async 
   assert.equal(countAction('users'), 2, 'users is read live every time — never cached');
 });
 
-test('Node cache NEVER caches requests: two reads both hit upstream', async () => {
+test('dynamic reads ARE cached within the short TTL (round-3): a 2nd requests read is served from memory', async () => {
   await read('requests', 'ceo');
   await read('requests', 'ceo');
-  assert.equal(countAction('requests'), 2, 'requests read live every time — never cached');
+  assert.equal(countAction('requests'), 1, 'requests served from the short-TTL cache on the 2nd read (was N sequential /exec calls)');
+});
+
+test('SECURITY: a cache HIT still scope-filters requests for tier B — never returns the raw cached list', async () => {
+  // A coordinator read populates the cache with the RAW [r1, r2] list but returns only their house (r1)…
+  const first = await (await read('requests', 'coordinator')).json();
+  assert.deepEqual(first.data.map((r) => r.id), ['r1']);
+  // …and the SECOND read is a cache HIT (no upstream requests call) that MUST still be scoped, not raw.
+  const second = await (await read('requests', 'coordinator')).json();
+  assert.equal(countAction('requests'), 1, 'the 2nd read hit the cache (no extra requests round-trip)');
+  assert.deepEqual(second.data.map((r) => r.id), ['r1'], 'cache hit is still scope-filtered — no raw-list leak to tier B');
+});
+
+test('a WRITE invalidates the dynamic cache so the post-write read is fresh (freshness preserved)', async () => {
+  await read('requests', 'ceo');
+  await read('requests', 'ceo');
+  assert.equal(countAction('requests'), 1, 'cached within the TTL');
+  await write('setStatus', 'ceo');           // any forwarded write clears the dynamic cache
+  await read('requests', 'ceo');
+  assert.equal(countAction('requests'), 2, 'the write cleared the dynamic cache → the next read re-fetched live');
 });
 
 // ---- stable-read caching + invalidation ----
@@ -224,7 +244,7 @@ test('houses is cached: second read served from Node memory (0 extra upstream hi
   assert.equal(countAction('houses'), 1, 'second houses read served from the Node micro-cache');
 });
 
-test('config + technicians are cached the same way; users/requests are not', async () => {
+test('config + technicians are cached the same way (stable, 120s)', async () => {
   await read('config', 'ceo'); await read('config', 'ceo');
   await read('technicians', 'ceo'); await read('technicians', 'ceo');
   assert.equal(countAction('config'), 1, 'config cached');
