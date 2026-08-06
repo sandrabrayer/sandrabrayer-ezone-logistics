@@ -41,11 +41,12 @@ const SHARED_ACCESS_CODE = (process.env.SHARED_ACCESS_CODE || '').trim();
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS) || 0;
 
-// Who may log into this (managers-oriented) app with the shared code = the active NON-coordinator roles.
-// Coordinators were removed from the app; the maintenance leads (רמי/צחי) keep login for their /workorders
-// preventive-daily entry. (To restrict to strictly manager-tier — field_ops/ops_manager/ceo — drop
-// 'maintenance' from this one set; nothing else changes.)
-const LOGIN_ROLES = new Set(['field_ops', 'ops_manager', 'ceo', 'maintenance']);
+// Who may log into this app with the shared code = the manager-tier roles ONLY (field_ops = רועי,
+// ops_manager = אולגה). This is JUST the login-roster filter — it does not touch the Users sheet or any
+// token/role/scope logic. Excluded from login: ceo (סנדרה), maintenance (רמי/צחי), and coordinators.
+// (⚠ removing maintenance means רמי/צחי can no longer reach ANY page, including their #73 /workorders
+// preventive-daily entry — add 'maintenance' back here to restore them; nothing else changes.)
+const LOGIN_ROLES = new Set(['field_ops', 'ops_manager']);
 
 // ---- version truth (deploy provenance) ----
 // COMMIT: the git SHA this Node build was deployed from. Railway injects RAILWAY_GIT_COMMIT_SHA into the
@@ -76,9 +77,9 @@ const HEAD_INJECT =
 // FALLBACK login-roster names only. The picker is normally built from the LIVE active roster
 // (getLoginNames → doGet('users')); this hardcoded list is used solely when that read is unavailable
 // (a deploy-order window or an upstream outage) so the login page can never present an empty picker.
-// It mirrors the LOGIN_ROLES (active, non-coordinator) seeded SEED_USERS (setup.gs); a guard test asserts
-// the two stay in sync. Coordinators are NOT here — they no longer log into this app.
-const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי'];
+// It mirrors the LOGIN_ROLES (active manager-tier: field_ops + ops_manager) seeded SEED_USERS (setup.gs);
+// a guard test asserts the two stay in sync. Only רועי + אולגה log into this app.
+const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה'];
 // buildClientShim(names) → the injected <head> shim, with `names` as the login picker's roster. Built
 // per-request from the live active roster so the picker always reflects who can actually log in (a
 // renamed/added/deactivated user in the Users sheet is reflected within one micro-cache TTL) — no more

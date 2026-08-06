@@ -12,7 +12,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { hashPin, rosterProof, verifyToken } from '../src/auth.js';
+import { hashPin, rosterProof, verifyToken, signToken } from '../src/auth.js';
 
 const SECRET = 'k'.repeat(40);
 const APP_PIN = '555555';
@@ -125,7 +125,7 @@ test('approve/reject WITHOUT a Bearer token → 401 and nothing reaches upstream
 
 test('tier-B (maintenance) is refused approve AND reject at the gateway (403), no upstream call', async () => {
   forwarded.length = 0;
-  const { token } = await login('רמי', CODE); // maintenance
+  const token = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' }); // maintenance can't log in; mint to test the gate
   assert.equal((await dashboardWrite(token, 'approve', { id: 'REQ-1', by: 'רמי' })).status, 403);
   assert.equal((await dashboardWrite(token, 'reject', { id: 'REQ-1', by: 'רמי' })).status, 403);
   assert.equal(forwarded.length, 0, 'a refused write is blocked BEFORE any Apps Script call');

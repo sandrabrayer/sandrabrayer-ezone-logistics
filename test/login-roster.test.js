@@ -1,16 +1,16 @@
 // test/login-roster.test.js — the login ROSTER + shared-code credential path.
 //
-// Login is now: pick a user from the dropdown + enter ONE shared access code (SHARED_ACCESS_CODE). Identity
-// and role still come from the SELECTED roster user (Users sheet) — only the secret check changed from a
-// per-user pin_hash to the shared code. The roster (picker AND who may log in) = ACTIVE, NON-coordinator
-// users (managers + the maintenance leads); coordinators no longer log into this app.
+// Login is: pick a user from the dropdown + enter ONE shared access code (SHARED_ACCESS_CODE). Identity and
+// role still come from the SELECTED roster user (Users sheet) — only the secret check is the shared code.
+// The roster (picker AND who may log in) = ACTIVE MANAGER-TIER users only (field_ops = רועי, ops_manager =
+// אולגה). ceo (סנדרה), maintenance (רמי/צחי) and coordinators do NOT log into this app.
 //
 // These drive the REAL gateway against a FAKE Apps Script upstream serving the seed roster, and assert:
-//   1. the picker lists exactly the active LOGIN_ROLES users (no coordinators), derived from the live roster;
+//   1. the picker lists exactly the active manager-tier users (רועי, אולגה), derived from the live roster;
 //   2. login SUCCEEDS for every roster user with the shared code, role resolved from the roster;
-//   3. coordinators + wrong/empty code FAIL CLOSED (generic 401);
+//   3. every non-manager (ceo/maintenance/coordinator) + wrong/empty code FAIL CLOSED (generic 401);
 //   4. names are matched TRIMMED (a padded sheet cell still logs in);
-//   5. the hardcoded FALLBACK list stays in sync with the seeded active non-coordinator roster.
+//   5. the hardcoded FALLBACK list stays in sync with the seeded active manager-tier roster.
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -23,8 +23,8 @@ let loginRosterNames, isActiveUser, _DEFAULT_LOGIN_NAMES;
 const SECRET = 'k'.repeat(40);
 const CODE = '2026'; // the shared access code (SHARED_ACCESS_CODE)
 
-// Full seed roster (mirror of setup.gs SEED_USERS name/role/house). LOGIN_NAMES = the active
-// non-coordinator names, in sheet order — the only ones who may log in / appear in the picker.
+// Full seed roster (mirror of setup.gs SEED_USERS name/role/house). LOGIN_NAMES = the active manager-tier
+// names, in sheet order — the only ones who may log in / appear in the picker. NON_LOGIN = everyone else.
 const SEED = [
   { name: 'רועי',  role: 'field_ops',   house: '' },
   { name: 'אולגה', role: 'ops_manager', house: '' },
@@ -36,8 +36,8 @@ const SEED = [
   { name: 'אורן',  role: 'coordinator', house: 'רעננה אשר' },
   { name: 'אביב',  role: 'coordinator', house: 'רמות השבים' },
 ];
-const LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי'];
-const COORDINATORS = ['שירה', 'יעקב', 'אורן', 'אביב'];
+const LOGIN_NAMES = ['רועי', 'אולגה'];
+const NON_LOGIN = ['סנדרה', 'רמי', 'צחי', 'שירה', 'יעקב', 'אורן', 'אביב']; // ceo + maintenance + coordinators
 
 function buildRoster() { return SEED.map((u) => ({ name: u.name, role: u.role, house: u.house, active: 'TRUE' })); }
 let roster = buildRoster();
@@ -88,31 +88,31 @@ async function pickerNames() {
   return m ? JSON.parse(m[1]) : null;
 }
 
-// ---- 1. picker = active LOGIN_ROLES users only (no coordinators) ----
+// ---- 1. picker = active manager-tier users only ----
 
-test('the picker lists exactly the active non-coordinator roster (managers + maintenance), in order', async () => {
-  const names = await pickerNames();
-  assert.deepEqual(names, LOGIN_NAMES, 'picker = active LOGIN_ROLES users, coordinators excluded');
+test('the picker lists exactly the active manager-tier roster (רועי, אולגה), in order', async () => {
+  assert.deepEqual(await pickerNames(), LOGIN_NAMES, 'picker = active LOGIN_ROLES users (field_ops + ops_manager)');
 });
 
-test('no coordinator appears in the picker', async () => {
+test('no non-manager (ceo / maintenance / coordinator) appears in the picker', async () => {
   const names = await pickerNames();
-  for (const c of COORDINATORS) assert.ok(!names.includes(c), `${c} (coordinator) must not be offered`);
+  for (const n of NON_LOGIN) assert.ok(!names.includes(n), `${n} must not be offered`);
 });
 
 test('a DEACTIVATED roster user drops out of the picker (roster is the source of truth)', async () => {
-  roster.find((u) => u.name === 'צחי').active = 'FALSE';
+  roster.find((u) => u.name === 'אולגה').active = 'FALSE';
   _resetNodeCache();
-  assert.ok(!(await pickerNames()).includes('צחי'));
+  assert.deepEqual(await pickerNames(), ['רועי']);
 });
 
-test('a newly added active manager appears; a newly added coordinator does NOT', async () => {
+test('a newly added active manager appears; a new maintenance / coordinator does NOT', async () => {
   roster.push({ name: 'דנה', role: 'field_ops', house: '', active: 'TRUE' });
+  roster.push({ name: 'עידו', role: 'maintenance', house: 'sharon', active: 'TRUE' });
   roster.push({ name: 'נועה', role: 'coordinator', house: 'הפרדס', active: 'TRUE' });
   _resetNodeCache();
   const names = await pickerNames();
   assert.ok(names.includes('דנה'), 'a new active manager appears');
-  assert.ok(!names.includes('נועה'), 'a new coordinator does NOT appear');
+  assert.ok(!names.includes('עידו') && !names.includes('נועה'), 'a new maintenance/coordinator does NOT appear');
 });
 
 // ---- 2. login succeeds for every roster user with the shared code ----
@@ -133,12 +133,12 @@ test('every name the picker offers can actually log in (picker ⟷ roster never 
   }
 });
 
-// ---- 3. fail closed: coordinators, wrong code, empty code ----
+// ---- 3. fail closed: non-managers, wrong code, empty code ----
 
-for (const c of COORDINATORS) {
-  test(`coordinator ${c} CANNOT log in even with the correct shared code (not in the roster)`, async () => {
-    const r = await login(c, CODE);
-    assert.equal(r.status, 401, `${c} must be refused`);
+for (const name of NON_LOGIN) {
+  test(`${name} CANNOT log in even with the correct shared code (not in the manager-tier roster)`, async () => {
+    const r = await login(name, CODE);
+    assert.equal(r.status, 401, `${name} must be refused`);
     assert.ok(!r.body.token);
   });
 }
@@ -156,8 +156,8 @@ test('an EMPTY code never authenticates anyone', async () => {
 });
 
 test('an inactive roster user cannot log in even with the correct code', async () => {
-  roster.find((u) => u.name === 'רמי').active = 'FALSE';
-  assert.equal((await login('רמי', CODE)).status, 401);
+  roster.find((u) => u.name === 'אולגה').active = 'FALSE';
+  assert.equal((await login('אולגה', CODE)).status, 401);
 });
 
 // ---- 4. name is matched TRIMMED (guards a trailing-whitespace live sheet cell) ----
@@ -176,28 +176,30 @@ test('the served / injects the picker names into the shim in <head>', async () =
   assert.ok(html.indexOf('var NAMES=[') !== -1 && html.indexOf('var NAMES=[') < html.indexOf('</head>'));
 });
 
-test('loginRosterNames applies the roster filter (LOGIN_ROLES + trim, dedupe, drop inactive/blank)', () => {
+test('loginRosterNames applies the roster filter (manager-tier + trim, dedupe, drop inactive/blank)', () => {
   const rows = [
     { name: 'רועי', role: 'field_ops', active: 'TRUE' },
     { name: ' אולגה ', role: 'ops_manager', active: true },  // padded → trimmed
-    { name: 'מושבת', role: 'ceo', active: 'FALSE' },          // inactive → dropped
-    { name: 'רועי', role: 'field_ops', active: '1' },         // dup → dropped
-    { name: '', role: 'ceo', active: 'TRUE' },                // blank → dropped
-    { name: 'שירה', role: 'coordinator', active: 'TRUE' },    // coordinator → dropped (not LOGIN_ROLES)
-    { name: 'רמי', role: 'maintenance', active: 'TRUE' },
+    { name: 'מושבת', role: 'ops_manager', active: 'FALSE' }, // inactive → dropped
+    { name: 'רועי', role: 'field_ops', active: '1' },        // dup → dropped
+    { name: '', role: 'field_ops', active: 'TRUE' },         // blank → dropped
+    { name: 'סנדרה', role: 'ceo', active: 'TRUE' },          // ceo → dropped (not LOGIN_ROLES)
+    { name: 'רמי', role: 'maintenance', active: 'TRUE' },    // maintenance → dropped
+    { name: 'שירה', role: 'coordinator', active: 'TRUE' },   // coordinator → dropped
   ];
-  assert.deepEqual(loginRosterNames(rows), ['רועי', 'אולגה', 'רמי']);
+  assert.deepEqual(loginRosterNames(rows), ['רועי', 'אולגה']);
   assert.equal(isActiveUser({ active: 'FALSE' }), false);
   assert.equal(isActiveUser({ active: 'TRUE' }), true);
 });
 
-test('the hardcoded FALLBACK list stays in sync with the seeded active NON-coordinator roster', () => {
+test('the hardcoded FALLBACK list stays in sync with the seeded active manager-tier roster', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const setup = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
   const block = setup.match(/var SEED_USERS = \[([\s\S]*?)\];/)[1];
-  // Each seed row: [ 'name', 'role', 'house', 'ACTIVE', 'pin_hash' ] — keep active, non-coordinator names.
+  // Each seed row: [ 'name', 'role', 'house', 'ACTIVE', 'pin_hash' ] — keep active field_ops/ops_manager.
   const seededLogin = [...block.matchAll(/\[\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'[^']*'\s*,\s*'([^']*)'/g)]
-    .filter((m) => m[3].toUpperCase() === 'TRUE' && m[2] !== 'coordinator').map((m) => m[1]);
+    .filter((m) => m[3].toUpperCase() === 'TRUE' && (m[2] === 'field_ops' || m[2] === 'ops_manager'))
+    .map((m) => m[1]);
   assert.deepEqual(_DEFAULT_LOGIN_NAMES, seededLogin,
-    'DEFAULT_LOGIN_NAMES (the fallback picker) must equal the active non-coordinator SEED_USERS names, in order');
+    'DEFAULT_LOGIN_NAMES (the fallback picker) must equal the active manager-tier SEED_USERS names, in order');
 });
