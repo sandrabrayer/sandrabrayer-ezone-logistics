@@ -99,8 +99,9 @@
     .modal-title { margin: 0 0 16px; font-size: 1.1rem; color: var(--accent-2); }
     .modal-field { margin-bottom: 14px; }
     .modal-field label { display: block; font-weight: 700; font-size: .85rem; margin-bottom: 6px; }
-    .modal-field input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 10px 12px; }
-    .modal-field input:focus { outline: none; border-color: var(--accent-2); }
+    .modal-field input, .modal-field select, .modal-field textarea { width: 100%; font-family: inherit; font-size: 1rem; color: var(--ink); background: #161a20; border: 1.5px solid var(--card-line); border-radius: 10px; padding: 10px 12px; box-sizing: border-box; }
+    .modal-field input:focus, .modal-field select:focus, .modal-field textarea:focus { outline: none; border-color: var(--accent-2); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
     .modal-hint { color: var(--muted); font-size: .78rem; margin-top: 5px; }
     .modal-actions { display: flex; gap: 8px; margin-top: 6px; }
 
@@ -142,7 +143,7 @@
   </script>
 
   <div class="topbar">
-    <nav class="nav"><a href="/">דרישה חדשה</a><a href="/dashboard" class="active">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
+    <nav class="nav"><a href="/dashboard" class="active">דשבורד</a><a href="/workorders">משימות פתוחות וסטטוס</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a></nav>
     <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span class="brand-name">לוגיסטיקה</span></div>
   </div>
   <div class="wrap">
@@ -165,6 +166,7 @@
           <option value="צחי">צחי</option>
         </select>
       </span>
+      <span><button class="act go" id="openCreate" type="button">＋ דרישה חדשה</button></span>
     </div>
 
     <div class="msg" id="msg"></div>
@@ -174,6 +176,47 @@
   </div>
 
   <!-- Deferral modal: calendar date picker + reminder-days-before -->
+  <!-- In-dashboard create (nav cleanup): managers file requests here — the standalone דרישה חדשה page is gone.
+       created_by is set server-side from the session token; the house list comes from the loaded allHouses. -->
+  <div class="modal-overlay" id="createModal">
+    <div class="modal-box">
+      <h3 class="modal-title">דרישה חדשה</h3>
+      <div class="modal-field">
+        <label for="crHouse">בית</label>
+        <select id="crHouse"><option value="" disabled selected>בחר/י בית…</option></select>
+      </div>
+      <div class="modal-field">
+        <label for="crCategory">קטגוריה</label>
+        <select id="crCategory">
+          <option value="" disabled selected>בחר/י…</option>
+          <option value="רכישה">רכישה</option>
+          <option value="תיקון">תיקון</option>
+          <option value="החלפה">החלפה</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="crUrgency">דחיפות</label>
+        <select id="crUrgency">
+          <option value="רגיל" selected>רגיל</option>
+          <option value="דחוף">דחוף</option>
+          <option value="חירום">חירום</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="crDescription">תיאור</label>
+        <input type="text" id="crDescription" placeholder="מה צריך לרכוש / לתקן / להחליף?" />
+      </div>
+      <div class="modal-field">
+        <label for="crLocation">מיקום בבית <span style="color:var(--muted);font-weight:500">(לא חובה)</span></label>
+        <input type="text" id="crLocation" placeholder="למשל: מטבח, חדר 4, גינה" />
+      </div>
+      <div class="modal-actions">
+        <button class="act" id="crCancel" type="button">ביטול</button>
+        <button class="act go" id="crConfirm" type="button">שליחת דרישה</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="deferModal">
     <div class="modal-box">
       <h3 class="modal-title">דחיית דרישה לתאריך</h3>
@@ -665,6 +708,35 @@
     document.getElementById('who').addEventListener('change', render);
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
+
+    // In-dashboard create request (nav cleanup). Reuses the loaded house list + the shared post() helper
+    // (which authenticates via the Bearer shim, reloads the board, and shows the result banner). The server
+    // stamps created_by from the session token, so the modal never collects it.
+    const createModal = document.getElementById('createModal');
+    document.getElementById('openCreate').addEventListener('click', () => {
+      const sel = document.getElementById('crHouse');
+      sel.innerHTML = '<option value="" disabled selected>בחר/י בית…</option>';
+      allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+      document.getElementById('crCategory').selectedIndex = 0;
+      document.getElementById('crUrgency').value = 'רגיל';
+      document.getElementById('crDescription').value = '';
+      document.getElementById('crLocation').value = '';
+      createModal.classList.add('open');
+    });
+    document.getElementById('crCancel').addEventListener('click', () => createModal.classList.remove('open'));
+    document.getElementById('crConfirm').addEventListener('click', () => {
+      const house = document.getElementById('crHouse').value;
+      const category = document.getElementById('crCategory').value;
+      const urgency = document.getElementById('crUrgency').value;
+      const description = document.getElementById('crDescription').value.trim();
+      const location_in_house = document.getElementById('crLocation').value.trim();
+      if (!house) return showMsg('err', 'יש לבחור בית.');
+      if (!category) return showMsg('err', 'יש לבחור קטגוריה.');
+      if (!urgency) return showMsg('err', 'יש לבחור דחיפות.');
+      createModal.classList.remove('open');
+      post('createRequest', { house, category, urgency, description, location_in_house });
+    });
+
     load();
   </script>
   <script>

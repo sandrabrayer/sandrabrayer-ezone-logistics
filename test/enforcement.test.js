@@ -16,11 +16,16 @@ function mayApprove(actorRole, cost, urgency) {
   return canApprove(actorRole, required);
 }
 
-test('רועי (field_ops) approving a >3000 (ops_manager) request → rejected; אולגה (ops_manager) → allowed', () => {
+test('רועי (field_ops) may approve a >3000 request too — Roy approves alone (the amount only sets the reporting flag)', () => {
+  // whoApproves still REPORTS ops_manager for >3000 (drives the approval_required flag for budget), but
+  // approval AUTHORITY is the manager tier: Roy, Olga and the CEO may all approve it.
   assert.equal(whoApproves(4000, 'רגיל', T), APPROVER.OPS_MANAGER);
-  assert.equal(mayApprove(ROLE.FIELD_OPS, 4000, 'רגיל'), false);   // רועי cannot approve the ops_manager request
+  assert.equal(mayApprove(ROLE.FIELD_OPS, 4000, 'רגיל'), true);    // רועי CAN approve (bug fix)
   assert.equal(mayApprove(ROLE.OPS_MANAGER, 4000, 'רגיל'), true);  // אולגה can
   assert.equal(mayApprove(ROLE.CEO, 4000, 'רגיל'), true);          // ceo always
+  // tier B still cannot approve at any amount
+  assert.equal(mayApprove(ROLE.COORDINATOR, 4000, 'רגיל'), false);
+  assert.equal(mayApprove(ROLE.MAINTENANCE, 4000, 'רגיל'), false);
 });
 
 test('a field_ops request (≤3000) is approved by field_ops, not by a coordinator/maintenance', () => {

@@ -3,6 +3,55 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — Task 1: field_ops dashboard 403 fix + perf round-3 cache + nav cleanup
+
+Three production follow-ups after the deploy chain was confirmed current.
+
+**1. BUG — Roy (field_ops) can now FULLY operate the dashboard.** Two dashboard actions the UI offers Roy
+were refused server-side with Code.gs's `forbidden_()` ("Forbidden: role not authorized for this action"):
+- **approve / reject over ₪3000** — those route to `ops_manager` by amount, and `canApprove` required an
+  EXACT role match, so field_ops was refused. `canApprove` now grants the whole manager tier
+  (field_ops / ops_manager / ceo) authority over ANY request. `whoApproves`/`approvalRequired` are UNCHANGED
+  — the amount still drives the budget/reporting flag, it just no longer gates who may approve.
+- **delete a request** — the card shows מחיקה to Roy but `handleDeleteRequest_` gated `isManagement_`
+  (exec-only). It now gates `isManagerRole` (field_ops included); the /management-only deletes
+  (`deleteCompliance` / `deleteTraining`) stay `isManagement_`.
+- `src/roles.js` + `apps-script/Code.gs` (MIRROR:roles stays in sync). Tier B (coordinator/maintenance) is
+  still refused both. Tests: `roles.test.js` / `enforcement.test.js` updated to the new authority contract;
+  new `test/dashboard-field-ops.test.js` drives the REAL Code.gs handlers (field_ops approves >₪3000,
+  rejects, deletes; tier B refused).
+
+**2. PERF (round-3) — short-TTL, write-invalidated cache for the hot reads.** Investigation (a
+call-counting probe against the real gateway) found the bundle path healthy — 1 call/page, never
+`degraded` — but the micro-cache only trimmed the bundle payload; every tab switch still made **1 blocking
+`/exec` round-trip** because `requests`/`findings`/`inspections` were never cached. Added an ~8s cache for
+those, INVALIDATED on every write (`handleAction`), so a burst of tab switches reuses one read while a
+write still forces fresh data. The per-role scope filter STILL runs on a cache hit (a cached raw `requests`
+list is never returned unscoped to tier B). Numbers, one manager session (login → dashboard → workorders →
+inventory → reports → dashboard → approve):
+
+| | before | after |
+| --- | --- | --- |
+| repeat dashboard load | 1 `/exec` call | **0** |
+| tab switch (workorders/reports/back) | 1 call each | **0** each |
+| total `/exec` GETs in the walk | **9** | **5** |
+| post-write reload | refetches | **still refetches (freshness kept)** |
+
+At live Apps Script latency (~1–3s/call incl. 302 + cold start) that turns multi-second tab switches into
+instant ones. `src/server.js`; tests in `pagedata.test.js` (cache hit, write-invalidation, scope-filter-on-hit).
+
+**3. NAV cleanup (Logistics → managers-only).** The standalone **דרישה חדשה** tab is removed from the nav;
+managers file requests from a new **in-dashboard create modal** (button + modal on `/dashboard`;
+`created_by` is stamped from the token, never the client). **אירועים חריגים** (`/events`) is removed
+entirely — nav link, the `events.html` page, the HTML route, and the service-worker route. `'/'` (index.html)
+is kept AS-IS as the root/login landing (the entry-flow/root rework is the separate architecture session).
+The events **backend** (createEvent/updateEvent handlers, the `MIRROR:events` logic in `src/events.js`, the
+Events sheet) is left dormant, not removed. `src/access.js` / `src/server.js` / `src/public/sw.js` /
+`src/dashboard.html`; tests: `access.test.js` / `access-server.test.js` / `nav-events.test.js` updated,
+new `test/dashboard-create.test.js`.
+
+`node --test` green (**601 tests**). No secrets; explicit-path adds.
+
 ## [Unreleased] — /management redesigned as a HUB + topic views, and two new field checklists
 
 **Why.** Olga's one long /management page became a **dashboard hub**: a compact KPI/gauge summary per topic,

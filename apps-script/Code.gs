@@ -257,11 +257,13 @@ function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject: only the role that chain B resolves to FOR THAT REQUEST. The CEO may always
-// approve. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
+// approve / reject authority: any manager-tier role (field_ops = Roy, ops_manager, ceo) may approve or
+// reject ANY request — Roy operates the dashboard alone, so the per-request amount tier no longer GATES
+// who may approve. requiredRole (the whoApproves() result) is retained so the approval_required flag
+// still marks over-threshold requests for budget/reporting, but it does not restrict the approver.
+// Tier B (coordinator / maintenance) never approves.
 function canApprove(actorRole, requiredRole) {
-  if (actorRole === ROLE.CEO) return true;
-  return actorRole === requiredRole;
+  return isManagerRole(actorRole);
 }
 
 // defer: field_ops, ops_manager, ceo (a "this can wait" call, not the money decision).
@@ -2549,7 +2551,10 @@ function isManagement_(role) { return role === ROLE.OPS_MANAGER || role === ROLE
 
 function handleDeleteRequest_(p, actor) {
   if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });
-  if (!isManagement_(actor.role)) return forbidden_();
+  // Deleting a request is a dashboard action Roy (field_ops) drives — the card shows מחיקה to him — so
+  // the whole manager tier may delete (audit-logged below). NARROWER isManagement_ still gates the
+  // /management-only deletes (deleteCompliance / deleteTraining); only this request delete is loosened.
+  if (!isManagerRole(actor.role)) return forbidden_();
   var sheet = getSheet_('Requests');
   var data = sheet.getDataRange().getValues();
   var headers = data[0];
