@@ -19,19 +19,24 @@ It **fails loudly and early** if a secret is missing or `CLASPRC_JSON` isn't val
 JSON, and requires clasp's `Deployed …@<version>` confirmation (clasp 3.x can
 reject an id and still exit 0).
 
+**Before pushing, CI stamps the commit** into `Code.gs` (`var DEPLOY_COMMIT = '<GITHUB_SHA>'`),
+so the live `action=version` returns exactly what was deployed.
+
 **Then it verifies the LIVE deployment.** clasp's `Deployed` line only proves it
 redeployed the deployment named by `DEPLOYMENT_ID` — not that that deployment is
 the one production calls. So a final step probes the real `/exec` (the URL in
 `APPS_SCRIPT_EXEC_URL`, the same value Railway uses):
 
-- `action=users` — exists on **every** published version (baseline: is the URL reachable at all?).
-- `action=bundle` — exists **only on the current `Code.gs`** (recent-only: is the new code actually live?).
+- `action=version` — the **strongest** check: it must return `{"commit":"<GITHUB_SHA>"}`, proving the
+  deployment behind `APPS_SCRIPT_EXEC_URL` is **this exact commit**.
+- `action=bundle` / `action=users` — still probed to make a failure **actionable**: `users` exists on
+  every version (is the URL reachable?), `bundle` only on recent code (reachable-but-stale?).
 
-If `bundle` doesn't answer `{"ok":true,…}` with a `houses` key (after a few
-retries for propagation), the workflow **fails**. Baseline-passes-but-bundle-fails
-means `DEPLOYMENT_ID` is deploying a **different** deployment than the one
-`APPS_SCRIPT_EXEC_URL` points at (green CI, stale production) — realign
-`DEPLOYMENT_ID` to that deployment's id.
+If `action=version` doesn't equal the deployed SHA (after a few retries for
+propagation), the workflow **fails** — and the message says whether the `/exec`
+was unreachable or reachable-but-stale. Reachable-but-stale means `DEPLOYMENT_ID`
+deploys a **different** deployment than the one `APPS_SCRIPT_EXEC_URL` points at
+(green CI, stale production) — realign `DEPLOYMENT_ID` to that deployment's id.
 
 ### ⚠️ After this merges, CI fails until you add two secrets
 
@@ -54,6 +59,44 @@ means `DEPLOYMENT_ID` is deploying a **different** deployment than the one
 Asia/Jerusalem — the standard ecosystem Web App settings). If the live project
 differs, run `clasp pull` locally and commit the real manifest first — flipping
 access off "Anyone" breaks anonymous `/exec` consumers.
+
+## Version truth & self-verifying deploys
+
+The app's failure history is **version mismatch** across three independent legs (Railway / clasp / service
+worker). These make the live version of each leg **provable at a glance** and make every deploy
+**self-verifying**, so a green deploy can't hide a stale leg.
+
+**`GET /version`** (Node, unauthenticated, non-secret) returns:
+
+```json
+{ "node": { "commit": "<railway git sha>", "builtAt": "<ISO boot time>" },
+  "appsScript": { "commit": "<live /exec action=version>" } }
+```
+
+- `node.commit` = `RAILWAY_GIT_COMMIT_SHA` injected by Railway at build time (`unknown` locally).
+- `appsScript.commit` = the live `/exec` `action=version` (`DEPLOY_COMMIT`, stamped by the clasp workflow),
+  cached ~60s. `unreachable` if `/exec` can't be reached.
+
+**Footer.** Every page (including the login screen) shows a small gray `node <sha> · gs <sha>` footer
+(injected by the auth shim, reads `/version`). Anyone can see what's live without tooling.
+
+**Three legs, three verifications:**
+
+| Leg | Live version source | Self-verified by |
+| --- | --- | --- |
+| **Node (Railway)** | `GET /version` → `node.commit` | [`verify-live.yml`](.github/workflows/verify-live.yml) — on push to `main` (and on-demand), polls the live `/version` until `node.commit == GITHUB_SHA`, then runs `smoke-live.js`. Fails if Railway stays stale. |
+| **Apps Script (clasp)** | `/exec?action=version` → `commit` | the `deploy-apps-script.yml` post-deploy step (above) asserts it `== GITHUB_SHA`. |
+| **Service worker** | `/sw.js` cache name `ezone-logistics-<commit>` | Node stamps the running commit into the SW cache name at serve time, so **every deploy changes it** → the SW's `activate()` purges all prior caches → returning visitors and incognito first-loads both get fresh documents. |
+
+**How to trigger the Railway check yourself:**
+
+```bash
+APP_URL=https://ezone-logistics.up.railway.app EXPECTED_COMMIT=<sha> node test/smoke-live.js
+```
+
+`verify-live.yml` runs this automatically after each merge (with `EXPECTED_COMMIT=github.sha`). The app URL
+defaults to the public Railway host; override with an `APP_URL` **repo variable** if the host changes.
+`APPS_SCRIPT_EXEC_URL` stays a **secret** — the clasp workflow reads it; you never paste it into a PR.
 
 ## Security
 

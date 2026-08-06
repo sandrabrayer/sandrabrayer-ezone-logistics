@@ -119,13 +119,21 @@ Script `/exec` 302 → Sheets) or a mixed-version deploy window. After each merg
 APP_URL=https://<your-deployed-app> node test/smoke-live.js
 ```
 
-It checks: `GET /` returns 200 with the login shim; `POST /api/login` with a bogus user returns a
-proper JSON **401** (the whole Node→Apps Script auth path responds); and — when you also pass real
-credentials — one authenticated read succeeds end-to-end:
+It checks: `GET /version` (the live commit on each leg); `GET /` returns 200 with the login shim;
+`POST /api/login` with a bogus user returns a proper JSON **401** (the whole Node→Apps Script auth path
+responds); and — when you also pass real credentials — one authenticated read succeeds end-to-end:
 
 ```bash
 APP_URL=https://<your-deployed-app> SMOKE_USER='רועי' SMOKE_PIN='<password>' node test/smoke-live.js
 ```
+
+### Version truth (which commit is live?)
+
+`GET /version` returns the git SHA live on each leg — `{ node: { commit, builtAt }, appsScript: { commit } }`
+— and every page (incl. login) shows a small gray `node <sha> · gs <sha>` footer. Each deploy is
+**self-verifying**: `deploy-apps-script.yml` asserts the live `action=version == GITHUB_SHA`,
+`verify-live.yml` asserts the live `/version` `node.commit == GITHUB_SHA`, and the service-worker cache
+name carries the commit so every deploy purges stale caches. See **DEPLOY.md → Version truth**.
 
 Exit code is non-zero if any check fails, so it can gate a deploy. This is the guard for the login
 regressions (#59, #61-branch, #62) that all passed unit tests but broke in production.
