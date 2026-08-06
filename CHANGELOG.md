@@ -3,6 +3,61 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — login — ONE shared access code (replaces per-user pin_hash + tier-B APP_PIN)
+
+**Why.** The per-user login kept failing in production ("שם או קוד שגויים" for רועי with the correct code)
+while every test passed — a live-only, data/env-dependent failure. Coordinators no longer log into this app,
+so login is simplified to **pick a user + enter ONE shared access code** (`SHARED_ACCESS_CODE`, a Railway
+env var; the server refuses to start if it is unset). Identity and role STILL come from the selected roster
+user (the signed token is issued exactly as before); only the per-user secret check is replaced.
+
+**Live-bug hypothesis pass (tests pass, prod fails — the env/data-dependent differences).** The per-user
+path did three fragile, live-only things; the shared-code path removes or hardens each:
+- **H1 — roster PROOF / `SESSION_SECRET` drift → `pin_hash` stripped (most likely).** `handleLogin` read the
+  roster WITH a server-to-server proof = `HMAC(SESSION_SECRET, 'roster:users')`; Code.gs returns `pin_hash`
+  ONLY when its own Script-Property `SESSION_SECRET` recomputes the same proof. If Railway's secret and the
+  Apps Script Script Property ever diverged, the proof mismatched, `pin_hash` came back **blank**, and every
+  tier-A manager (Roy/Olga — role not coordinator/maintenance) fell through to `ok=false` → generic 401.
+  Tests always matched (one Node secret on both sides). **Removed:** the shared-code path reads the roster
+  **publicly (no proof)** and never touches `pin_hash`, so this can't break login.
+- **H2 — Apps-Script-vs-Node hashing mismatch.** `pin_hash` is produced by Apps Script `setUserPin()` and
+  verified by Node `verifyPin` (PBKDF2). Any encoding/iteration divergence fails in prod while Node-hash +
+  Node-verify tests always agree. **Removed** (no hashing in login anymore).
+- **H3 — the stored `pin_hash` is stale/for a different password.** Someone re-set or cleared Roy's cell.
+  **Removed** (login no longer reads it).
+- **H4 — trailing/hidden whitespace in the live `Users.name` cell** ("רועי ") → `name` lookup misses → 401.
+  This would ALSO break the shared-code path (still matches by name), so it's **fixed first**: the name is
+  matched **trimmed** on both sides.
+- **H5 — `active` column drift.** `isActiveUser` already tolerates `TRUE`/`true`/`1`/boolean + whitespace;
+  a genuinely blank `active` cell is a data issue that would (correctly) drop the user from the roster.
+- **H6 — trailing newline in the Railway value.** `SHARED_ACCESS_CODE` is **trimmed on load** so a stray
+  `"2026\n"` can't length-mismatch every `checkPin` and fail all logins.
+
+**What changed (`src/server.js`).**
+- `SHARED_ACCESS_CODE` env (trimmed) replaces `APP_PIN`; startup fail-closed now requires it.
+- `handleLogin` = public roster read → find the ACTIVE, `LOGIN_ROLES`, trimmed-name-matched user → one
+  constant-time `checkPin` against the shared code → issue the same identity token. Kept: rate limiting
+  (8/15min per IP), session expiry (`SESSION_DAYS`), sign-out, generic 401s.
+- **Roster = active NON-coordinator users** (`LOGIN_ROLES` = field_ops, ops_manager, ceo, **maintenance**).
+  Coordinators are dropped from the picker and refused login. **סנדרה (ceo)** can now log in (she had no
+  `pin_hash`, so the old scheme locked her out). The picker (`loginRosterNames`) + `DEFAULT_LOGIN_NAMES`
+  fallback are filtered to `LOGIN_ROLES`. *(Maintenance is included so the leads רמי/צחי keep their
+  `/workorders` preventive-daily entry from the hub redesign; to restrict to strictly manager-tier, drop
+  `'maintenance'` from the single `LOGIN_ROLES` set — nothing else changes.)*
+- Chain-B role gates, scope filtering, and the token format are **unchanged**. `pin_hash`/`setUserPin` stay
+  in the sheet/Apps Script but are dormant.
+
+**Docs/UX.** `.env.example`, README, `src/schema.js`, and the ecosystem status doc updated (`APP_PIN` →
+`SHARED_ACCESS_CODE`); the login overlay placeholder is now "קוד גישה".
+
+**Tests.** `login-roster.test.js` rewritten to the shared-code contract (picker = active non-coordinator
+roster; login succeeds for every roster user with the code; coordinators / wrong / empty code fail closed;
+role in token matches the selected user; **trimmed-name** login; fallback in sync with the seed). New
+`login-shared-unset.test.js` (fail-closed when the code is unset). `staff-tiers.test.js` reworked to mint
+tokens directly (scope/gate coverage kept, obsolete per-user-password tests removed). `dashboard-approve` /
+`management-writes` swapped to the shared code (+ minted coordinator tokens for the gate checks).
+`node --test` green (**588 tests**). No secrets in the repo.
+
 ## [Unreleased] — Task 1: field_ops dashboard 403 fix + perf round-3 cache + nav cleanup
 
 Three production follow-ups after the deploy chain was confirmed current.

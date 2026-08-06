@@ -52,10 +52,10 @@ export const HEADERS = {
   // server-side role enforcement. `house` = own house (coordinator), cluster(s) (maintenance), or
   // blank = all houses (field_ops / ops_manager / ceo). `active` gates login.
   //
-  // Increment 31: `pin_hash` APPENDED at the end (never reorder existing columns). A salted PBKDF2
-  // hash for tier-A managers (רועי, אולגה) — set via the setUserPin() Apps Script helper, NEVER a
-  // plaintext. Blank for tier-B users (they log in with the shared APP_PIN) and for סנדרה (ceo, no
-  // login).
+  // Increment 31: `pin_hash` APPENDED at the end (never reorder existing columns). NOTE: login no longer
+  // uses `pin_hash` — the app moved to ONE shared access code (SHARED_ACCESS_CODE) for the whole roster.
+  // The column + setUserPin() helper stay for backward compatibility but are dormant; identity/role still
+  // come from the selected Users row. `active` gates login; coordinators no longer log in here.
   Users: ['name', 'role', 'house', 'active', 'pin_hash'],
 
   // Internal maintenance leads + reusable external suppliers. §8.

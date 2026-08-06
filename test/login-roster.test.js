@@ -1,37 +1,30 @@
-// test/login-roster.test.js — the login ROSTER + credential path (Bug 3).
+// test/login-roster.test.js — the login ROSTER + shared-code credential path.
 //
-// Two symptoms, one root cause: the login picker used to be a HARDCODED name list that duplicated the
-// Users roster, so any Users-sheet edit (add / remove / rename / deactivate) made the dropdown drift —
-// it could list a name that no longer matched a roster row, and selecting it + the correct code gave
-// "שם או קוד שגויים". The fix derives the picker from the LIVE active roster (doGet('users')) through the
-// SAME shared users-read path the login verification uses, so the two can never disagree.
+// Login is now: pick a user from the dropdown + enter ONE shared access code (SHARED_ACCESS_CODE). Identity
+// and role still come from the SELECTED roster user (Users sheet) — only the secret check changed from a
+// per-user pin_hash to the shared code. The roster (picker AND who may log in) = ACTIVE, NON-coordinator
+// users (managers + the maintenance leads); coordinators no longer log into this app.
 //
-// These tests drive the REAL gateway (src/server.js requestHandler) against a FAKE Apps Script upstream
-// that serves the full 9-user seed (mirror of setup.gs SEED_USERS), and assert:
-//   1. the roster endpoint returns ALL active users (and the picker is derived from it, inactive dropped);
-//   2. login SUCCEEDS for every seeded user with the correct code (tier-A personal password, tier-B APP_PIN);
-//   3. login FAILS CLOSED on the wrong code for every user;
-//   4. the served '/' page injects the live active-roster names — no hardcoded drift;
-//   5. the hardcoded FALLBACK list stays in sync with the seed.
+// These drive the REAL gateway against a FAKE Apps Script upstream serving the seed roster, and assert:
+//   1. the picker lists exactly the active LOGIN_ROLES users (no coordinators), derived from the live roster;
+//   2. login SUCCEEDS for every roster user with the shared code, role resolved from the roster;
+//   3. coordinators + wrong/empty code FAIL CLOSED (generic 401);
+//   4. names are matched TRIMMED (a padded sheet cell still logs in);
+//   5. the hardcoded FALLBACK list stays in sync with the seeded active non-coordinator roster.
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { hashPin, rosterProof } from '../src/auth.js';
-// NOTE: src/server.js reads its secrets/EXEC_URL from process.env AT MODULE LOAD. It must be imported
-// only AFTER `before` sets them (ES modules are singletons — a top-level import would freeze empty env).
-// So server.js exports are captured via a dynamic import inside `before`, below.
+// server.js reads env AT MODULE LOAD, so it is imported only after `before` sets env (captured below).
 let loginRosterNames, isActiveUser, _DEFAULT_LOGIN_NAMES;
 
 const SECRET = 'k'.repeat(40);
-const APP_PIN = '246810';
+const CODE = '2026'; // the shared access code (SHARED_ACCESS_CODE)
 
-// Correct code per seeded user. Managers (tier A) hold a personal password; tier B (coordinator +
-// maintenance) share APP_PIN. Mirrors setup.gs SEED_USERS (name/role/house), fully provisioned so every
-// user has a working login path.
-const PW = { 'רועי': 'roy-pw', 'אולגה': 'olga-pw', 'סנדרה': 'sandra-pw' };
+// Full seed roster (mirror of setup.gs SEED_USERS name/role/house). LOGIN_NAMES = the active
+// non-coordinator names, in sheet order — the only ones who may log in / appear in the picker.
 const SEED = [
   { name: 'רועי',  role: 'field_ops',   house: '' },
   { name: 'אולגה', role: 'ops_manager', house: '' },
@@ -43,32 +36,18 @@ const SEED = [
   { name: 'אורן',  role: 'coordinator', house: 'רעננה אשר' },
   { name: 'אביב',  role: 'coordinator', house: 'רמות השבים' },
 ];
-const correctCode = (name) => (name in PW ? PW[name] : APP_PIN);
+const LOGIN_NAMES = ['רועי', 'אולגה', 'סנדרה', 'רמי', 'צחי'];
+const COORDINATORS = ['שירה', 'יעקב', 'אורן', 'אביב'];
 
-// Mutable roster so a test can deactivate / add a user and prove the picker follows. Each entry:
-// { name, role, house, active, pin_hash }. Managers get a personal hash; everyone else has a blank hash
-// (tier-B shared PIN). Rebuilt fresh before each test.
-function buildRoster() {
-  return SEED.map((u) => ({
-    name: u.name, role: u.role, house: u.house, active: 'TRUE',
-    pin_hash: u.name in PW ? hashPin(PW[u.name]) : '',
-  }));
-}
-let roster = buildRoster(); // initialized eagerly so the upstream never sees `undefined`; beforeEach re-seeds
+function buildRoster() { return SEED.map((u) => ({ name: u.name, role: u.role, house: u.house, active: 'TRUE' })); }
+let roster = buildRoster();
 
-// Fake Apps Script upstream: mirrors usersForRead_ — pin_hash ONLY to the correct proof, stripped otherwise.
+// Fake Apps Script upstream. The shared-code login reads the roster PUBLICLY (no proof) — pin_hash is
+// irrelevant now — so the users read just returns name/role/house/active.
 const upstream = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
-  const action = u.searchParams.get('action');
   const send = (data) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, data })); };
-  if (req.method === 'GET') {
-    if (action === 'users') {
-      const withHash = u.searchParams.get('auth') === rosterProof(SECRET);
-      return send(withHash ? roster : roster.map((x) => { const c = { ...x }; delete c.pin_hash; return c; }));
-    }
-    if (action === 'houses') return send([]);
-    return send([]);
-  }
+  if (req.method === 'GET') return send(u.searchParams.get('action') === 'users' ? roster : []);
   res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
 });
 
@@ -78,7 +57,7 @@ before(async () => {
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
   process.env.APPS_SCRIPT_EXEC_URL = `http://127.0.0.1:${upstream.address().port}/exec`;
   process.env.SESSION_SECRET = SECRET;
-  process.env.APP_PIN = APP_PIN;
+  process.env.SHARED_ACCESS_CODE = CODE;
   process.env.SESSION_DAYS = '7';
   const mod = await import('../src/server.js');
   _loginAttempts = mod._loginAttempts;
@@ -99,116 +78,126 @@ beforeEach(() => { roster = buildRoster(); _resetNodeCache(); _loginAttempts.cle
 async function login(name, pin) {
   _loginAttempts.clear();
   const r = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, pin }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, pin }),
   });
   return { status: r.status, body: await r.json() };
 }
-
-// Names the served '/' picker was injected with (the shim sets `var NAMES=[...]`).
 async function pickerNames() {
   const html = await (await fetch(`${base}/`)).text();
   const m = html.match(/var NAMES=(\[[^\]]*\]);/);
   return m ? JSON.parse(m[1]) : null;
 }
 
-// ---- 1. roster endpoint returns all active users; picker derives from it ----
+// ---- 1. picker = active LOGIN_ROLES users only (no coordinators) ----
 
-test('the roster endpoint returns ALL active seeded users (9), and the picker lists exactly them', async () => {
+test('the picker lists exactly the active non-coordinator roster (managers + maintenance), in order', async () => {
   const names = await pickerNames();
-  assert.deepEqual(names, SEED.map((u) => u.name), 'picker must list every active seeded user, in order');
-  assert.equal(names.length, 9);
+  assert.deepEqual(names, LOGIN_NAMES, 'picker = active LOGIN_ROLES users, coordinators excluded');
 });
 
-test('a DEACTIVATED user drops out of the picker (no hardcoded drift — the roster is the source of truth)', async () => {
+test('no coordinator appears in the picker', async () => {
+  const names = await pickerNames();
+  for (const c of COORDINATORS) assert.ok(!names.includes(c), `${c} (coordinator) must not be offered`);
+});
+
+test('a DEACTIVATED roster user drops out of the picker (roster is the source of truth)', async () => {
   roster.find((u) => u.name === 'צחי').active = 'FALSE';
-  _resetNodeCache(); // roster changed → re-derive
-  const names = await pickerNames();
-  assert.ok(!names.includes('צחי'), 'an inactive user must not appear in the login picker');
-  assert.deepEqual(names, SEED.filter((u) => u.name !== 'צחי').map((u) => u.name));
+  _resetNodeCache();
+  assert.ok(!(await pickerNames()).includes('צחי'));
 });
 
-test('a newly ADDED active user appears in the picker (picker follows the live roster)', async () => {
-  roster.push({ name: 'דנה', role: 'coordinator', house: 'הפרדס', active: 'TRUE', pin_hash: '' });
+test('a newly added active manager appears; a newly added coordinator does NOT', async () => {
+  roster.push({ name: 'דנה', role: 'field_ops', house: '', active: 'TRUE' });
+  roster.push({ name: 'נועה', role: 'coordinator', house: 'הפרדס', active: 'TRUE' });
   _resetNodeCache();
   const names = await pickerNames();
-  assert.ok(names.includes('דנה'), 'a newly added active user must appear in the picker');
+  assert.ok(names.includes('דנה'), 'a new active manager appears');
+  assert.ok(!names.includes('נועה'), 'a new coordinator does NOT appear');
 });
 
-// ---- 2. login succeeds for EVERY seeded user with the correct code ----
+// ---- 2. login succeeds for every roster user with the shared code ----
 
-for (const u of SEED) {
-  test(`login SUCCEEDS for ${u.name} (${u.role}) with the correct code`, async () => {
-    const r = await login(u.name, correctCode(u.name));
-    assert.equal(r.status, 200, `${u.name} must log in with the correct code`);
-    assert.ok(r.body.token, 'a session token must be issued');
-    assert.equal(r.body.role, u.role, 'the role resolves from the roster, not the client');
+for (const name of LOGIN_NAMES) {
+  test(`login SUCCEEDS for ${name} with the shared code; role resolves from the roster`, async () => {
+    const r = await login(name, CODE);
+    assert.equal(r.status, 200, `${name} must log in with the shared code`);
+    assert.ok(r.body.token, 'a session token is issued');
+    assert.equal(r.body.role, SEED.find((u) => u.name === name).role, 'role comes from the SELECTED roster user');
+    assert.equal(r.body.name, name);
   });
 }
 
-test('every name the picker offers can actually log in (picker ⟷ roster can never disagree)', async () => {
-  const names = await pickerNames();
-  for (const name of names) {
-    assert.equal((await login(name, correctCode(name))).status, 200, `${name} is offered but cannot log in`);
+test('every name the picker offers can actually log in (picker ⟷ roster never disagree)', async () => {
+  for (const name of await pickerNames()) {
+    assert.equal((await login(name, CODE)).status, 200, `${name} is offered but cannot log in`);
   }
 });
 
-// ---- 3. login fails closed on the wrong code ----
+// ---- 3. fail closed: coordinators, wrong code, empty code ----
 
-for (const u of SEED) {
-  test(`login FAILS CLOSED for ${u.name} with the wrong code (generic 401)`, async () => {
-    const r = await login(u.name, 'definitely-wrong');
-    assert.equal(r.status, 401, `${u.name} with a wrong code must be rejected`);
-    assert.ok(!r.body.token, 'no token on a failed login');
+for (const c of COORDINATORS) {
+  test(`coordinator ${c} CANNOT log in even with the correct shared code (not in the roster)`, async () => {
+    const r = await login(c, CODE);
+    assert.equal(r.status, 401, `${c} must be refused`);
+    assert.ok(!r.body.token);
   });
 }
 
-test('tier-A managers cannot log in with the shared APP_PIN (must use their own password)', async () => {
-  assert.equal((await login('רועי', APP_PIN)).status, 401);
-  assert.equal((await login('אולגה', APP_PIN)).status, 401);
+test('the WRONG code fails for every roster user (generic 401, no token)', async () => {
+  for (const name of LOGIN_NAMES) {
+    const r = await login(name, 'not-the-code');
+    assert.equal(r.status, 401, `${name} + wrong code must fail`);
+    assert.ok(!r.body.token);
+  }
 });
 
-test('an inactive user cannot log in even with the otherwise-correct code (fails closed)', async () => {
-  roster.find((u) => u.name === 'שירה').active = 'FALSE';
-  const r = await login('שירה', APP_PIN);
-  assert.equal(r.status, 401, 'a deactivated user must not authenticate');
+test('an EMPTY code never authenticates anyone', async () => {
+  for (const name of LOGIN_NAMES) assert.equal((await login(name, '')).status, 401, `${name} + empty code must fail`);
 });
 
-test('an empty code never authenticates anyone', async () => {
-  for (const u of SEED) assert.equal((await login(u.name, '')).status, 401, `${u.name} + empty code must fail`);
+test('an inactive roster user cannot log in even with the correct code', async () => {
+  roster.find((u) => u.name === 'רמי').active = 'FALSE';
+  assert.equal((await login('רמי', CODE)).status, 401);
 });
 
-// ---- 4. the served page injects the live shim, and a bad roster read falls back (never empty) ----
+// ---- 4. name is matched TRIMMED (guards a trailing-whitespace live sheet cell) ----
+
+test('a padded roster name cell still logs in with the trimmed name (live-sheet whitespace guard)', async () => {
+  roster.find((u) => u.name === 'רועי').name = ' רועי ';
+  const r = await login('רועי', CODE);
+  assert.equal(r.status, 200, 'trailing/leading whitespace in the sheet name must not block login');
+  assert.equal(r.body.name, 'רועי', 'the token carries the trimmed name');
+});
+
+// ---- 5. picker injection + roster-filter unit + fallback sync ----
 
 test('the served / injects the picker names into the shim in <head>', async () => {
   const html = await (await fetch(`${base}/`)).text();
-  const headEnd = html.indexOf('</head>');
-  const namesAt = html.indexOf('var NAMES=[');
-  assert.ok(namesAt !== -1 && namesAt < headEnd, 'the picker roster must be injected inside <head>');
+  assert.ok(html.indexOf('var NAMES=[') !== -1 && html.indexOf('var NAMES=[') < html.indexOf('</head>'));
 });
 
-// ---- 5. the shared filter + the fallback list are correct ----
-
-test('loginRosterNames applies the shared active filter (trim, dedupe, drop inactive/blank)', () => {
+test('loginRosterNames applies the roster filter (LOGIN_ROLES + trim, dedupe, drop inactive/blank)', () => {
   const rows = [
-    { name: 'רועי', active: 'TRUE' },
-    { name: ' אולגה ', active: true },   // padded → trimmed
-    { name: 'מושבת', active: 'FALSE' },  // inactive → dropped
-    { name: 'רועי', active: '1' },       // dup → dropped
-    { name: '', active: 'TRUE' },        // blank → dropped
+    { name: 'רועי', role: 'field_ops', active: 'TRUE' },
+    { name: ' אולגה ', role: 'ops_manager', active: true },  // padded → trimmed
+    { name: 'מושבת', role: 'ceo', active: 'FALSE' },          // inactive → dropped
+    { name: 'רועי', role: 'field_ops', active: '1' },         // dup → dropped
+    { name: '', role: 'ceo', active: 'TRUE' },                // blank → dropped
+    { name: 'שירה', role: 'coordinator', active: 'TRUE' },    // coordinator → dropped (not LOGIN_ROLES)
+    { name: 'רמי', role: 'maintenance', active: 'TRUE' },
   ];
-  assert.deepEqual(loginRosterNames(rows), ['רועי', 'אולגה']);
+  assert.deepEqual(loginRosterNames(rows), ['רועי', 'אולגה', 'רמי']);
   assert.equal(isActiveUser({ active: 'FALSE' }), false);
   assert.equal(isActiveUser({ active: 'TRUE' }), true);
 });
 
-test('the hardcoded FALLBACK list stays in sync with the seeded active roster (no silent drift)', () => {
+test('the hardcoded FALLBACK list stays in sync with the seeded active NON-coordinator roster', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const setup = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
   const block = setup.match(/var SEED_USERS = \[([\s\S]*?)\];/)[1];
-  // Each seed row: [ 'name', 'role', 'house', 'ACTIVE', 'pin_hash' ] — keep names whose 4th field is TRUE.
-  const seededActive = [...block.matchAll(/\[\s*'([^']+)'\s*,\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']*)'/g)]
-    .filter((m) => m[2].toUpperCase() === 'TRUE').map((m) => m[1]);
-  assert.deepEqual(_DEFAULT_LOGIN_NAMES, seededActive,
-    'DEFAULT_LOGIN_NAMES (the fallback picker) must equal the active SEED_USERS names, in order');
+  // Each seed row: [ 'name', 'role', 'house', 'ACTIVE', 'pin_hash' ] — keep active, non-coordinator names.
+  const seededLogin = [...block.matchAll(/\[\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'[^']*'\s*,\s*'([^']*)'/g)]
+    .filter((m) => m[3].toUpperCase() === 'TRUE' && m[2] !== 'coordinator').map((m) => m[1]);
+  assert.deepEqual(_DEFAULT_LOGIN_NAMES, seededLogin,
+    'DEFAULT_LOGIN_NAMES (the fallback picker) must equal the active non-coordinator SEED_USERS names, in order');
 });

@@ -16,6 +16,7 @@ import { hashPin, rosterProof, verifyToken } from '../src/auth.js';
 
 const SECRET = 'k'.repeat(40);
 const APP_PIN = '555555';
+const CODE = '2026'; // shared access code
 
 const USERS = [
   { name: 'רועי',  role: 'field_ops',   house: '', active: 'TRUE', pin_hash: hashPin('roy-password') },
@@ -53,7 +54,7 @@ before(async () => {
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
   process.env.APPS_SCRIPT_EXEC_URL = `http://127.0.0.1:${upstream.address().port}/exec`;
   process.env.SESSION_SECRET = SECRET;
-  process.env.APP_PIN = APP_PIN;
+  process.env.SHARED_ACCESS_CODE = CODE;
   process.env.SESSION_DAYS = '7';
   const mod = await import('../src/server.js');
   _loginAttempts = mod._loginAttempts;
@@ -88,7 +89,7 @@ async function dashboardWrite(token, action, payload) {
 
 test('dashboard APPROVE: a manager\'s אישור reaches Apps Script with the correct forwarded token', async () => {
   forwarded.length = 0;
-  const { token } = await login('רועי', 'roy-password'); // field_ops
+  const { token } = await login('רועי', CODE); // field_ops
   const { status } = await dashboardWrite(token, 'approve', { id: 'REQ-1', by: 'רועי' });
   assert.equal(status, 200, 'the gateway forwards approve and returns the upstream 200');
   assert.equal(forwarded.length, 1, 'exactly one write reached Apps Script');
@@ -106,7 +107,7 @@ test('dashboard APPROVE: a manager\'s אישור reaches Apps Script with the co
 
 test('dashboard REJECT: a manager\'s לא אושר reaches Apps Script with the reason payload', async () => {
   forwarded.length = 0;
-  const { token } = await login('אולגה', 'olga-password'); // ops_manager
+  const { token } = await login('אולגה', CODE); // ops_manager
   const { status } = await dashboardWrite(token, 'reject', { id: 'REQ-2', by: 'אולגה', reason: 'לא מאושר תקציבית' });
   assert.equal(status, 200);
   assert.equal(forwarded.length, 1);
@@ -124,7 +125,7 @@ test('approve/reject WITHOUT a Bearer token → 401 and nothing reaches upstream
 
 test('tier-B (maintenance) is refused approve AND reject at the gateway (403), no upstream call', async () => {
   forwarded.length = 0;
-  const { token } = await login('רמי', APP_PIN); // maintenance
+  const { token } = await login('רמי', CODE); // maintenance
   assert.equal((await dashboardWrite(token, 'approve', { id: 'REQ-1', by: 'רמי' })).status, 403);
   assert.equal((await dashboardWrite(token, 'reject', { id: 'REQ-1', by: 'רמי' })).status, 403);
   assert.equal(forwarded.length, 0, 'a refused write is blocked BEFORE any Apps Script call');

@@ -54,17 +54,17 @@ Login is identity-based (matching the ezone-managers / ezone-staffing standard).
 with `{ name, pin }` returns an HMAC-signed session token carrying the user's **name + role +
 house/cluster scope + issued-at**. The tier is data-driven off the `Users` sheet:
 
-- **Tier A — managers (רועי, אולגה):** each has a **personal password**, hashed (salted PBKDF2) in
-  the `Users.pin_hash` column and set via the `setUserPin()` Apps Script helper. Their password is
-  verified against **their own** `pin_hash`.
-- **Tier B — everyone else (coordinators + maintenance):** the **shared `APP_PIN`**.
-- **סנדרה (ceo):** no password, **cannot log in** (row stays in `Users`).
+- **One shared access code** (`SHARED_ACCESS_CODE`): pick a user from the dropdown + enter the code.
+  Identity and role come from the **selected roster user** (Users sheet) — the signed session token is
+  issued for that user exactly as before; only the secret check is now one shared code for everyone.
+- **Roster = active, non-coordinator users** (managers + the maintenance leads רמי/צחי). **Coordinators
+  no longer log into this app.** **סנדרה (ceo)** can now log in with the shared code like any manager.
 
-Wrong tier/credential combinations all return the **same generic 401** — the response never reveals
-which tier a name belongs to. Login is rate-limited to 8 attempts / 15 min per IP (fail-closed), and
-the PIN/password is never logged. Passwords are verified **only in Node** at login; **Code.gs trusts
-only the signed token** (it does not re-hash passwords). The hash-bearing roster is returned by Apps
-Script only to a server-to-server HMAC proof — the world-callable `/exec` never leaks `pin_hash`.
+A wrong/empty code or a name that is not an active roster user returns the **same generic 401**. Login is
+rate-limited to 8 attempts / 15 min per IP (fail-closed), the code is never logged, and the server
+**refuses to start** if `SHARED_ACCESS_CODE` is unset. The roster is read from the **public** `users`
+endpoint (no `pin_hash` needed) and matched by **trimmed** name, so a `SESSION_SECRET`/proof drift or a
+trailing-whitespace sheet cell can no longer break login. **Code.gs still trusts only the signed token.**
 
 - Every data request is Bearer-authenticated; the token is never in a query string, the page source,
   or persisted browser storage (memory only). Tokens expire after `SESSION_DAYS` days.
@@ -91,7 +91,7 @@ The server **refuses to start** if any is missing or empty — set them **before
 | Var | Where | Notes |
 |---|---|---|
 | `APPS_SCRIPT_EXEC_URL` | Railway env | This app's `/exec` URL |
-| `APP_PIN` | Railway env | **Tier-B shared PIN only** (coordinators + maintenance). Tier-A managers use personal `pin_hash` passwords |
+| `SHARED_ACCESS_CODE` | Railway env | The one shared login code for every roster user (managers + maintenance). Trimmed on load |
 | `SESSION_SECRET` | Railway env **and** Apps Script Script Property | ≥ 32 chars; identical in both places |
 | `SESSION_DAYS` | Railway env | Token lifetime in days |
 

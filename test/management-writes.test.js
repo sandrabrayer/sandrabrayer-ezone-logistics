@@ -6,10 +6,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { hashPin, rosterProof, verifyToken } from '../src/auth.js';
+import { hashPin, rosterProof, verifyToken, signToken } from '../src/auth.js';
 
 const SECRET = 'k'.repeat(40);
 const APP_PIN = '555555';
+const CODE = '2026'; // shared access code
 
 const USERS = [
   { name: 'אולגה', role: 'ops_manager', house: '', active: 'TRUE', pin_hash: hashPin('olga-password') },
@@ -37,7 +38,7 @@ let gateway, base, _loginAttempts;
 before(async () => {
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
   process.env.APPS_SCRIPT_EXEC_URL = `http://127.0.0.1:${upstream.address().port}/exec`;
-  process.env.SESSION_SECRET = SECRET; process.env.APP_PIN = APP_PIN; process.env.SESSION_DAYS = '7';
+  process.env.SESSION_SECRET = SECRET; process.env.SHARED_ACCESS_CODE = CODE; process.env.SESSION_DAYS = '7';
   const mod = await import('../src/server.js');
   _loginAttempts = mod._loginAttempts;
   gateway = http.createServer(mod.requestHandler);
@@ -65,12 +66,12 @@ const READINESS = ['addReadinessItem', 'updateReadinessItem', 'deleteReadinessIt
 
 test('EXEC-ONLY writes: ops_manager forwarded (200) with real token; field_ops & tier-B → 403, nothing forwarded', async () => {
   forwarded.length = 0;
-  const olga = (await login('אולגה', 'olga-password')).token;
+  const olga = (await login('אולגה', CODE)).token;
   for (const act of EXEC_ONLY) assert.equal((await action(olga, act, { id: 'X' })).status, 200, `${act} ops_manager`);
   for (const f of forwarded) assert.equal(verifyToken(SECRET, f.token).role, 'ops_manager');
   forwarded.length = 0;
-  const roy = (await login('רועי', 'roy-password')).token;      // field_ops — NOT an exec
-  const rami = (await login('רמי', APP_PIN)).token;             // maintenance
+  const roy = (await login('רועי', CODE)).token;      // field_ops — NOT an exec
+  const rami = (await login('רמי', CODE)).token;             // maintenance
   for (const act of EXEC_ONLY) {
     assert.equal((await action(roy, act, { id: 'X' })).status, 403, `${act} field_ops must be 403`);
     assert.equal((await action(rami, act, { id: 'X' })).status, 403, `${act} maintenance must be 403`);
@@ -80,12 +81,12 @@ test('EXEC-ONLY writes: ops_manager forwarded (200) with real token; field_ops &
 
 test('MANAGER-TIER readiness writes: field_ops IS allowed (forwarded); coordinator & maintenance → 403', async () => {
   forwarded.length = 0;
-  const roy = (await login('רועי', 'roy-password')).token;      // field_ops = manager tier
+  const roy = (await login('רועי', CODE)).token;      // field_ops = manager tier
   for (const act of READINESS) assert.equal((await action(roy, act, { board: 'opening', id: 'X', house: 'h', item: 'i' })).status, 200, `${act} field_ops`);
   assert.equal(forwarded.length, READINESS.length, 'field_ops readiness writes reach Apps Script');
   forwarded.length = 0;
-  const coord = (await login('שירה', APP_PIN)).token;           // coordinator
-  const rami = (await login('רמי', APP_PIN)).token;             // maintenance
+  const coord = signToken(SECRET, 7, { name: 'שירה', role: 'coordinator', scope: 'קיסריה עפרוני' }); // coordinators can't log in; mint to test the gate
+  const rami = (await login('רמי', CODE)).token;             // maintenance
   for (const act of READINESS) {
     assert.equal((await action(coord, act, { board: 'opening', id: 'X' })).status, 403, `${act} coordinator must be 403`);
     assert.equal((await action(rami, act, { board: 'opening', id: 'X' })).status, 403, `${act} maintenance must be 403`);
@@ -95,11 +96,11 @@ test('MANAGER-TIER readiness writes: field_ops IS allowed (forwarded); coordinat
 
 test('updatePreventiveItem: maintenance AND managers may write; coordinator → 403', async () => {
   forwarded.length = 0;
-  const rami = (await login('רמי', APP_PIN)).token;             // maintenance lead
-  const roy = (await login('רועי', 'roy-password')).token;      // manager
+  const rami = (await login('רמי', CODE)).token;             // maintenance lead
+  const roy = (await login('רועי', CODE)).token;      // manager
   assert.equal((await action(rami, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'maintenance may write daily');
   assert.equal((await action(roy, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'manager may write daily');
-  const coord = (await login('שירה', APP_PIN)).token;
+  const coord = signToken(SECRET, 7, { name: 'שירה', role: 'coordinator', scope: 'קיסריה עפרוני' });
   assert.equal((await action(coord, 'updatePreventiveItem', { house: 'x', item: 'מים', done: true })).status, 403, 'coordinator may NOT write daily');
 });
 
