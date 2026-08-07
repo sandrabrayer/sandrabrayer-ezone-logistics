@@ -3,11 +3,12 @@
 // real-browser timing (shim runs while document.body is null, as it does in <head>), triggers the login
 // overlay via the page's first /api/exec fetch, then clicks כניסה and asserts login completes.
 //
-// Regression guard: after the role-based nav rewrite (shim: nav rebuild + redirect replacing the old
-// per-feature mounters), a broken shim could leave the login page dead — the overlay never binds, or the
-// redirect logic fires on the login page. This proves, for coordinator/maintenance/field_ops/ops_manager/
-// ceo, that the overlay appears, the click posts /api/login, the session is saved, the overlay closes,
-// and NO redirect fires while logging in on '/'.
+// '/' is now a BARE managers-only landing (the standalone coordinator request form was removed): its only
+// job is to bring an unauthenticated visitor to the login overlay and then forward a signed-in user to
+// /dashboard. This proves, for coordinator/maintenance/field_ops/ops_manager/ceo, that the overlay
+// appears, the click posts /api/login, the session is saved, the overlay closes, and the page then
+// forwards to /dashboard. (The overlay itself is role-agnostic; the roster gate — only רועי + אולגה may
+// actually authenticate — is enforced at the server and covered by login-roster.test.js.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -43,10 +44,9 @@ function makeEl(tag) {
 
 function loadLoginPage(role, pathname) {
   const calls = [], store = {};
+  // The bare landing has no form elements; getElementById is only used by the shim (e.g. ezone-ver),
+  // which creates its own nodes. An empty id map (getElementById → null) is all the page needs.
   const ids = {};
-  for (const id of ['created_by', 'house', 'submitBtn', 'msg', 'myStatus', 'myStatusBody', 'location_in_house', 'description']) {
-    ids[id] = makeEl(id === 'submitBtn' ? 'button' : 'div'); ids[id].id = id;
-  }
   const nav = makeEl('nav');
   let body = null; // real browser: null while <head> scripts run
   const domL = {};
@@ -88,11 +88,12 @@ for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'c
     const btn = ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה');
     assert.ok(btn, `${role}: the כניסה login overlay must appear`);
     btn.click();
-    await flush();
+    await flush(16);
     assert.ok(ctx.calls.some((u) => u.indexOf('/api/login') === 0), `${role}: clicking כניסה must POST /api/login`);
     assert.ok('ezone_session' in ctx.store, `${role}: a session must be saved on success`);
     assert.ok(!ctx.body._find((c) => c.tagName === 'button' && c.textContent === 'כניסה'), `${role}: the overlay must close`);
-    assert.equal(ctx.replacedTo, null, `${role}: logging in on / must NOT redirect`);
+    // Once authenticated, the bare landing forwards to the dashboard (its only job).
+    assert.equal(ctx.replacedTo, '/dashboard', `${role}: after login, '/' forwards to /dashboard`);
   });
 }
 

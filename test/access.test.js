@@ -102,11 +102,10 @@ test('reads: houses/config/requests open to all; users + manager-only reads are 
 
 // ---- WRITE MATRIX (role × data write) — the mirrored gate ----
 
-test('writes: tier B limited to createRequest (+createEvent for coordinator); managers pass the early gate', () => {
-  // coordinator
-  assert.equal(canWriteAction('coordinator', 'createRequest'), true);
-  assert.equal(canWriteAction('coordinator', 'createEvent'), true);
-  for (const a of WRITES.filter((x) => x !== 'createRequest' && x !== 'createEvent')) {
+test('writes: coordinator has NO in-app write; maintenance only createRequest; managers pass the early gate', () => {
+  // coordinator — no in-app write surface at all. Coordinators are not Logistics users; they file
+  // requests from the external ezone-coordinators app via the secret-gated intake, never a session.
+  for (const a of WRITES) {
     assert.equal(canWriteAction('coordinator', a), false, `coordinator must not ${a}`);
   }
   // maintenance — only createRequest (no createEvent, per existing events rule)
