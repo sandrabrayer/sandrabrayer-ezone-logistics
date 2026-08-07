@@ -3,6 +3,32 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX — login button loading state (spinner + disabled, no dead moment)
+
+**Why.** Clicking **כניסה** (or pressing Enter) had no immediate feedback — on a slow login the button
+looked inert, inviting a second click. Now it shows an in-progress state the instant it's pressed.
+
+**What (in the injected auth shim's login overlay, `src/server.js`).**
+- **On click / Enter:** the button is **immediately disabled** and shows a **spinner inside the button**
+  (label cleared, `aria-busy="true"`). A guard makes a second Enter/click while in-flight a no-op, so a
+  slow login can't be double-submitted.
+- **On failure** (401 / 429 / network): the button is **restored** (label back, re-enabled) and the
+  existing Hebrew error is shown — unchanged copy.
+- **On success:** the button **stays disabled/spinning through the redirect** (overlay close + nav mount)
+  — no dead moment where it flips back to idle before the page changes.
+- The spinner keyframes ride in a `<style>` appended inside the overlay (inline styles can't define
+  `@keyframes`); the spinner is `aria-hidden`, dark-on-teal to match the button.
+
+**Scope.** Only the login button. The dashboard **approve/reject** buttons already reload on success and
+live in a separate file (`dashboard.html`) with their own flow — no shared helper made it trivial to extend
+without editing those handlers, so per the "only if cheap" guidance they're left as-is.
+
+**Tests.** New `test/login-button.test.js` (4) renders the real shim in a DOM sandbox with a **deferred**
+`/api/login`: the button is disabled + shows a spinner **while in flight**; **re-enabled with the label
+restored and the error shown on failure**; a second click in-flight fires no duplicate request; and on
+success the overlay closes without the button flipping back to an idle state. `node --test` green
+(**598 tests**). No secrets; `src/server.js` + one test only.
+
 ## [Unreleased] — three small UI/roster changes (management note removed, login = רועי+אולגה, bigger hub cards)
 
 **1. `/management` — data-source note removed.** Deleted the explanatory sub-line ("מוצג רק מה שיש לו מקור
