@@ -141,9 +141,10 @@ test('the /management data (incl. budget) is exec-only: field_ops / coordinator 
 
 test('exceptional events: reporting is closed to maintenance; editing is exec-only (server-side 403)', async () => {
   const roy = tok('רועי'), olga = tok('אולגה'), coord = tok('שירה'), maint = tok('רמי');
-  // createEvent: maintenance refused at the gateway; everyone else forwarded (fake upstream → 200).
+  // createEvent: refused for BOTH tier-B roles at the gateway (coordinators are no longer Logistics
+  // users; maintenance never reported events); managers are forwarded (fake upstream → 200).
   assert.equal((await postAction('createEvent', maint)).status, 403);
-  assert.equal((await postAction('createEvent', coord)).status, 200);
+  assert.equal((await postAction('createEvent', coord)).status, 403);
   assert.equal((await postAction('createEvent', roy)).status, 200);
   assert.equal((await postAction('createEvent', olga)).status, 200);
   // updateEvent (edit/close): exec-only.

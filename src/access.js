@@ -1,14 +1,16 @@
 // access.js — role-based page + data-action visibility (owner's required model, increment 38).
 //
-// Owner's model (post nav-cleanup — Logistics is becoming managers-only):
-//   coordinator  → no nav tab (the standalone request form + /events were removed); '/' still serves so a
-//                  session lands on the root. Data gates (createRequest own-house scope) are unchanged.
+// Owner's model (Logistics is now managers-only):
+//   coordinator  → NOT a Logistics user at all: no login, no nav tab, no write action. Coordinators file
+//                  requests from the external ezone-coordinators app, which POSTs to the secret-gated
+//                  createRequest intake (Code.gs) server-to-server. No coordinator surface lives here.
 //   maintenance  → dashboard / workorders / inventory / inspection / reports (the tier-B pages it had; no /events).
 //   field_ops    → those same pages (everything EXCEPT /management); no standalone request form or /events.
 //   ops_manager  → everything, including /management.
 //   ceo          → everything, including /management.
-// Requests are now filed from the in-dashboard create modal, not a standalone דרישה חדשה page. אירועים
-// חריגים (/events) is removed entirely (nav + page + routes). '/' (index.html) stays as the root/login landing.
+// Requests are filed from the in-dashboard create modal (managers), not a standalone דרישה חדשה page.
+// אירועים חריגים (/events) is removed entirely (nav + page + routes). '/' (index.html) is a bare login
+// landing that forwards a signed-in manager to /dashboard — it holds no request-submission surface.
 //
 // Two enforcement layers use this module:
 //   1. SERVER-SIDE data gate (src/server.js): canRead() gates every doGet action by the session role;
@@ -19,8 +21,8 @@
 //   2. NAV shim (src/server.js injects NAV_BY_ROLE): renders only the links a role may open and redirects
 //      away from a page the role may not open. Display only — never the security control.
 //
-// This does NOT weaken any existing gate: canManage (managementData / updateEvent), the coordinator
-// own-house scope on createRequest/createEvent, canApprove/canDispatch/canBlock etc. all still run in the
+// This does NOT weaken any existing gate: canManage (managementData / updateEvent), the tier-B
+// own-house scope on createRequest, canApprove/canDispatch/canBlock etc. all still run in the
 // handlers. canWriteAction is an ADDITIONAL early gate that also CLOSES a gap — several write handlers
 // (createInspection/addFinding/confirmFinding/submitInventory/editRequest) had no server-side role check
 // and were protected UI-only; tier B is now refused them server-side.
@@ -32,13 +34,16 @@ import { isManagerRole, ROLE } from './roles.js';
 // (role string literals only) so the two copies stay identical. Manager-tier roles pass this early gate
 // and are then subject to the PRECISE per-action gate inside each handler (canManage for managementData /
 // updateEvent, chain-B canApprove, canDispatch, canBlock, isManagement_ for delete, …) — unchanged.
-// Tier-B roles are limited to exactly what they can do today via the app: a coordinator may file a
-// request and report an event; maintenance may file a request. Every other write is refused.
+// Managers pass this early gate and hit each handler's precise gate. maintenance keeps its narrow
+// in-app writes (file a request, tick its daily preventive checklist). The coordinator role has NO
+// in-app write surface: coordinators no longer log into Logistics — they file requests from the
+// external ezone-coordinators app, which POSTs to the secret-gated intake endpoint server-to-server
+// (Code.gs handleCreateRequestIntake_), never through a Logistics session. So a coordinator session
+// is refused every write here. Every other write, for every non-manager role, is refused.
 var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
 
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
-  if (role === 'coordinator') return action === 'createRequest' || action === 'createEvent';
   if (role === 'maintenance') return action === 'createRequest' || action === 'updatePreventiveItem';
   return false;
 }

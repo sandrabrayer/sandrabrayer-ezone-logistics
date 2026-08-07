@@ -54,10 +54,11 @@ test('reads: tier B (coordinator/maintenance) get 403 on manager-only reads; man
 
 // ---- WRITES ----
 
-test('writes: coordinator may createRequest + createEvent; every other write → 403', async () => {
-  assert.equal((await postAction('createRequest', 'coordinator')).status, PASSED);
-  assert.equal((await postAction('createEvent', 'coordinator')).status, PASSED);
-  for (const a of ['createInspection', 'addFinding', 'confirmFinding', 'submitInventory', 'editRequest', 'approve', 'assign', 'setStatus', 'deleteRequest']) {
+test('writes: a coordinator session may do NOTHING — every write, incl. createRequest/createEvent → 403', async () => {
+  // Coordinators no longer log into Logistics; they file requests from the external ezone-coordinators
+  // app via the secret-gated intake (Code.gs), not a Logistics session. So a coordinator token is
+  // refused every write at the Node proxy with no upstream call.
+  for (const a of ['createRequest', 'createEvent', 'createInspection', 'addFinding', 'confirmFinding', 'submitInventory', 'editRequest', 'approve', 'assign', 'setStatus', 'deleteRequest']) {
     assert.equal((await postAction(a, 'coordinator')).status, DENIED, `coordinator must not ${a}`);
   }
 });

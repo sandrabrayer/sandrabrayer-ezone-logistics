@@ -706,9 +706,10 @@ async function handleAction(req, res) {
   if (!body || typeof body.action !== 'string') {
     return sendJson(res, 400, { ok: false, error: 'missing action' });
   }
-  // Role-based write gate (src/access.js, mirrored in Code.gs). Tier B is limited to createRequest
-  // (+ createEvent for coordinators); every other write is refused here with no upstream call. Manager
-  // roles pass and are then subject to the precise per-action checks below + in each Code.gs handler.
+  // Role-based write gate (src/access.js, mirrored in Code.gs). maintenance is limited to createRequest
+  // (+ its daily preventive tick); a coordinator session has no write at all (coordinators file via the
+  // external ezone-coordinators app, not a Logistics session). Every other write is refused here with no
+  // upstream call. Manager roles pass and are subject to the precise per-action checks below + in Code.gs.
   if (!canWriteAction(actor.role, body.action)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }

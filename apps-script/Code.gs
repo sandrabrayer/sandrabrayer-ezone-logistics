@@ -323,13 +323,16 @@ function houseInScope(role, scope, houseName, houseCluster) {
 // (role string literals only) so the two copies stay identical. Manager-tier roles pass this early gate
 // and are then subject to the PRECISE per-action gate inside each handler (canManage for managementData /
 // updateEvent, chain-B canApprove, canDispatch, canBlock, isManagement_ for delete, …) — unchanged.
-// Tier-B roles are limited to exactly what they can do today via the app: a coordinator may file a
-// request and report an event; maintenance may file a request. Every other write is refused.
+// Managers pass this early gate and hit each handler's precise gate. maintenance keeps its narrow
+// in-app writes (file a request, tick its daily preventive checklist). The coordinator role has NO
+// in-app write surface: coordinators no longer log into Logistics — they file requests from the
+// external ezone-coordinators app, which POSTs to the secret-gated intake endpoint server-to-server
+// (handleCreateRequestIntake_), never through a Logistics session. So a coordinator session is
+// refused every write here. Every other write, for every non-manager role, is refused.
 var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
 
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
-  if (role === 'coordinator') return action === 'createRequest' || action === 'createEvent';
   if (role === 'maintenance') return action === 'createRequest' || action === 'updatePreventiveItem';
   return false;
 }
@@ -570,6 +573,21 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: 'Invalid JSON body' });
   }
 
+  // Coordinator request intake (server-to-server). The external ezone-coordinators app POSTs a
+  // createRequest here DIRECTLY (no Logistics session), authenticated by the CREATE_REQUEST_SECRET
+  // Script Property — NOT a session token. It is handled before the token gate so an external system
+  // can file a request without logging in, and is discriminated by the presence of a `secret` field
+  // (the in-app manager createRequest carries a `token` and no `secret`, so it falls through to the
+  // token gate below, unchanged). Fail-closed on the secret — see handleCreateRequestIntake_.
+  if (body && body.action === 'createRequest' && body.secret !== undefined) {
+    try {
+      return handleCreateRequestIntake_(body);
+    } catch (err2) {
+      Logger.log('createRequest intake error: ' + (err2 && err2.stack ? err2.stack : err2));
+      return jsonOut_({ ok: false, error: 'Server error' });
+    }
+  }
+
   // Fail-closed identity auth: EVERY write must carry a valid HMAC session token, verified here
   // against the SESSION_SECRET Script Property. The actor (name + role) comes from the token only.
   var actor = verifyToken_(getSessionSecret_(), (body && body.token) || '');
@@ -643,6 +661,87 @@ function handleCreateRequest_(input, actor) {
   // (logged), never a silently wrong date.
   row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
   appendRequest(row);
+  rebuildDigest();
+  return jsonOut_({ ok: true, id: row.id });
+}
+
+// ===== Coordinator request intake (server-to-server) =====
+// The ezone-coordinators app is the front door for coordinators; it POSTs finished requests here
+// directly, authenticated by a SHARED SECRET (CREATE_REQUEST_SECRET), never a Logistics session.
+// Coordinators do NOT log into Logistics — this is the only way a coordinator-originated request
+// enters the system of record. See REQUEST-INTAKE-CONTRACT.md for the wire contract + error codes.
+
+// The intake secret from Script Properties. '' when unset (→ intake is fail-closed / rejected).
+function getCreateRequestSecret_() {
+  return PropertiesService.getScriptProperties().getProperty('CREATE_REQUEST_SECRET') || '';
+}
+
+// Length cap for the free-text fields on an intake request (defence against an oversized payload
+// bloating a cell / the sheet). created_by is a person's name, so it gets a much tighter cap.
+var INTAKE_MAX_DESCRIPTION_ = 2000;
+var INTAKE_MAX_CREATED_BY_ = 120;
+var INTAKE_MAX_LOCATION_ = 200;
+
+// Strict validation for a coordinator-intake payload. `idToName` is the canonical-id → house-name map
+// (HOUSE-IDS.md); `house` MUST be one of its keys — a canonical id, never a display name or anything
+// else. Returns an error string, or null when the payload is acceptable. Rejects anything off-contract.
+function validateIntakeRequest_(p, idToName) {
+  if (!p || typeof p !== 'object') return 'Missing payload';
+  if (!p.house || !Object.prototype.hasOwnProperty.call(idToName, p.house)) {
+    return 'Invalid or missing house';
+  }
+  if (VALID_CATEGORIES.indexOf(p.category) === -1) return 'Invalid or missing category';
+  if (VALID_URGENCIES.indexOf(p.urgency) === -1) return 'Invalid or missing urgency';
+  var desc = p.description == null ? '' : String(p.description);
+  if (desc.replace(/^\s+|\s+$/g, '') === '') return 'Missing description';
+  if (desc.length > INTAKE_MAX_DESCRIPTION_) return 'description too long';
+  var loc = p.location_in_house == null ? '' : String(p.location_in_house);
+  if (loc.length > INTAKE_MAX_LOCATION_) return 'location_in_house too long';
+  var blank = (p.estimated_cost === '' || p.estimated_cost == null);
+  if (!blank && isNaN(Number(p.estimated_cost))) return 'estimated_cost must be a number or blank';
+  var createdBy = p.created_by == null ? '' : String(p.created_by);
+  if (createdBy.replace(/^\s+|\s+$/g, '') === '') return 'Missing created_by';
+  if (createdBy.length > INTAKE_MAX_CREATED_BY_) return 'created_by too long';
+  return null;
+}
+
+// Handle a secret-authenticated createRequest from ezone-coordinators. Fail-closed: an unset secret,
+// an empty provided secret, or a mismatch is rejected with NO writes. On success the request enters
+// the NORMAL lifecycle (status דרישה, amount-based approval routing, SLA due date) exactly like an
+// in-app request, PLUS an audit row recording the coordinator (created_by) and source=coordinators.
+function handleCreateRequestIntake_(body) {
+  var configured = getCreateRequestSecret_();
+  var provided = (body && typeof body.secret === 'string') ? body.secret : '';
+  // constantTimeEq_ fails closed on empty / length-mismatch, but guard the empties explicitly so an
+  // unset Script Property can never be satisfied by an empty provided secret.
+  if (!configured || !provided || !constantTimeEq_(provided, configured)) {
+    return jsonOut_({ ok: false, error: 'Unauthorized' });
+  }
+
+  var input = (body && body.payload) || {};
+  var idToName = canonicalHouseIdToName_();
+  var validationError = validateIntakeRequest_(input, idToName);
+  if (validationError) return jsonOut_({ ok: false, error: validationError });
+
+  // Logistics keys requests on the house NAME internally (HOUSE-IDS.md: the id↔name mapping applies at
+  // the boundary only). Map the canonical id the coordinator sent → the city-first Hebrew display name
+  // so the request groups, routes, and displays identically to every other request.
+  var row = buildNewRequest_({
+    created_by: String(input.created_by),
+    house: idToName[input.house],
+    category: input.category,
+    description: String(input.description),
+    location_in_house: input.location_in_house || '',
+    urgency: input.urgency,
+    estimated_cost: input.estimated_cost,
+  });
+  // Approval routing (chain B) + SLA due date are derived exactly as in handleCreateRequest_.
+  row.approval_required = approvalRequiredFor_(row.estimated_cost, row.urgency);
+  row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
+  appendRequest(row);
+  // Audit the creation: from '' → דרישה, by the coordinator, tagged with the intake source so the
+  // provenance of a coordinator-filed request is visible in the AuditLog.
+  writeAuditEntry(row.id, '', STATUS_REQUEST, row.created_by, 'source=coordinators');
   rebuildDigest();
   return jsonOut_({ ok: true, id: row.id });
 }

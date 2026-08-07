@@ -3,6 +3,56 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — feature — secured server-to-server request intake; coordinator surfaces stripped
+
+**Why.** Coordinators no longer live in Logistics — they file requests from the separate
+**ezone-coordinators** app, which POSTs each finished request into Logistics **server-to-server**.
+Logistics stays the **system of record**. Two changes land this: a secret-gated intake endpoint, and
+the removal of the last coordinator-facing surfaces inside Logistics.
+
+**Task 1 — secured `createRequest` intake (`apps-script/Code.gs`).** A new secret-gated path handles a
+`createRequest` that carries a `secret` field, **before** the session-token gate, so an external system
+can file a request without a Logistics login:
+- **Fail-closed auth.** The `secret` is compared constant-time against the `CREATE_REQUEST_SECRET`
+  Script Property. Unset/empty property, empty provided secret, or a mismatch → `Unauthorized` with
+  **no writes**. No session token is involved.
+- **Strict validation.** `house` must be a **canonical id** (HOUSE-IDS.md — `ramot-hashavim`,
+  `raanana-asher`, `caesarea-ofroni`, `caesarea-rehab`, `pardes`, `sde-eliezer`), mapped to the Hebrew
+  house name at the boundary (Logistics keys on the name internally); `category` ∈ {רכישה,תיקון,החלפה};
+  `urgency` ∈ {רגיל,דחוף,חירום}; `description` required and length-capped (≤2000); `estimated_cost`
+  numeric or blank; `created_by` (the coordinator's name) required. Anything off-contract is rejected.
+- **Normal lifecycle.** The request enters at status **דרישה**, with **unchanged** amount-based approval
+  routing (chain B) and an SLA `due_at`, plus an **AuditLog** row (`'' → דרישה`, `by`=coordinator,
+  note **`source=coordinators`**) recording provenance.
+- **No public Node route.** The Node frontend exposes no unauthenticated submit route; the
+  coordinators app calls the Apps Script `/exec` directly. The in-app **manager** `createRequest`
+  (session token, no `secret`) is untouched — presence of the `secret` field is the discriminator.
+- Contract documented in **`REQUEST-INTAKE-CONTRACT.md`** (request/response shape + every error code).
+
+**Task 2 — strip remaining coordinator surfaces.**
+- **`src/index.html`** was the last standalone coordinator request form (a submitter picker + house
+  auto-fill that POSTed `createRequest`, plus a coordinator "my status" panel). It is replaced by a
+  **bare managers-only login landing**: the injected auth shim owns the login overlay, and once a
+  manager is signed in the page forwards to `/dashboard`. No request-submission surface remains at `/`.
+- **`canWriteAction`** (mirrored in `src/access.js` + `apps-script/Code.gs`) no longer grants the
+  `coordinator` role any write — a coordinator session is refused every action. Managers keep the
+  in-dashboard create modal (`dashboard.html`), unchanged. maintenance keeps its narrow writes.
+- Login roster is unchanged: **רועי + אולגה** only.
+
+**Tests.** New `test/create-request-intake.test.js` (14) evaluates the REAL `Code.gs` intake with faked
+Apps Script globals: fail-closed on unset/wrong/empty secret (no `Requests`/`AuditLog` writes), rejects
+a non-canonical house / bad category / bad urgency / missing + oversized description / missing
+`created_by` / non-numeric cost, a successful create (house id → name, coordinator `created_by`, status
+דרישה) with its `source=coordinators` audit row, chain-B routing (over-threshold → ops_manager, low →
+field_ops, emergency → auto), the doPost secret-vs-token discriminator, and the managers' create path
+intact. Updated `login-page.test.js` (bare landing forwards to `/dashboard`), `access.test.js` /
+`access-server.test.js` / `staff-tiers.test.js` (coordinator now has no in-app write), and
+`mobile-css.test.js` (dropped the removed intake-form assertions). `node --test` green (**614 tests**).
+
+**Deploy.** No secret is committed — `CREATE_REQUEST_SECRET` must be set in the Logistics Apps Script
+**Script Properties**. This touches `apps-script/**`, so the clasp deploy + live verify fire on merge
+and re-stamp `DEPLOY_COMMIT`; the `/version` footer's **gs** SHA rolls to the merge commit.
+
 ## [Unreleased] — bug — service worker heals wedged clients after a deploy (no manual cache clear)
 
 **Symptom (evidence-backed).** After a deploy, browsers running the OLD service worker kept serving **stale
