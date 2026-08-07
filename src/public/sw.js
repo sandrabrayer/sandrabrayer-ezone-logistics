@@ -23,10 +23,15 @@
  * dependency on the service-worker globals, so the test suite can evaluate this
  * exact file and assert on them directly.
  */
-// Bumped v2 → v3: v2 cached the non-shell HTML pages (inventory/reports/workorders/inspection/
-// management) CACHE-FIRST, so after a redeploy those pages served STALE html — including the pre-fix
-// version WITHOUT the persisted-session shim, which re-prompted for the PIN. Bumping purges v2 on
-// activate, and every app document is now network-first (below) so a redeploy is always picked up.
+// CACHE name — the Node server REWRITES this literal to `ezone-logistics-<commit>` when it serves /sw.js,
+// so every deploy ships a new cache name and a new SW byte-content (the browser detects the update, and
+// activate() purges every non-matching cache). The static 'v3' here is only the local/dev fallback.
+//
+// Heal history: v2 cached the non-shell HTML pages (inventory/reports/workorders/inspection/management)
+// CACHE-FIRST, so after a redeploy those pages served STALE html (no version footer, old shim). Two things
+// fix existing wedged clients WITHOUT a manual cache clear: (1) every app document is now network-first
+// (below); (2) install skipWaiting()s UNCONDITIONALLY and activate deletes every non-current cache + claims
+// clients, so the new worker can't be blocked from taking over by a failed shell precache.
 var CACHE = 'ezone-logistics-v3';
 var SHELL = [
   './',
@@ -74,14 +79,26 @@ function shouldCache(url, origin) {
 }
 
 self.addEventListener('install', function (e) {
+  // Take over ASAP. skipWaiting is called UNCONDITIONALLY and FIRST — it must NOT be gated on the shell
+  // precache. If addAll() rejected (a renamed/removed shell asset), install would fail and the NEW worker
+  // would never activate — leaving the OLD worker (and its stale, cache-first document cache) in control
+  // forever. THAT is the heal-blocker this fixes. So skipWaiting immediately, then precache best-effort
+  // (per-asset, failures swallowed) so one missing file can never abort the update.
+  self.skipWaiting();
   e.waitUntil(
-    caches.open(CACHE)
-      .then(function (c) { return c.addAll(SHELL); })
-      .then(function () { return self.skipWaiting(); })
+    caches.open(CACHE).then(function (c) {
+      return Promise.all(SHELL.map(function (u) {
+        return fetch(u).then(function (r) { return (r && r.ok) ? c.put(u, r) : null; }).catch(function () { return null; });
+      }));
+    }).catch(function () { return null; })
   );
 });
 
 self.addEventListener('activate', function (e) {
+  // Delete EVERY cache whose name isn't the current (commit-stamped) CACHE — purges all stale pre-deploy
+  // caches, including older commit-stamped names and the legacy vN names — then claim all open clients so
+  // THIS worker controls them immediately. Existing tabs heal WITHOUT a manual cache clear: their next
+  // navigation is served by the new, network-first worker.
   e.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(

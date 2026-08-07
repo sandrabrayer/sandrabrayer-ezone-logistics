@@ -3,6 +3,38 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — bug — service worker heals wedged clients after a deploy (no manual cache clear)
+
+**Symptom (evidence-backed).** After a deploy, browsers running the OLD service worker kept serving **stale
+cached HTML on non-dashboard routes** — those pages rendered **no version footer**, while freshly-purged
+clients got current pages. The commit-stamped cache (deploy provenance) only takes effect once the NEW SW
+**activates**, and the old SW was not being replaced/purged on existing clients.
+
+**Root cause.** `install` gated `skipWaiting()` behind `caches.addAll(SHELL)`. If **any** shell asset failed
+to fetch (a renamed/removed file), `addAll` rejected → install failed → the **new worker never activated**,
+leaving the old worker (which cached non-shell documents CACHE-FIRST) in control indefinitely. The old
+worker then served pre-deploy HTML on `/inventory`, `/reports`, `/workorders`, `/inspection`, `/management`
+(dashboard was network-first even in the old worker, so it looked fine — exactly the observed split).
+
+**Fix (`src/public/sw.js` + `src/server.js`).**
+1. **New SW takes over unconditionally.** `install` now calls `self.skipWaiting()` **first and
+   unconditionally**, then precaches the shell **best-effort** (per-asset `fetch`+`put`, all failures
+   swallowed) — a missing shell file can never abort the update. `activate` deletes **every** cache whose
+   name isn't the current commit-stamped `CACHE` (older commit names + legacy `vN`) and calls
+   `clients.claim()`, so open tabs are controlled by the new worker immediately.
+2. **`/sw.js` is never HTTP-cached.** Served with `Cache-Control: no-cache, no-store, must-revalidate`
+   (was plain `no-cache`), so the browser always re-fetches the worker script and detects a new deploy
+   promptly — closing the trap where a cacheable `/sw.js` pins the old worker for its max-age.
+3. **Documents recover on next navigation.** Every app document is already **network-first** (by route or
+   any `navigate`), so once the new worker is in control a wedged client heals on its very next navigation.
+
+**Tests.** New `test/sw-lifecycle.test.js` (4) evaluates the REAL `sw.js` with faked `caches`/`self`:
+`install` calls `skipWaiting` **even when the precache (`caches.open`/`fetch`) rejects**; `activate` deletes
+every non-current cache, keeps the current one, and calls `clients.claim()`; and the booted Node server
+serves `/sw.js` with a `no-store, must-revalidate` Cache-Control and a commit-stamped cache name. `pwa.test.js`
+(network-only/network-first routing) stays green. `node --test` green (**598 tests**). No secrets; no
+`apps-script/**`.
+
 ## [Unreleased] — UX — login button loading state (spinner + disabled, no dead moment)
 
 **Why.** Clicking **כניסה** (or pressing Enter) had no immediate feedback — on a slow login the button
