@@ -187,18 +187,38 @@ function buildClientShim(names) {
       pin.type='password';pin.setAttribute('autocomplete','off');pin.placeholder='קוד גישה';
       var btn=el('button','width:100%;min-height:44px;font-size:16px;font-weight:700;border:0;border-radius:8px;background:#00bfa5;color:#04150f;cursor:pointer','כניסה');
       var err=el('div','color:#ff8a80;font-size:.9rem;margin-top:10px;min-height:1.1em','');
+      // Spinner keyframes — a <style> inside the overlay applies globally (inline styles can't do @keyframes).
+      card.appendChild(el('style',null,'@keyframes ezspin{to{transform:rotate(360deg)}}'));
       card.appendChild(h);card.appendChild(sel);card.appendChild(pin);card.appendChild(btn);card.appendChild(err);ov.appendChild(card);
       document.body.appendChild(ov);pin.focus();
+      // In-progress state for the login button: disable + show a spinner INSIDE the button. setLoading(false)
+      // restores the label and re-enables; on success we DON'T restore — the button keeps spinning through
+      // the redirect so there's no dead moment.
+      var _btnLabel=btn.textContent;
+      function setLoading(on){
+        if(on){
+          btn.disabled=true;btn.style.cursor='default';btn.style.opacity='.9';btn.textContent='';
+          var sp=el('span','display:inline-block;width:16px;height:16px;box-sizing:border-box;border:2px solid rgba(4,21,15,.35);border-top-color:#04150f;border-radius:50%;animation:ezspin .6s linear infinite;vertical-align:middle');
+          sp.setAttribute('aria-hidden','true');btn.setAttribute('aria-busy','true');btn.appendChild(sp);
+        }else{
+          btn.disabled=false;btn.style.cursor='pointer';btn.style.opacity='1';btn.removeAttribute('aria-busy');btn.textContent=_btnLabel;
+        }
+      }
       function attempt(){
-        err.textContent='';btn.disabled=true;
+        if(btn.disabled)return; // already in-flight — guards an Enter-key double-submit while the button spins
+        err.textContent='';setLoading(true);
         origFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sel.value,pin:pin.value})})
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
-          btn.disabled=false;
-          if(res.s===200&&res.j&&res.j.token){saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountNav();resolve();}
-          else if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
+          if(res.s===200&&res.j&&res.j.token){
+            // SUCCESS — keep the button disabled + spinning through the redirect; no dead moment.
+            saveSession(res.j.token,res.j.role,res.j.scope,res.j.expiresInDays);applySession({token:res.j.token,role:res.j.role,scope:res.j.scope});
+            if(ov.parentNode)ov.parentNode.removeChild(ov);mountSignOut();mountNav();resolve();return;
+          }
+          setLoading(false); // FAILURE — restore the button, then surface the error
+          if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
           else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
-        }).catch(function(){btn.disabled=false;err.textContent='שגיאת רשת';});
+        }).catch(function(){setLoading(false);err.textContent='שגיאת רשת';});
       }
       btn.addEventListener('click',attempt);
       pin.addEventListener('keydown',function(e){if(e.key==='Enter')attempt();});
