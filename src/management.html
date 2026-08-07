@@ -42,24 +42,21 @@
     .pill.ok { background: #06251f; color: var(--accent-2); }
     /* notRecorded — a deliberately NEUTRAL pill (never green/ok): a missing record must not read as fine. */
     .pill.gray { background: #2a2f38; color: #aeb6c2; }
-    .unavail { background: repeating-linear-gradient(135deg, #23262e, #23262e 8px, #20232b 8px, #20232b 16px); border: 1px dashed var(--card-line); border-radius: 12px; padding: 12px 14px; }
-    .unavail .t { font-weight: 800; color: #cfd5de; }
-    .unavail .r { color: var(--muted); font-size: .85rem; margin-top: 3px; }
     .na { color: var(--muted); font-style: italic; }
     .loading, .empty { color: var(--muted); }
     .deny { background: var(--card); border: 1px solid var(--red); border-radius: var(--radius); padding: 28px; text-align: center; color: #ff8a80; font-weight: 700; }
     h3 { font-size: 1.05rem; margin: 22px 0 8px; color: var(--accent-2); }
     h4 { font-size: .98rem; margin: 12px 0 4px; }
     /* HUB — topic cards */
-    .hub-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-    .hub-card { text-align: right; direction: rtl; background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 18px; cursor: pointer; color: var(--ink); font-family: inherit; transition: border-color .12s, box-shadow .12s; display: flex; flex-direction: column; gap: 6px; }
-    .hub-card:hover { border-color: var(--accent-2); box-shadow: 0 0 30px -14px var(--glow); }
-    .hub-icon { font-size: 1.5rem; }
-    .hub-title { font-weight: 800; font-size: 1.05rem; color: #fff; }
-    .hub-sum { color: var(--muted); }
-    .hub-sum .n { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; }
+    .hub-grid { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .hub-card { text-align: right; direction: rtl; background: var(--card); border: 1px solid var(--card-line); border-radius: 20px; padding: 30px 28px; cursor: pointer; color: var(--ink); font-family: inherit; transition: border-color .12s, box-shadow .12s, transform .12s; display: flex; flex-direction: column; gap: 12px; min-height: 190px; }
+    .hub-card:hover { border-color: var(--accent-2); box-shadow: 0 0 40px -14px var(--glow); transform: translateY(-2px); }
+    .hub-icon { font-size: 2.4rem; line-height: 1; }
+    .hub-title { font-weight: 800; font-size: 1.5rem; color: #fff; letter-spacing: -.01em; }
+    .hub-sum { color: var(--muted); margin-top: auto; }
+    .hub-sum .n { font-size: 2.9rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; }
     .hub-sum .n.red { color: var(--red); } .hub-sum .n.amber { color: var(--amber); } .hub-sum .n.ok { color: var(--accent-2); } .hub-sum .n.na { color: var(--muted); }
-    .hub-sum .l { font-size: .82rem; margin-top: 2px; }
+    .hub-sum .l { font-size: 1rem; margin-top: 4px; }
     /* topic view header */
     .topic-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; flex-wrap: wrap; }
     .topic-head h2 { margin: 0; }
@@ -94,7 +91,6 @@
   </div>
   <div class="wrap">
     <h1>ניהול תפעולי רשת</h1>
-    <p class="sub">מסך הנהלה (מנהלת תפעול / מנכ״לית). מוצג רק מה שיש לו מקור נתונים אמיתי בלוגיסטיקה — מדד ללא מקור מסומן במפורש כ״לא זמין״, לעולם לא כאפס.</p>
     <div id="out"><p class="loading">טוען…</p></div>
   </div>
 

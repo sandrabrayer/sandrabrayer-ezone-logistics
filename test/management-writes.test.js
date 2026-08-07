@@ -71,7 +71,7 @@ test('EXEC-ONLY writes: ops_manager forwarded (200) with real token; field_ops &
   for (const f of forwarded) assert.equal(verifyToken(SECRET, f.token).role, 'ops_manager');
   forwarded.length = 0;
   const roy = (await login('רועי', CODE)).token;      // field_ops — NOT an exec
-  const rami = (await login('רמי', CODE)).token;             // maintenance
+  const rami = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' });             // maintenance
   for (const act of EXEC_ONLY) {
     assert.equal((await action(roy, act, { id: 'X' })).status, 403, `${act} field_ops must be 403`);
     assert.equal((await action(rami, act, { id: 'X' })).status, 403, `${act} maintenance must be 403`);
@@ -86,7 +86,7 @@ test('MANAGER-TIER readiness writes: field_ops IS allowed (forwarded); coordinat
   assert.equal(forwarded.length, READINESS.length, 'field_ops readiness writes reach Apps Script');
   forwarded.length = 0;
   const coord = signToken(SECRET, 7, { name: 'שירה', role: 'coordinator', scope: 'קיסריה עפרוני' }); // coordinators can't log in; mint to test the gate
-  const rami = (await login('רמי', CODE)).token;             // maintenance
+  const rami = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' });             // maintenance
   for (const act of READINESS) {
     assert.equal((await action(coord, act, { board: 'opening', id: 'X' })).status, 403, `${act} coordinator must be 403`);
     assert.equal((await action(rami, act, { board: 'opening', id: 'X' })).status, 403, `${act} maintenance must be 403`);
@@ -96,7 +96,7 @@ test('MANAGER-TIER readiness writes: field_ops IS allowed (forwarded); coordinat
 
 test('updatePreventiveItem: maintenance AND managers may write; coordinator → 403', async () => {
   forwarded.length = 0;
-  const rami = (await login('רמי', CODE)).token;             // maintenance lead
+  const rami = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' });             // maintenance lead
   const roy = (await login('רועי', CODE)).token;      // manager
   assert.equal((await action(rami, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'maintenance may write daily');
   assert.equal((await action(roy, 'updatePreventiveItem', { house: 'רמות השבים', item: 'מים', done: true })).status, 200, 'manager may write daily');

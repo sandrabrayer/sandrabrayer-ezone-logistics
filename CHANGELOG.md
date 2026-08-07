@@ -3,6 +3,34 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — three small UI/roster changes (management note removed, login = רועי+אולגה, bigger hub cards)
+
+**1. `/management` — data-source note removed.** Deleted the explanatory sub-line ("מוצג רק מה שיש לו מקור
+נתונים אמיתי בלוגיסטיקה — מדד ללא מקור מסומן במפורש כ״לא זמין״…"). No "לא זמין" placeholder cards render
+(the render path already returns "אין נתונים" per panel, never a "לא זמין" card), so nothing else was needed;
+the now-dead `.unavail` CSS was removed too. The hub cards themselves are unchanged.
+
+**2. Login dropdown = רועי + אולגה only (`LOGIN_ROLES` → field_ops + ops_manager).** This is JUST the
+login-roster filter — the **Users sheet is untouched** and **no token/role/scope logic changed**. Removed
+from login: **ceo (סנדרה)** and **maintenance (רמי/צחי)** (coordinators were already out). The picker
+(`loginRosterNames`) and the `DEFAULT_LOGIN_NAMES` fallback follow the filter.
+- **⚠ What this breaks for רמי/צחי:** every page requires a session token from login, so with maintenance
+  out of the roster **רמי/צחי can no longer log in at all** — they lose access to the whole app, **including
+  their #73 `/workorders` preventive-daily entry** (the maintenance leads' daily checklist). The `/workorders`
+  page, the `updatePreventiveItem` write gate (maintenance-allowed), and the `PreventiveDaily` sheet are all
+  **still in place and unchanged** — only the login door is closed. To restore them, add `'maintenance'` back
+  to the single `LOGIN_ROLES` set in `src/server.js` (one line); nothing else changes.
+
+**3. `/management` hub — bigger topic cards.** Larger cards (min column 230→**320px**, padding 18→**30px**,
+radius 16→**20px**, min-height **190px**, grid gap 14→**22px**), larger KPI numbers (1.7→**2.9rem**), titles
+(1.05→**1.5rem**) and icons (1.5→**2.4rem**), roomier line spacing, and a subtle hover lift. Still responsive
+— `auto-fit`/`minmax` reflows and the mobile breakpoint collapses to a single column.
+
+**Tests.** `login-roster.test.js` updated to the manager-only roster (picker = רועי+אולגה; ceo/maintenance/
+coordinators all fail closed; fallback synced to active field_ops+ops_manager seeds). `dashboard-approve` /
+`management-writes` now **mint** the maintenance token directly (רמי can't log in) to keep exercising the
+gateway gates. `node --test` green (**588 tests**).
+
 ## [Unreleased] — deploy provenance — /version on both legs, self-verifying deploys, commit-stamped SW cache
 
 **Why.** The app's failure history is **version mismatch** across three independent deploy legs (Railway
