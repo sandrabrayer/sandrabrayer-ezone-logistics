@@ -779,9 +779,12 @@ export async function requestHandler(req, res) {
     const headers = { 'Content-Type': asset.type };
     if (asset.noCache) headers['Cache-Control'] = 'no-cache';
     if (path === '/sw.js') {
-      // Stamp the running commit into the SW cache name so EVERY deploy changes it → the SW's activate()
-      // purges all prior caches → no returning visitor (or incognito first-load) is served a stale
-      // document after a deploy. sw.js is served no-cache, so the browser always re-reads this stamp.
+      // The SW script must NEVER be HTTP-cached — the browser has to re-fetch it on every check so a new
+      // deploy is detected promptly and wedged clients heal. (A cacheable /sw.js is the classic trap where
+      // the browser keeps the old worker for up to its max-age.) Stronger than plain no-cache.
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      // Stamp the running commit into the SW cache name so EVERY deploy changes it → new byte-content the
+      // browser detects → the SW's activate() purges all prior caches. No stale document after a deploy.
       body = Buffer.from(String(body).replace(/var CACHE = '[^']*';/, `var CACHE = 'ezone-logistics-${COMMIT}';`));
     }
     res.writeHead(200, headers);
