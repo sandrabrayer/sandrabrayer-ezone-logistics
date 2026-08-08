@@ -31,9 +31,12 @@ export const DIGEST_HOUSE_IDS = [
 ];
 
 // The OpenTickets tab columns, in order (append-only). Mirror of DIGEST_OPEN_HEADERS_ in
-// apps-script/digest.gs. daysOpen / overdue / blocked appended in increment 36. No financial fields.
+// apps-script/digest.gs. daysOpen / overdue / blocked appended in increment 36; category / urgency /
+// location_in_house appended after them (this change). No financial fields — the three new columns are
+// non-financial request facts, money-scrubbed like `title` before they are published.
 export const DIGEST_OPEN_HEADERS = [
   'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
+  'category', 'urgency', 'location_in_house',
 ];
 
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */
@@ -145,6 +148,48 @@ export function truncateTitle(text, maxLen) {
 /** The OpenTickets `title`: description, money-scrubbed, single line, <=80 chars. */
 export function formatTitle(description, maxLen) {
   return truncateTitle(scrubMoney(description), maxLen);
+}
+
+// ---- Scrubbed passthrough fields (category / urgency / location_in_house) ----
+// The three columns appended to OpenTickets are non-financial request facts. They go through the SAME
+// money scrubber as the title (the contract invariant: no price ever leaks into a readable field) and
+// are flattened to a single line, but they are NOT length-capped — category and urgency are short
+// controlled values and location_in_house is a short free-text hint. null / '' → ''.
+
+/** An OpenTickets passthrough field: money-scrubbed and single-lined, like `title` but uncapped. */
+export function scrubField(value) {
+  return scrubMoney(String(value == null ? '' : value).replace(/\s+/g, ' '));
+}
+
+// ---- OpenTickets row assembly ----
+// One place that fixes the OpenTickets column ORDER, so the frozen contract and the Apps Script writer
+// (apps-script/digest.gs buildOpenTicketRows_) can never drift. Pure: the writer resolves the house id,
+// dates and aging facts from the sheets and passes them in `ctx`; here we only lay them out + scrub the
+// request-derived text. Mirror of digestOpenTicketRow_ in apps-script/digest.gs.
+
+/**
+ * Build ONE OpenTickets row as a flat array in DIGEST_OPEN_HEADERS order.
+ * @param {object} req request row (reads .id, .description, .status, .category, .urgency, .location_in_house)
+ * @param {object} ctx sheet-resolved facts: { house, openedDate, updatedAt, daysOpen, overdue, blocked }
+ */
+export function openTicketRow(req, ctx) {
+  const r = req || {};
+  const c = ctx || {};
+  return [
+    c.house,
+    String(r.id == null ? '' : r.id),
+    formatTitle(r.description),
+    String(r.status == null ? '' : r.status),
+    c.openedDate,
+    c.updatedAt,
+    c.daysOpen == null ? '' : c.daysOpen,
+    c.overdue,
+    c.blocked,
+    // ---- APPENDED (this change): non-financial request facts, scrubbed like title ----
+    scrubField(r.category),
+    scrubField(r.urgency),
+    scrubField(r.location_in_house),
+  ];
 }
 
 // ---- Sunday week-start (Israeli week) ----

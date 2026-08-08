@@ -3,6 +3,45 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — contract — OpenTickets digest: append category / urgency / location_in_house
+
+**Why.** The coordinators app reads the read-only OpenTickets digest to triage Logistics tickets, but the
+digest carried only house / id / title / status / dates / aging — a coordinator could not tell a **תיקון**
+from a **החלפה**, a **חירום** from a **רגיל**, or *where in the house* the work is, without opening
+Logistics. These three request facts are non-financial and safe to publish.
+
+**What.** Three **append-only** columns are added at the END of the OpenTickets header, after the increment-36
+aging columns — the frozen-contract order is now:
+
+```
+1 house  2 ticketId  3 title  4 status  5 openedDate  6 updatedAt  7 daysOpen  8 overdue  9 blocked
+10 category  11 urgency  12 location_in_house
+```
+
+- `category` — `Requests.category` (רכישה / תיקון / החלפה)
+- `urgency` — `Requests.urgency` (רגיל / דחוף / חירום)
+- `location_in_house` — `Requests.location_in_house` (free-text hint)
+
+**Contract invariants held.** The nine existing columns are **byte-identical** and keep their exact
+positions (append-only — never reordered or removed; consumers read by header name). **No financial field
+is published** — the three values run through the **same money scrubber as `title`** (`scrubField`:
+money-scrubbed + single-lined, uncapped), so no price can leak into a readable field. `estimated_cost` /
+`actual_cost` / `due_at` / `blocked_reason` remain unpublished.
+
+**Where.** `src/digest.js` gains `scrubField` and a pure `openTicketRow` builder (mirror of the new
+`digestScrubField_` / `digestOpenTicketRow_` in `apps-script/digest.gs`); `buildOpenTicketRows_` now
+delegates row layout to `digestOpenTicketRow_`, populating the new columns from Requests data in
+`rebuildDigest`. `DIGEST-CONTRACT.md`'s OpenTickets schema is updated to document columns 10-12. Header
+arrays on both sides stay in lock-step.
+
+**Deploy.** Touches `apps-script/**`, so the post-merge clasp deploy + verify run fires and the version
+footer's `gs` SHA rolls to the new Apps Script commit.
+
+**Tests.** `test/digest.test.js`: the append is asserted after the existing nine (which stay byte-identical),
+the writer's header array is checked to mirror `src` exactly, `scrubField` scrubbing/single-lining/null
+handling is locked, and `openTicketRow` is verified for full 12-column layout, correct scrubbed values at
+10/11/12, byte-identical columns 1-9, and missing-field tolerance. Suite: 640 pass / 0 fail (was 630).
+
 ## [Unreleased] — UX/data — spinner coverage on the last write buttons, footer overlap fix, roster label correction
 
 Three small, independent fixes bundled into one change.

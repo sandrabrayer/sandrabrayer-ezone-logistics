@@ -22,17 +22,22 @@ SHARED with ezone-kitchen so all E-Zone apps key houses on one namespace; ids ap
 boundary only (Logistics keys on the Hebrew name internally).
 
 Tab OpenTickets — columns in this exact order:
-  1 house            house id
-  2 ticketId         Requests.id
-  3 title            Requests.description, single line, <=80 chars, scrubbed
-  4 status           Hebrew status, as stored
-  5 openedDate       YYYY-MM-DD, from Requests.created_at
-  6 updatedAt        ISO 8601 UTC, latest AuditLog row, fallback created_at
-  7 daysOpen         integer; created_at → now, or → completed_at once completed (increment 36)
-  8 overdue          boolean; due_at passed and not completed/closed/deferred (increment 36)
-  9 blocked          boolean; the manual block flag (increment 36)
+   1 house             house id
+   2 ticketId          Requests.id
+   3 title             Requests.description, single line, <=80 chars, scrubbed
+   4 status            Hebrew status, as stored
+   5 openedDate        YYYY-MM-DD, from Requests.created_at
+   6 updatedAt         ISO 8601 UTC, latest AuditLog row, fallback created_at
+   7 daysOpen          integer; created_at → now, or → completed_at once completed (increment 36)
+   8 overdue           boolean; due_at passed and not completed/closed/deferred (increment 36)
+   9 blocked           boolean; the manual block flag (increment 36)
+  10 category          Requests.category (רכישה / תיקון / החלפה), single line, scrubbed
+  11 urgency           Requests.urgency (רגיל / דחוף / חירום), single line, scrubbed
+  12 location_in_house Requests.location_in_house, single line, scrubbed
 Included when status is NOT 'סגור' and NOT 'לא מאושר'. Columns 7-9 are aging facts (non-financial);
-due_at itself and blocked_reason are NOT published.
+due_at itself and blocked_reason are NOT published. Columns 10-12 are non-financial request facts,
+APPENDED after the aging columns and money-scrubbed exactly like `title` (no price ever leaks); they
+are NOT length-capped. estimated_cost / actual_cost remain unpublished.
 
 Tab WeeklyCounts — columns in this exact order:
   1 house              house id
