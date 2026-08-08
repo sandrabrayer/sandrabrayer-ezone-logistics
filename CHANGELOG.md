@@ -3,6 +3,42 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Increment 3 · step 2b] — Dashboard action spinners + immediate board refresh
+
+**What:** Two UX guarantees on the Roy/Sandra board: an in-flight spinner on every action button,
+and an immediate board refresh after every status-change write.
+
+**Added**
+- `src/dashboard.html` — in-flight spinners on the action buttons (אישור, דחייה, דחה לתאריך,
+  הקצאה לביצוע, סמן כהושלם, סגור), following the login-button pattern (#79). When a POST is in
+  flight the triggering button is disabled and shows a spinner (`startSpinner`); on failure it is
+  re-enabled with its label restored so the coordinator can retry. On success the board re-renders
+  and the button is replaced wholesale, so no manual restore is needed. This also prevents
+  double-submits (a second click while the first transition is still writing).
+- `test/dashboard.test.js` — structural tests over the inline board script: spinner CSS/keyframes
+  present, every action button forwards its element to the handler, each wrapper accepts and passes
+  `btn` to `post`, `startSpinner` disables + spins + returns a restore, `post` spins on entry and
+  restores only on write failure, and the refresh-on-write wiring (below).
+
+**Changed**
+- `src/dashboard.html` — refresh timing verified and made robust. The board already refreshed
+  immediately on every status change (each write awaited a reload) — coordinators were never on a
+  schedule or a manual refresh. That reload path was split into `load()` (first paint: populate the
+  house filter once, then render) and `refresh()` (re-fetch requests + threshold and re-render).
+  Every status-change write now calls `refresh()`, which also fixes a latent bug in the old reload:
+  it re-appended the house-filter options on every action, duplicating them. `refresh()` no longer
+  touches the house filter, so the immediate refresh is clean and lighter (two GETs instead of
+  three).
+
+**Why:** Without the spinner a slow Apps Script POST looked unresponsive and invited double-clicks
+that fire the same transition twice. The refresh-timing task confirmed the board is live (not a
+scheduled/manual digest); the split makes that live refresh correct and removes the duplicate-filter
+side effect.
+
+**Deploy note:** frontend-only change (`src/dashboard.html`). No Apps Script redeploy required.
+
+---
+
 ## [Increment 3 · step 2] — Roy/Sandra dashboard (board + actions)
 
 **What:** The dashboard where Roy and Sandra see requests by status and act on them. Wires to the

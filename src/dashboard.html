@@ -71,6 +71,14 @@
     button.act.go:hover { background: var(--go-press); }
     button.act.danger { color: var(--red); border-color: rgba(224,88,74,.4); }
     button.act:disabled { opacity: .4; cursor: default; }
+    /* in-flight state: keep the button fully visible (spinner must read) while the POST runs */
+    button.act.busy, button.act.busy:disabled { opacity: 1; cursor: progress; }
+    .spinner {
+      display: inline-block; width: 12px; height: 12px; margin-inline-end: 6px; vertical-align: -2px;
+      border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+      animation: act-spin .6s linear infinite;
+    }
+    @keyframes act-spin { to { transform: rotate(360deg); } }
     .empty { color: var(--muted); font-size: .9rem; padding: 8px 2px; }
     .msg { padding: 11px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 16px; display: none; }
     .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
@@ -153,27 +161,36 @@
       return approver === 'רועי' || approver === 'sandra';
     }
 
+    // First paint: populate the house filter once, then fetch requests + threshold and render.
     async function load() {
       try {
-        const [reqRes, cfgRes, houseRes] = await Promise.all([
-          fetch(EXEC_URL + '?action=requests').then(r => r.json()),
-          fetch(EXEC_URL + '?action=config').then(r => r.json()),
-          fetch(EXEC_URL + '?action=houses').then(r => r.json()),
-        ]);
-        if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
-        allRequests = reqRes.data || [];
-        if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
-          threshold = Number(cfgRes.data.approval_threshold);
-        }
+        const houseRes = await fetch(EXEC_URL + '?action=houses').then(r => r.json());
         if (houseRes.ok) {
           const sel = document.getElementById('filterHouse');
           houseRes.data.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
         }
-        render();
+        await refresh();
       } catch (e) {
         board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';
         showMsg('err', 'לא ניתן לטעון את הדרישות.');
       }
+    }
+
+    // Re-fetch requests (+ threshold) and re-render the board and counters. Called on first load
+    // and after every status-change write, so coordinators see the new state immediately. It does
+    // NOT repopulate the house filter — that is built once in load(); re-adding it here would
+    // append duplicate options on every refresh.
+    async function refresh() {
+      const [reqRes, cfgRes] = await Promise.all([
+        fetch(EXEC_URL + '?action=requests').then(r => r.json()),
+        fetch(EXEC_URL + '?action=config').then(r => r.json()),
+      ]);
+      if (!reqRes.ok) throw new Error(reqRes.error || 'load failed');
+      allRequests = reqRes.data || [];
+      if (cfgRes.ok && cfgRes.data && cfgRes.data.approval_threshold != null) {
+        threshold = Number(cfgRes.data.approval_threshold);
+      }
+      render();
     }
 
     function filtered() {
@@ -227,37 +244,61 @@
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
         const allowed = canApprove(who(), r.estimated_cost, r.urgency);
         const needSandra = whoApproves(r.estimated_cost, r.urgency) === 'sandra';
-        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}')">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
-        btns.push(`<button class="act danger" onclick="doReject('${id}')">דחייה</button>`);
-        btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
+        btns.push(`<button class="act go" ${allowed ? '' : 'disabled'} onclick="doApprove('${id}', this)">אישור${needSandra && !allowed ? ' (סנדרה)' : ''}</button>`);
+        btns.push(`<button class="act danger" onclick="doReject('${id}', this)">דחייה</button>`);
+        btns.push(`<button class="act" onclick="doDefer('${id}', this)">דחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
-        btns.push(`<button class="act go" onclick="doAssign('${id}')">הקצאה לביצוע</button>`);
+        btns.push(`<button class="act go" onclick="doAssign('${id}', this)">הקצאה לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
-        btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+        btns.push(`<button class="act go" onclick="doComplete('${id}', this)">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
-        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}', this)">סגור</button>`);
       } else {
         btns.push('<span class="empty">—</span>');
       }
       return btns.join('');
     }
 
-    async function post(action, payload) {
+    // In-flight spinner for an action button — the login-button pattern (#79). Disables the button
+    // and swaps in a spinner while the POST runs; returns a restore() that re-enables it and puts
+    // the original label back (used only on failure — on success the board re-renders and the
+    // button is replaced wholesale, so there is nothing to restore).
+    function startSpinner(btn) {
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.classList.add('busy');
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + orig;
+      return () => { btn.disabled = false; btn.classList.remove('busy'); btn.innerHTML = orig; };
+    }
+
+    async function post(action, payload, btn) {
+      const restore = btn ? startSpinner(btn) : null;
       try {
         const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'שגיאה');
-        showMsg('ok', 'בוצע.');
-        await load();
-      } catch (e) { showMsg('err', 'הפעולה נכשלה: ' + e.message); }
+      } catch (e) {
+        // The write failed — restore the button so the coordinator can retry.
+        showMsg('err', 'הפעולה נכשלה: ' + e.message);
+        if (restore) restore();
+        return;
+      }
+      // Write succeeded — refresh the board immediately so the new status shows at once.
+      showMsg('ok', 'בוצע.');
+      try {
+        await refresh();
+      } catch (e) {
+        showMsg('err', 'הפעולה בוצעה, אך רענון הלוח נכשל. רענן/י ידנית.');
+        if (restore) restore();
+      }
     }
 
-    window.doApprove = (id) => post('approve', { id, by: who() });
-    window.doReject = (id) => { const reason = prompt('סיבת הדחייה:') || ''; post('reject', { id, by: who(), reason }); };
-    window.doDefer = (id) => { const d = prompt('דחה עד תאריך (YYYY-MM-DD):'); if (d) post('defer', { id, by: who(), deferred_until: d }); };
-    window.doAssign = (id) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }); };
-    window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
-    window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
+    window.doApprove = (id, btn) => post('approve', { id, by: who() }, btn);
+    window.doReject = (id, btn) => { const reason = prompt('סיבת הדחייה:') || ''; post('reject', { id, by: who(), reason }, btn); };
+    window.doDefer = (id, btn) => { const d = prompt('דחה עד תאריך (YYYY-MM-DD):'); if (d) post('defer', { id, by: who(), deferred_until: d }, btn); };
+    window.doAssign = (id, btn) => { const to = prompt('הקצה לאחראי (רמי / צחי / שם טכנאי חיצוני):'); if (to) post('assign', { id, by: who(), assigned_to: to, assignment_type: (to === 'רמי' || to === 'צחי') ? 'internal' : 'external' }, btn); };
+    window.doComplete = (id, btn) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }, btn); };
+    window.doSetStatus = (id, to, btn) => post('setStatus', { id, by: who(), to }, btn);
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
