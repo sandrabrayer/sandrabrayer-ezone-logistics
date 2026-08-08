@@ -35,6 +35,10 @@ jobs:
           # The public app URL. Override with a repo variable APP_URL if the host ever changes.
           APP_URL: ${{ vars.APP_URL || 'https://ezone-logistics.up.railway.app' }}
           EXPECTED_COMMIT: ${{ github.sha }}
+          # Optional: enable the authenticated-read leg (login + one authed pageData read). When both are
+          # set, smoke-live.js logs in as SMOKE_USER and FAILS the run on a bad login; unset → that leg SKIPs.
+          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_PIN: ${{ secrets.SMOKE_PIN }}
         run: |
           echo "Verifying ${APP_URL} serves ${EXPECTED_COMMIT} (Railway auto-deploys main; allowing time to propagate)…"
           attempt=0; max=20; delay=15; live=""
