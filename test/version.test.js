@@ -87,6 +87,21 @@ test('the injected shim renders a version footer that reads /version on every pa
   assert.ok(shim.includes("origFetch('/version')"), 'footer fetches /version');
 });
 
+test('the version footer and the sign-out button sit in OPPOSITE bottom corners (no overlap)', () => {
+  // Regression: the footer's own direction:ltr made inset-inline-end resolve to the SAME right edge as the
+  // sign-out button (RTL inset-inline-start), so the version text sat under the התנתקות button on some
+  // screens. The footer is now pinned to the physical left corner while sign-out stays at the RTL start.
+  const shim = mod.buildClientShim(['רועי']);
+  // Isolate each mounted control's inline style: the createElement('…style…','text/label') call.
+  const verStyle = shim.match(/'(position:fixed;bottom:12px;[^']*)'[^']*'…'/);
+  const outStyle = shim.match(/'(position:fixed;bottom:12px;[^']*)'[^']*'התנתקות'/);
+  assert.ok(verStyle, 'the version footer style is present');
+  assert.ok(outStyle, 'the sign-out button style is present');
+  assert.ok(/(^|;)left:12px(;|$)/.test(verStyle[1]), 'the footer is anchored to the physical left edge');
+  assert.ok(!/inset-inline-end/.test(verStyle[1]), 'the footer no longer uses inset-inline-end (which collided with sign-out)');
+  assert.ok(/inset-inline-start:12px/.test(outStyle[1]), 'sign-out stays at the RTL inline-start (right edge) — layout untouched');
+});
+
 test('a served HTML page carries the version footer (injected shim)', async () => {
   const html = await (await fetch(`${base}/`)).text();
   assert.ok(html.includes('ezone-ver') && html.includes("origFetch('/version')"), 'the / page must include the version footer');

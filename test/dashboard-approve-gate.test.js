@@ -101,7 +101,7 @@ test('exec (ceo) may approve BOTH tiers, and only execs see the delete button', 
   const h = ceo.board.innerHTML;
   assert.ok(/doApprove\('R-LOW'/.test(h) && /doApprove\('R-HIGH'/.test(h), 'ceo approves any amount');
   assert.ok(!/ממתין לאישור אולגה/.test(h), 'no pending-Olga label for an exec');
-  assert.ok(/doDelete\('R-HIGH'\)/.test(h), 'exec sees the delete button');
+  assert.ok(/doDelete\('R-HIGH', this\)/.test(h), 'exec sees the delete button');
 
   const roy = renderDashboard('field_ops', [req('R-LOW', 500)]);
   await flush();

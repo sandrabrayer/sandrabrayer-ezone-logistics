@@ -131,9 +131,12 @@
     // Logistics owns ONLY טואלטיקה + חומרי ניקוי (food is owned by ezone-kitchen).
     const CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'];
     const COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
+    // Only the four houses with a seeded coordinator are listed. The pre-opening houses (שדה אליעזר,
+    // רעננה הפרדס) have no coordinator yet → blank in the רכז/ת column. צחי is a maintenance lead, not a
+    // coordinator, so he is intentionally absent here (kept in sync with INVENTORY_HOUSE_COORDINATORS).
     const HOUSE_COORDINATORS = {
       'קיסריה עפרוני': 'שירה', 'קיסריה ריהאב': 'יעקב', 'רעננה אשר': 'אורן',
-      'רמות השבים': 'אביב', 'שדה אליעזר': 'צחי',
+      'רמות השבים': 'אביב',
     };
     const WEEK_CHOICES = 12;               // how many recent Sundays to offer in the week picker
     // Quantity picker options — the SAME for every item (nothing per-row); "אחר" reveals a free input.

@@ -352,20 +352,22 @@ export const SEED_CHECKLIST_ITEMS = [
 export const INVENTORY_CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'];
 
 // Who may submit a weekly count (increment 26): the house COORDINATORS, not the maintenance
-// leads. Each open/pre-opening house has a coordinator; רועי is the cross-house backstop and
-// רמי/צחי stay accepted as a maintenance-lead backstop (צחי is also קיסריה/צפון's coordinator).
+// leads. רועי is the cross-house backstop and רמי/צחי stay accepted as a maintenance-lead backstop
+// (they are NOT coordinators — see the map below; they cover any house that has none yet).
 export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
 
 // House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
 // people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (קיסריה ריהאב) · אורן (רעננה אשר) ·
-// אביב (רמות השבים) · צחי (שדה אליעזר). רועי covers anything unmapped (backstop, incl. רעננה הפרדס).
+// אביב (רמות השבים). Only these four houses have a seeded coordinator (see SEED_USERS). The two
+// pre-opening houses — שדה אליעזר and רעננה הפרדס — have NO coordinator yet, so they are intentionally
+// absent here and render blank in the רכז/ת column. צחי is a MAINTENANCE lead (role: maintenance), not
+// a coordinator, so he must never appear here. רועי covers anything unmapped as the backstop counter.
 // Keys are the CANONICAL house display names (HOUSE-IDS.md) — kept in sync with SEED_HOUSES.
 export const INVENTORY_HOUSE_COORDINATORS = {
   'קיסריה עפרוני': 'שירה',
   'קיסריה ריהאב': 'יעקב',
   'רעננה אשר': 'אורן',
   'רמות השבים': 'אביב',
-  'שדה אליעזר': 'צחי',
 };
 
 // The closed set of base units (increment 33) — SHARED with ezone-kitchen. An item whose base_unit

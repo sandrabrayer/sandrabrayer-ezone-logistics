@@ -473,7 +473,7 @@
         return `<div style="margin-bottom:12px">
           <div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(b.trade)} · ${clusterHe[b.cluster] || escapeHtml(b.cluster)} <span class="pill normal">${b.reqs.length} עבודות</span></div>
           ${rows}
-          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)})'>הקצה כביקור מרוכז</button>
+          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)}, this)'>הקצה כביקור מרוכז</button>
         </div>`;
       }).join('');
       return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box">
@@ -482,9 +482,9 @@
         ${blocks}
       </div>`;
     }
-    window.doAssignBatch = (ids, trade) => {
+    window.doAssignBatch = (ids, trade, btn) => {
       if (!confirm(`להקצות ${ids.length} עבודות כביקור מרוכז אחד (${trade})?`)) return;
-      post('assignBatch', { ids, by: who(), trade });
+      post('assignBatch', { ids, by: who(), trade }, btn);
     };
 
     function renderHouseConsolidation() {
@@ -515,7 +515,7 @@
           <div class="attn-item" style="justify-content:space-between">
             <span>${it.location ? '<b>' + escapeHtml(it.location) + ':</b> ' : ''}${escapeHtml(it.text)}
               <span class="pill urgent">${escapeHtml(it.category)}</span>${it.count > 1 ? ' <span class="pill normal">×' + it.count + '</span>' : ''}</span>
-            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}')">פתח דרישה</button>
+            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}', this)">פתח דרישה</button>
           </div>`).join('');
         return `<div style="margin-bottom:14px"><div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(house)}</div>${rows}</div>`;
       }).join('');
@@ -578,15 +578,15 @@
       } else if (s === ST.APPROVED) {
         btns.push(`<button class="act go" onclick="doAssign('${id}')">הועבר לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
-        btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+        btns.push(`<button class="act go" onclick="doComplete('${id}', this)">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
-        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}', this)">סגור</button>`);
       } else {
         btns.push('<span class="empty">—</span>');
       }
       // Edit only before approval; delete always available to Roy/Sandra.
       if ([ST.REQUEST, ST.PENDING].includes(s)) {
-        btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
+        btns.push(`<button class="act" onclick="doEdit('${id}', this)">עריכה</button>`);
       }
       // Block / unblock (increment 36) — manager tier only, on still-open requests. The server
       // enforces canBlock regardless of what the UI shows.
@@ -598,7 +598,7 @@
       // Delete is destructive and EXEC-ONLY (ops_manager / ceo), mirroring Code.gs handleDeleteRequest_
       // (isManagement_). field_ops/tier-B never see it — no delete button that would 403.
       if (isExecUI()) {
-        btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
+        btns.push(`<button class="act danger" onclick="doDelete('${id}', this)">מחיקה</button>`);
       }
       return btns.join('');
     }
@@ -755,17 +755,17 @@
       }
       referModal.classList.remove('open'); _referId = null;
     });
-    window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
-    window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
-    window.doConfirmFinding = (fid) => post('confirmFinding', { finding_id: fid, by: who() });
-    window.doDelete = (id) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }); };
-    window.doEdit = (id) => {
+    window.doComplete = (id, btn) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }, btn); };
+    window.doSetStatus = (id, to, btn) => post('setStatus', { id, by: who(), to }, btn);
+    window.doConfirmFinding = (fid, btn) => post('confirmFinding', { finding_id: fid, by: who() }, btn);
+    window.doDelete = (id, btn) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }, btn); };
+    window.doEdit = (id, btn) => {
       const r = allRequests.find(x => String(x.id) === String(id));
       if (!r) return;
       const description = prompt('תיאור:', r.description || ''); if (description === null) return;
       const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
       const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
-      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost });
+      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost }, btn);
     };
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -789,7 +789,8 @@
       createModal.classList.add('open');
     });
     document.getElementById('crCancel').addEventListener('click', () => createModal.classList.remove('open'));
-    document.getElementById('crConfirm').addEventListener('click', () => {
+    const crConfirmBtn = document.getElementById('crConfirm');
+    crConfirmBtn.addEventListener('click', async () => {
       const house = document.getElementById('crHouse').value;
       const category = document.getElementById('crCategory').value;
       const urgency = document.getElementById('crUrgency').value;
@@ -798,8 +799,10 @@
       if (!house) return showMsg('err', 'יש לבחור בית.');
       if (!category) return showMsg('err', 'יש לבחור קטגוריה.');
       if (!urgency) return showMsg('err', 'יש לבחור דחיפות.');
+      // The confirm button ("שליחת דרישה") spins while the createRequest POST is on the wire; the modal stays open
+      // until it resolves so a failed create keeps the entered values in place for a retry.
+      await post('createRequest', { house, category, urgency, description, location_in_house }, crConfirmBtn);
       createModal.classList.remove('open');
-      post('createRequest', { house, category, urgency, description, location_in_house });
     });
 
     load();
