@@ -90,16 +90,16 @@ test('field_ops: over-threshold request shows a DISABLED "ממתין לאישו�
   const html = ctx.board.innerHTML;
   assert.ok(/ממתין לאישור אולגה/.test(html), 'over-threshold shows the pending-Olga label');
   assert.ok(/disabled[^>]*ממתין לאישור אולגה|ממתין לאישור אולגה/.test(html) && /disabled/.test(html), 'the label button is disabled');
-  assert.ok(/doApprove\('R-LOW'\)/.test(html), 'the ≤threshold request keeps a real אישור button');
-  assert.ok(!/doApprove\('R-HIGH'\)/.test(html), 'the over-threshold request has NO clickable approve');
-  assert.ok(!/doApprove\('R-HIGH'\)|doReject\('R-HIGH'\)/.test(html), 'no approve/reject 403-bait for the over-threshold request');
+  assert.ok(/doApprove\('R-LOW'/.test(html), 'the ≤threshold request keeps a real אישור button');
+  assert.ok(!/doApprove\('R-HIGH'/.test(html), 'the over-threshold request has NO clickable approve');
+  assert.ok(!/doApprove\('R-HIGH'|doReject\('R-HIGH'/.test(html), 'no approve/reject 403-bait for the over-threshold request');
 });
 
 test('exec (ceo) may approve BOTH tiers, and only execs see the delete button', async () => {
   const ceo = renderDashboard('ceo', [req('R-LOW', 500), req('R-HIGH', 9000)]);
   await flush();
   const h = ceo.board.innerHTML;
-  assert.ok(/doApprove\('R-LOW'\)/.test(h) && /doApprove\('R-HIGH'\)/.test(h), 'ceo approves any amount');
+  assert.ok(/doApprove\('R-LOW'/.test(h) && /doApprove\('R-HIGH'/.test(h), 'ceo approves any amount');
   assert.ok(!/ממתין לאישור אולגה/.test(h), 'no pending-Olga label for an exec');
   assert.ok(/doDelete\('R-HIGH'\)/.test(h), 'exec sees the delete button');
 

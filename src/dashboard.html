@@ -82,6 +82,11 @@
     button.act.go:hover { background: var(--go-press); }
     button.act.danger { color: var(--red); border-color: rgba(224,88,74,.4); }
     button.act:disabled { opacity: .4; cursor: default; }
+    /* In-flight spinner shown INSIDE an action button while its POST is on the wire (mirrors the login
+       button's setLoading, #79). currentColor tints the spinner to match each button variant (go/danger). */
+    @keyframes ezspin { to { transform: rotate(360deg); } }
+    .act-spin { display: inline-block; width: 14px; height: 14px; box-sizing: border-box; border: 2px solid rgba(255,255,255,.28); border-top-color: currentColor; border-radius: 50%; animation: ezspin .6s linear infinite; vertical-align: middle; }
+    button.act[aria-busy="true"] { opacity: .9; cursor: default; }
     .empty { color: var(--muted); font-size: .9rem; padding: 8px 2px; }
     .msg { padding: 11px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 16px; display: none; }
     .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
@@ -562,8 +567,8 @@
       const btns = [];
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
         if (canApproveUI(r)) {
-          btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
-          btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
+          btns.push(`<button class="act go" onclick="doApprove('${id}', this)">אישור</button>`);
+          btns.push(`<button class="act danger" onclick="doReject('${id}', this)">לא אושר</button>`);
         } else {
           // Over the approval threshold and this session may not approve it (field_ops → routed to Olga).
           // Show a clear, NON-clickable status instead of a button that would 403 on click.
@@ -587,8 +592,8 @@
       // enforces canBlock regardless of what the UI shows.
       if (canBlockUI() && ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(s)) {
         btns.push(isBlockedUI(r)
-          ? `<button class="act" onclick="doUnblock('${id}')">בטל חסימה</button>`
-          : `<button class="act" onclick="doBlock('${id}')">חסום</button>`);
+          ? `<button class="act" onclick="doUnblock('${id}', this)">בטל חסימה</button>`
+          : `<button class="act" title="בקשה שאינה יכולה להתקדם — ממתינה לחלק/ספק/גישה" onclick="doBlock('${id}', this)">תקוע</button>`);
       }
       // Delete is destructive and EXEC-ONLY (ops_manager / ceo), mirroring Code.gs handleDeleteRequest_
       // (isManagement_). field_ops/tier-B never see it — no delete button that would 403.
@@ -598,7 +603,34 @@
       return btns.join('');
     }
 
-    async function post(action, payload) {
+    // In-flight state for an action button: disable it and show a spinner INSIDE it while its POST is on the
+    // wire, mirroring the login button's setLoading (#79). setActLoading(btn,false) restores the label and
+    // re-enables. Assigning textContent clears the spinner child (same trick as the login shim). aria-busy
+    // doubles as the busy flag so a stray re-entry can't stack a second spinner or double-submit.
+    function setActLoading(btn, on) {
+      if (!btn) return;
+      if (on) {
+        if (btn.getAttribute('aria-busy') === 'true') return; // already in flight — guard a double-submit
+        btn._label = btn.textContent;
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.textContent = '';
+        const sp = document.createElement('span');
+        sp.className = 'act-spin';
+        sp.setAttribute('aria-hidden', 'true');
+        btn.appendChild(sp);
+      } else {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = btn._label != null ? btn._label : btn.textContent;
+      }
+    }
+
+    async function post(action, payload, btn) {
+      // btn (optional): the button that triggered this write. It spins + disables while the request is on the
+      // wire. On success load() re-renders the list (the button is replaced, so the finally-restore lands on a
+      // detached node — no dead moment); on failure the button is restored in place so the user can retry.
+      if (btn) setActLoading(btn, true);
       try {
         const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: window.__STAFF_TOKEN__ || '' }) });
         const json = await res.json();
@@ -611,14 +643,16 @@
         // role may not take (approve above threshold, delete), so this is a defensive fallback.
         const raw = String((e && e.message) || '');
         showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+      } finally {
+        if (btn) setActLoading(btn, false);
       }
     }
 
-    window.doApprove = (id) => post('approve', { id, by: who() });
-    window.doReject = (id) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }); };
-    // Block requires a reason (server also enforces); unblock clears it.
-    window.doBlock = (id) => { const reason = (prompt('סיבת החסימה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }); };
-    window.doUnblock = (id) => { if (!confirm('לבטל את החסימה?')) return; post('setBlocked', { id, blocked: false }); };
+    window.doApprove = (id, btn) => post('approve', { id, by: who() }, btn);
+    window.doReject = (id, btn) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }, btn); };
+    // Block ("תקוע") requires a reason (server also enforces); unblock clears it.
+    window.doBlock = (id, btn) => { const reason = (prompt('סיבת החסימה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }, btn); };
+    window.doUnblock = (id, btn) => { if (!confirm('לבטל את החסימה?')) return; post('setBlocked', { id, blocked: false }, btn); };
 
     // Deferral via calendar modal + reminder N days before (default 7).
     let _deferId = null;
@@ -651,10 +685,13 @@
       deferModal.classList.add('open');
     };
     document.getElementById('deferCancel').addEventListener('click', () => { deferModal.classList.remove('open'); _deferId = null; });
-    document.getElementById('deferConfirm').addEventListener('click', () => {
+    const deferConfirmBtn = document.getElementById('deferConfirm');
+    deferConfirmBtn.addEventListener('click', async () => {
       if (!_deferId || !deferDate.value) { deferModal.classList.remove('open'); return; }
       const remind_days = Number(deferRemind.value) || 0;
-      post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) });
+      // Keep the modal open with the confirm button spinning while the defer POST is on the wire; close once
+      // it resolves so the "דחה לתאריך" action shows the same in-flight state as the inline buttons.
+      await post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) }, deferConfirmBtn);
       deferModal.classList.remove('open'); _deferId = null;
     });
     const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
@@ -701,17 +738,20 @@
       referModal.classList.add('open');
     };
     document.getElementById('referCancel').addEventListener('click', () => { referModal.classList.remove('open'); _referId = null; });
-    document.getElementById('referConfirm').addEventListener('click', () => {
+    const referConfirmBtn = document.getElementById('referConfirm');
+    referConfirmBtn.addEventListener('click', async () => {
       if (!_referId) { referModal.classList.remove('open'); return; }
       const id = _referId;
+      // The confirm button ("העבר") spins while the "הועבר לביצוע" POST is on the wire; the modal stays open
+      // until it resolves, then closes. A failed transfer is validated BEFORE any spinner starts.
       if (referType() === 'internal') {
         const lead = referLeadSel.value;
         if (!lead) { showMsg('err', 'בחר/י אחראי.'); return; }
-        post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' });
+        await post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' }, referConfirmBtn);
       } else {
         const trade = referTradeSel.value;
-        if (document.getElementById('referMarkOnly').checked) post('markExternal', { id, by: who(), trade });
-        else post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade });
+        if (document.getElementById('referMarkOnly').checked) await post('markExternal', { id, by: who(), trade }, referConfirmBtn);
+        else await post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade }, referConfirmBtn);
       }
       referModal.classList.remove('open'); _referId = null;
     });
