@@ -26,9 +26,11 @@ var DIGEST_TAB_WEEKLY_ = 'WeeklyCounts';
 var DIGEST_WEEKS_ = 8;
 
 // Header rows — EXACT order, append-only (see contract). Consumers read by header name.
-// daysOpen / overdue / blocked APPENDED (increment 36) — never reorder/remove (consumers read by
-// header name). No financial fields. Mirror of DIGEST_OPEN_HEADERS in src/digest.js.
-var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked'];
+// daysOpen / overdue / blocked APPENDED (increment 36); category / urgency / location_in_house APPENDED
+// after them (this change) — never reorder/remove (consumers read by header name). No financial fields:
+// the three new columns are non-financial request facts, money-scrubbed like `title`. Mirror of
+// DIGEST_OPEN_HEADERS in src/digest.js.
+var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked', 'category', 'urgency', 'location_in_house'];
 var DIGEST_WEEKLY_HEADERS_ = ['house', 'weekStart', 'status', 'shortagesSummary', 'updatedAt'];
 
 // Weekly-count status vocabulary (Hebrew display values are the stored values).
@@ -148,6 +150,14 @@ function digestTruncateTitle_(text, maxLen) {
 /** OpenTickets `title`: description, money-scrubbed, single line, <=80 chars. */
 function digestFormatTitle_(description) {
   return digestTruncateTitle_(digestScrubMoney_(description), DIGEST_TITLE_MAX_);
+}
+
+// The category / urgency / location_in_house columns (this change) are non-financial request facts.
+// They go through the SAME money scrubber as the title and are flattened to a single line, but are NOT
+// length-capped (short controlled values / a short free-text hint). Mirror of scrubField in src/digest.js.
+/** An OpenTickets passthrough field: money-scrubbed and single-lined, like `title` but uncapped. */
+function digestScrubField_(value) {
+  return digestScrubMoney_(String(value == null ? '' : value).replace(/\s+/g, ' '));
 }
 
 function digestWeekStart_(date) {
@@ -305,19 +315,43 @@ function buildOpenTicketRows_() {
     // Aging facts for the coordinators app (increment 36) — non-financial. ticketAging is the shared
     // SLA logic (defined in Code.gs, same Apps Script project).
     var aging = ticketAging(req, now);
-    rows.push([
-      house,
-      id,
-      digestFormatTitle_(req.description),
-      String(req.status == null ? '' : req.status),
-      digestDateOnly_(req.created_at),
-      updatedAt,
-      aging.days_open == null ? '' : aging.days_open,
-      aging.overdue,
-      aging.blocked,
-    ]);
+    // digestOpenTicketRow_ fixes the column order (mirror of openTicketRow in src/digest.js); we pass
+    // the sheet-resolved facts and it lays out + scrubs the request-derived text (title + the three
+    // appended non-financial columns).
+    rows.push(digestOpenTicketRow_(req, {
+      house: house,
+      openedDate: digestDateOnly_(req.created_at),
+      updatedAt: updatedAt,
+      daysOpen: aging.days_open,
+      overdue: aging.overdue,
+      blocked: aging.blocked,
+    }));
   });
   return rows;
+}
+
+/**
+ * Build ONE OpenTickets row as a flat array in DIGEST_OPEN_HEADERS_ order. Pure (no sheet access):
+ * the caller resolves house/dates/aging into `ctx`. Mirror of openTicketRow in src/digest.js.
+ */
+function digestOpenTicketRow_(req, ctx) {
+  var r = req || {};
+  var c = ctx || {};
+  return [
+    c.house,
+    String(r.id == null ? '' : r.id),
+    digestFormatTitle_(r.description),
+    String(r.status == null ? '' : r.status),
+    c.openedDate,
+    c.updatedAt,
+    c.daysOpen == null ? '' : c.daysOpen,
+    c.overdue,
+    c.blocked,
+    // ---- APPENDED (this change): non-financial request facts, scrubbed like title ----
+    digestScrubField_(r.category),
+    digestScrubField_(r.urgency),
+    digestScrubField_(r.location_in_house),
+  ];
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   scrubMoney, truncateTitle, formatTitle, TITLE_MAX,
   weekStart, recentWeekStarts,
   isShortage, shortageLabel, buildWeeklyGrid,
-  DIGEST_OPEN_HEADERS,
+  DIGEST_OPEN_HEADERS, scrubField, openTicketRow,
 } from '../src/digest.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -31,15 +31,31 @@ test('NO financial/budget columns in any digest tab (OpenTickets + WeeklyCounts)
   }
 });
 
-// ---- OpenTickets columns (increment 36: aging appended) ----
+// ---- OpenTickets columns (increment 36: aging appended; this change: category/urgency/location) ----
 
 test('OpenTickets carries daysOpen / overdue / blocked, appended after the original six', () => {
-  assert.deepEqual(DIGEST_OPEN_HEADERS, [
-    'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
-  ]);
-  // The original six keep their positions; the three aging columns are appended last.
+  // The original six keep their positions; the three aging columns follow them (positions 7-9).
   assert.deepEqual(DIGEST_OPEN_HEADERS.slice(0, 6),
     ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt']);
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(6, 9), ['daysOpen', 'overdue', 'blocked']);
+});
+
+test('OpenTickets appends category / urgency / location_in_house AFTER the existing nine columns', () => {
+  // Append-only contract: the nine existing columns are byte-identical and keep their exact positions;
+  // the three new non-financial request facts are added strictly at the end, in this order.
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(0, 9), [
+    'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
+  ]);
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(9), ['category', 'urgency', 'location_in_house']);
+  assert.equal(DIGEST_OPEN_HEADERS.length, 12);
+});
+
+test('the Apps Script writer header array mirrors src exactly (byte-for-byte, same order)', () => {
+  const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
+  const m = gs.match(/DIGEST_OPEN_HEADERS_\s*=\s*\[([^\]]*)\]/);
+  assert.ok(m, 'DIGEST_OPEN_HEADERS_ found in digest.gs');
+  const gsHeaders = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, ''));
+  assert.deepEqual(gsHeaders, DIGEST_OPEN_HEADERS, 'the writer and src header lists must not drift');
 });
 
 // ---- house-id map (increment 33: all six houses, canonical names) ----
@@ -234,4 +250,105 @@ test('recentWeekStarts returns n Sundays, most-recent first', () => {
 test('recentWeekStarts edge cases', () => {
   assert.deepEqual(recentWeekStarts('2026-07-25', 0), []);
   assert.deepEqual(recentWeekStarts('bad', 8), []);
+});
+
+// ---- scrubField: the appended category / urgency / location columns ----
+
+test('scrubField money-scrubs and single-lines, like title but uncapped', () => {
+  // Money is stripped exactly as in title (the contract invariant — no price leaks into a readable field).
+  assert.equal(scrubField('החלפה 3000 ₪'), 'החלפה');
+  assert.equal(scrubField('ליד המקרר 250 שח'), 'ליד המקרר');
+  // Newlines / runs of whitespace collapse to a single line, but no 80-char cap is applied.
+  assert.equal(scrubField('קומה 2\nליד המעלית'), 'קומה 2 ליד המעלית');
+  assert.equal(scrubField('  דחוף   '), 'דחוף');
+  const long = 'א'.repeat(120);
+  assert.equal(scrubField(long), long, 'passthrough fields are NOT length-capped');
+});
+
+test('scrubField normalises null / undefined / empty to an empty string', () => {
+  assert.equal(scrubField(null), '');
+  assert.equal(scrubField(undefined), '');
+  assert.equal(scrubField(''), '');
+});
+
+test('scrubField leaves bare counts (no currency marker) untouched — they are quantities, not prices', () => {
+  assert.equal(scrubField('חדר 3'), 'חדר 3');
+  assert.equal(scrubField('רגיל'), 'רגיל');
+});
+
+// ---- openTicketRow: full-row layout, values, and append-only correctness ----
+
+const SAMPLE_REQ = {
+  id: 'R-42',
+  description: 'נזילה מתחת לכיור 500 ₪',
+  status: 'מאושר',
+  category: 'תיקון',
+  urgency: 'דחוף',
+  location_in_house: 'מטבח — ליד\nהכיור 250 שח',
+};
+const SAMPLE_CTX = {
+  house: 'pardes',
+  openedDate: '2026-08-01',
+  updatedAt: '2026-08-05T09:00:00.000Z',
+  daysOpen: 7,
+  overdue: false,
+  blocked: false,
+};
+
+test('openTicketRow lays out all twelve columns in DIGEST_OPEN_HEADERS order', () => {
+  const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
+  assert.equal(row.length, DIGEST_OPEN_HEADERS.length, 'one cell per header');
+  assert.deepEqual(row, [
+    'pardes', 'R-42', 'נזילה מתחת לכיור', 'מאושר', '2026-08-01', '2026-08-05T09:00:00.000Z',
+    7, false, false,
+    'תיקון', 'דחוף', 'מטבח — ליד הכיור',
+  ]);
+});
+
+test('openTicketRow: the appended columns carry the scrubbed request facts at 10/11/12', () => {
+  const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
+  const at = (name) => row[DIGEST_OPEN_HEADERS.indexOf(name)];
+  assert.equal(at('category'), 'תיקון');
+  assert.equal(at('urgency'), 'דחוף');
+  // Money scrubbed AND single-lined (250 שח removed, newline collapsed).
+  assert.equal(at('location_in_house'), 'מטבח — ליד הכיור');
+});
+
+test('openTicketRow: the existing nine columns are byte-identical to the legacy assembly', () => {
+  // Guards existing consumers: adding the three columns must not perturb columns 1-9 for any input.
+  const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
+  const legacyFirstNine = [
+    SAMPLE_CTX.house,
+    String(SAMPLE_REQ.id),
+    formatTitle(SAMPLE_REQ.description),
+    String(SAMPLE_REQ.status),
+    SAMPLE_CTX.openedDate,
+    SAMPLE_CTX.updatedAt,
+    SAMPLE_CTX.daysOpen,
+    SAMPLE_CTX.overdue,
+    SAMPLE_CTX.blocked,
+  ];
+  assert.deepEqual(row.slice(0, 9), legacyFirstNine);
+  // title still money-scrubbed + capped exactly as before.
+  assert.equal(row[2], 'נזילה מתחת לכיור');
+});
+
+test('openTicketRow tolerates missing fields — blanks, never a thrown error or a leaked undefined', () => {
+  const row = openTicketRow({ id: 'R-1', status: 'דרישה' }, { house: 'sde-eliezer' });
+  assert.equal(row.length, 12);
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('category')], '');
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('urgency')], '');
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('location_in_house')], '');
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('daysOpen')], '');   // null daysOpen → '' (unchanged rule)
+  assert.equal(row[1], 'R-1');
+});
+
+test('the Apps Script writer builds rows via digestOpenTicketRow_ and appends the three scrubbed fields', () => {
+  // Source-level mirror check: the writer delegates row layout to digestOpenTicketRow_ and that builder
+  // scrubs category / urgency / location_in_house (so the .gs path matches the tested pure openTicketRow).
+  const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
+  assert.ok(/rows\.push\(digestOpenTicketRow_\(req,/.test(gs), 'buildOpenTicketRows_ delegates to digestOpenTicketRow_');
+  assert.ok(/digestScrubField_\(r\.category\)/.test(gs), 'category is scrubbed');
+  assert.ok(/digestScrubField_\(r\.urgency\)/.test(gs), 'urgency is scrubbed');
+  assert.ok(/digestScrubField_\(r\.location_in_house\)/.test(gs), 'location_in_house is scrubbed');
 });
