@@ -3,6 +3,45 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX — dashboard action buttons: in-flight spinners + חסום→תקוע rename
+
+**Why.** A manager who taps אישור / הועבר לביצוע / דחה לתאריך on a slow Apps Script POST got no
+feedback — the button looked dead and invited a second tap that fired the same transition twice. This
+brings the dashboard action buttons to the same in-flight treatment as the **#79 login button**
+(`src/server.js` `setLoading`): disabled + spinner while the write runs, restored on failure.
+
+**Task 1 — in-flight spinners (`src/dashboard.html`).**
+- New `setBtnLoading(btn)` mirrors the login `setLoading`: it disables the button, sets `aria-busy`,
+  and swaps in a spinner (`.act-spin` + `@keyframes act-spin`) while the POST is in flight. A `.busy`
+  rule keeps the button at full opacity (not dimmed by `:disabled`) so the spinner reads.
+- `post(action, payload, btn)` now drives that spinner and **returns success/failure**. On failure the
+  button is restored so the coordinator can retry; on success the board reloads (`load()`), so card
+  buttons are replaced wholesale and the restore is a harmless no-op. The disabled state also blocks
+  double-submits.
+- Every action button forwards its element (`onclick="doApprove('…', this)"`, etc.): the named five
+  (**אישור, לא אושר, הועבר לביצוע, תקוע, דחה לתאריך**) plus the siblings on the same `post()` path
+  (סמן כהושלם, סגור, עריכה, מחיקה, בטל תקיעה, פתח דרישה, הקצה כביקור מרוכז) — uniform feedback.
+- The three **modal confirms** (defer, "העברה ל" / assign, in-dashboard create) spin their own confirm
+  button while the POST runs and now **dismiss only on success** — on failure the modal stays open with
+  the error, button restored. Previously they closed optimistically before the write resolved.
+
+**Task 2 — rename חסום → תקוע (`src/dashboard.html`).** The block button is relabelled **תקוע**
+("stuck") with a tooltip — *דרישה שאינה יכולה להתקדם — ממתינה לחלק, לספק או לגישה* — which describes what
+it actually marks: a request that cannot proceed while it waits on a part, a supplier, or access. The
+paired unblock label becomes **בטל תקיעה** and the on-card badge reads **⛔ תקוע**. This is label-only:
+the data field, the audit action, and the server gate stay `blocked` / `setBlocked` (contract unchanged).
+
+**Tests (`test/`).** `dashboard-spinner.test.js` renders the real `dashboard.html` in a DOM sandbox and
+drives an action through `post()`: asserts the button is disabled + spinning + `aria-busy` while the
+write is in flight, restored on failure, restored after a successful reload, and that `post()` reports
+true/false so modal confirms gate their close. Static guards cover the תקוע rename + tooltip, that every
+action button forwards `this`, and the modal-confirm wiring. `dashboard-approve-gate.test.js` updated for
+the new `', this)'` call form. Suite: **622 pass / 0 fail**.
+
+**Deploy note.** Frontend-only (`src/dashboard.html`). No Apps Script redeploy required.
+
+---
+
 ## [Unreleased] — feature — secured server-to-server request intake; coordinator surfaces stripped
 
 **Why.** Coordinators no longer live in Logistics — they file requests from the separate

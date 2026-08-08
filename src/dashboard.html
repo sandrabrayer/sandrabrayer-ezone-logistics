@@ -82,6 +82,11 @@
     button.act.go:hover { background: var(--go-press); }
     button.act.danger { color: var(--red); border-color: rgba(224,88,74,.4); }
     button.act:disabled { opacity: .4; cursor: default; }
+    /* in-flight state — same pattern as the #79 login button (server.js setLoading): keep the
+       button readable (not dimmed) while its POST runs so the spinner reads clearly. */
+    button.act.busy, button.act.busy:disabled { opacity: 1; cursor: default; }
+    .act-spin { display: inline-block; width: 13px; height: 13px; box-sizing: border-box; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; vertical-align: middle; animation: act-spin .6s linear infinite; }
+    @keyframes act-spin { to { transform: rotate(360deg); } }
     .empty { color: var(--muted); font-size: .9rem; padding: 8px 2px; }
     .msg { padding: 11px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 16px; display: none; }
     .msg.ok { display: block; background: rgba(45,212,191,.12); color: var(--accent-2); border: 1px solid rgba(45,212,191,.35); }
@@ -468,7 +473,7 @@
         return `<div style="margin-bottom:12px">
           <div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(b.trade)} · ${clusterHe[b.cluster] || escapeHtml(b.cluster)} <span class="pill normal">${b.reqs.length} עבודות</span></div>
           ${rows}
-          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)})'>הקצה כביקור מרוכז</button>
+          <button class="act go" style="margin-top:8px" onclick='doAssignBatch(${JSON.stringify(ids)}, ${JSON.stringify(b.trade)}, this)'>הקצה כביקור מרוכז</button>
         </div>`;
       }).join('');
       return `<div class="attention" style="background:linear-gradient(var(--card),var(--card)) padding-box, var(--accent-grad) border-box">
@@ -477,9 +482,9 @@
         ${blocks}
       </div>`;
     }
-    window.doAssignBatch = (ids, trade) => {
+    window.doAssignBatch = (ids, trade, btn) => {
       if (!confirm(`להקצות ${ids.length} עבודות כביקור מרוכז אחד (${trade})?`)) return;
-      post('assignBatch', { ids, by: who(), trade });
+      post('assignBatch', { ids, by: who(), trade }, btn);
     };
 
     function renderHouseConsolidation() {
@@ -510,7 +515,7 @@
           <div class="attn-item" style="justify-content:space-between">
             <span>${it.location ? '<b>' + escapeHtml(it.location) + ':</b> ' : ''}${escapeHtml(it.text)}
               <span class="pill urgent">${escapeHtml(it.category)}</span>${it.count > 1 ? ' <span class="pill normal">×' + it.count + '</span>' : ''}</span>
-            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}')">פתח דרישה</button>
+            <button class="act go" onclick="doConfirmFinding('${it.ids[0]}', this)">פתח דרישה</button>
           </div>`).join('');
         return `<div style="margin-bottom:14px"><div class="rollup-house-name" style="font-weight:800;margin-bottom:6px">${escapeHtml(house)}</div>${rows}</div>`;
       }).join('');
@@ -536,7 +541,7 @@
         b.push(`<span class="pill emergency">באיחור${d ? ' · ' + d + ' ימים' : ''}</span>`);
       }
       if (isBlockedUI(r)) {
-        b.push(`<span class="pill" style="background:#4a3410;color:#e0a23a">⛔ חסום${r.blocked_reason ? ': ' + escapeHtml(String(r.blocked_reason)) : ''}</span>`);
+        b.push(`<span class="pill" style="background:#4a3410;color:#e0a23a">⛔ תקוע${r.blocked_reason ? ': ' + escapeHtml(String(r.blocked_reason)) : ''}</span>`);
       }
       return b.join(' ');
     }
@@ -562,8 +567,8 @@
       const btns = [];
       if ([ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(s)) {
         if (canApproveUI(r)) {
-          btns.push(`<button class="act go" onclick="doApprove('${id}')">אישור</button>`);
-          btns.push(`<button class="act danger" onclick="doReject('${id}')">לא אושר</button>`);
+          btns.push(`<button class="act go" onclick="doApprove('${id}', this)">אישור</button>`);
+          btns.push(`<button class="act danger" onclick="doReject('${id}', this)">לא אושר</button>`);
         } else {
           // Over the approval threshold and this session may not approve it (field_ops → routed to Olga).
           // Show a clear, NON-clickable status instead of a button that would 403 on click.
@@ -573,52 +578,74 @@
       } else if (s === ST.APPROVED) {
         btns.push(`<button class="act go" onclick="doAssign('${id}')">הועבר לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
-        btns.push(`<button class="act go" onclick="doComplete('${id}')">סמן כהושלם</button>`);
+        btns.push(`<button class="act go" onclick="doComplete('${id}', this)">סמן כהושלם</button>`);
       } else if (s === ST.COMPLETED) {
-        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}')">סגור</button>`);
+        btns.push(`<button class="act" onclick="doSetStatus('${id}','${ST.CLOSED}', this)">סגור</button>`);
       } else {
         btns.push('<span class="empty">—</span>');
       }
       // Edit only before approval; delete always available to Roy/Sandra.
       if ([ST.REQUEST, ST.PENDING].includes(s)) {
-        btns.push(`<button class="act" onclick="doEdit('${id}')">עריכה</button>`);
+        btns.push(`<button class="act" onclick="doEdit('${id}', this)">עריכה</button>`);
       }
       // Block / unblock (increment 36) — manager tier only, on still-open requests. The server
-      // enforces canBlock regardless of what the UI shows.
+      // enforces canBlock regardless of what the UI shows. Labelled "תקוע" (stuck): the request
+      // cannot proceed — waiting on a part, a supplier, or access.
       if (canBlockUI() && ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(s)) {
         btns.push(isBlockedUI(r)
-          ? `<button class="act" onclick="doUnblock('${id}')">בטל חסימה</button>`
-          : `<button class="act" onclick="doBlock('${id}')">חסום</button>`);
+          ? `<button class="act" onclick="doUnblock('${id}', this)">בטל תקיעה</button>`
+          : `<button class="act" title="דרישה שאינה יכולה להתקדם — ממתינה לחלק, לספק או לגישה" onclick="doBlock('${id}', this)">תקוע</button>`);
       }
       // Delete is destructive and EXEC-ONLY (ops_manager / ceo), mirroring Code.gs handleDeleteRequest_
       // (isManagement_). field_ops/tier-B never see it — no delete button that would 403.
       if (isExecUI()) {
-        btns.push(`<button class="act danger" onclick="doDelete('${id}')">מחיקה</button>`);
+        btns.push(`<button class="act danger" onclick="doDelete('${id}', this)">מחיקה</button>`);
       }
       return btns.join('');
     }
 
-    async function post(action, payload) {
+    // In-flight spinner for an action button — the same pattern as the #79 login button
+    // (src/server.js setLoading): disable the button and show a spinner INSIDE it while the POST
+    // runs. Returns a restore() that puts the label back and re-enables the button. Safe to call
+    // with a falsy btn (returns a no-op), so post() works whether or not a button was passed.
+    function setBtnLoading(btn) {
+      if (!btn) return () => {};
+      const label = btn.innerHTML;
+      btn.disabled = true; btn.classList.add('busy'); btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = '<span class="act-spin" aria-hidden="true"></span>';
+      return () => { btn.disabled = false; btn.classList.remove('busy'); btn.removeAttribute('aria-busy'); btn.innerHTML = label; };
+    }
+
+    // Returns true when the write succeeded, false otherwise — modal confirms use this to close on
+    // success but stay open (with the error) on failure. If `btn` is given it spins through the POST
+    // and is restored when the request settles (on failure so it can be retried; on success the board
+    // is reloaded and card buttons are replaced, so the restore is a harmless no-op).
+    async function post(action, payload, btn) {
+      const restore = setBtnLoading(btn);
       try {
         const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: window.__STAFF_TOKEN__ || '' }) });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'שגיאה');
         showMsg('ok', 'בוצע.');
         await load();
+        return true;
       } catch (e) {
         // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
         // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
         // role may not take (approve above threshold, delete), so this is a defensive fallback.
         const raw = String((e && e.message) || '');
         showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+        return false;
+      } finally {
+        restore();
       }
     }
 
-    window.doApprove = (id) => post('approve', { id, by: who() });
-    window.doReject = (id) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }); };
-    // Block requires a reason (server also enforces); unblock clears it.
-    window.doBlock = (id) => { const reason = (prompt('סיבת החסימה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }); };
-    window.doUnblock = (id) => { if (!confirm('לבטל את החסימה?')) return; post('setBlocked', { id, blocked: false }); };
+    window.doApprove = (id, btn) => post('approve', { id, by: who() }, btn);
+    window.doReject = (id, btn) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }, btn); };
+    // "תקוע" (stuck) requires a reason (server also enforces); clearing it removes the flag.
+    window.doBlock = (id, btn) => { const reason = (prompt('סיבת התקיעה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }, btn); };
+    window.doUnblock = (id, btn) => { if (!confirm('לבטל את סימון התקיעה?')) return; post('setBlocked', { id, blocked: false }, btn); };
 
     // Deferral via calendar modal + reminder N days before (default 7).
     let _deferId = null;
@@ -651,11 +678,12 @@
       deferModal.classList.add('open');
     };
     document.getElementById('deferCancel').addEventListener('click', () => { deferModal.classList.remove('open'); _deferId = null; });
-    document.getElementById('deferConfirm').addEventListener('click', () => {
+    document.getElementById('deferConfirm').addEventListener('click', async (ev) => {
       if (!_deferId || !deferDate.value) { deferModal.classList.remove('open'); return; }
       const remind_days = Number(deferRemind.value) || 0;
-      post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) });
-      deferModal.classList.remove('open'); _deferId = null;
+      // Spinner shows in the open modal while the POST runs; close only if it succeeded.
+      const ok = await post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) }, ev.currentTarget);
+      if (ok) { deferModal.classList.remove('open'); _deferId = null; }
     });
     const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
 
@@ -701,31 +729,33 @@
       referModal.classList.add('open');
     };
     document.getElementById('referCancel').addEventListener('click', () => { referModal.classList.remove('open'); _referId = null; });
-    document.getElementById('referConfirm').addEventListener('click', () => {
+    document.getElementById('referConfirm').addEventListener('click', async (ev) => {
       if (!_referId) { referModal.classList.remove('open'); return; }
       const id = _referId;
+      let result;
       if (referType() === 'internal') {
         const lead = referLeadSel.value;
         if (!lead) { showMsg('err', 'בחר/י אחראי.'); return; }
-        post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' });
+        result = post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' }, ev.currentTarget);
       } else {
         const trade = referTradeSel.value;
-        if (document.getElementById('referMarkOnly').checked) post('markExternal', { id, by: who(), trade });
-        else post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade });
+        if (document.getElementById('referMarkOnly').checked) result = post('markExternal', { id, by: who(), trade }, ev.currentTarget);
+        else result = post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade }, ev.currentTarget);
       }
-      referModal.classList.remove('open'); _referId = null;
+      // Spinner shows in the open modal while the POST runs; close only if it succeeded.
+      if (await result) { referModal.classList.remove('open'); _referId = null; }
     });
-    window.doComplete = (id) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }); };
-    window.doSetStatus = (id, to) => post('setStatus', { id, by: who(), to });
-    window.doConfirmFinding = (fid) => post('confirmFinding', { finding_id: fid, by: who() });
-    window.doDelete = (id) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }); };
-    window.doEdit = (id) => {
+    window.doComplete = (id, btn) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }, btn); };
+    window.doSetStatus = (id, to, btn) => post('setStatus', { id, by: who(), to }, btn);
+    window.doConfirmFinding = (fid, btn) => post('confirmFinding', { finding_id: fid, by: who() }, btn);
+    window.doDelete = (id, btn) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }, btn); };
+    window.doEdit = (id, btn) => {
       const r = allRequests.find(x => String(x.id) === String(id));
       if (!r) return;
       const description = prompt('תיאור:', r.description || ''); if (description === null) return;
       const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
       const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
-      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost });
+      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost }, btn);
     };
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -749,7 +779,7 @@
       createModal.classList.add('open');
     });
     document.getElementById('crCancel').addEventListener('click', () => createModal.classList.remove('open'));
-    document.getElementById('crConfirm').addEventListener('click', () => {
+    document.getElementById('crConfirm').addEventListener('click', async (ev) => {
       const house = document.getElementById('crHouse').value;
       const category = document.getElementById('crCategory').value;
       const urgency = document.getElementById('crUrgency').value;
@@ -758,8 +788,9 @@
       if (!house) return showMsg('err', 'יש לבחור בית.');
       if (!category) return showMsg('err', 'יש לבחור קטגוריה.');
       if (!urgency) return showMsg('err', 'יש לבחור דחיפות.');
-      createModal.classList.remove('open');
-      post('createRequest', { house, category, urgency, description, location_in_house });
+      // Spinner shows in the open modal while the POST runs; close only if it succeeded.
+      const ok = await post('createRequest', { house, category, urgency, description, location_in_house }, ev.currentTarget);
+      if (ok) createModal.classList.remove('open');
     });
 
     load();
