@@ -3,6 +3,30 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — ci — verify-live: enable the authenticated-read leg of the post-deploy smoke
+
+**Why.** The post-deploy `verify-live.yml` workflow already polls Railway's `/version` until it serves the
+merged commit and then runs `test/smoke-live.js` — but only the anonymous checks (home page, login-401,
+`/version` gate). `smoke-live.js` has always supported a stronger **authenticated-read leg** (log in as a
+real user, then do one authed `houses` read + a non-degraded `pageData` bundle check), which stays dormant
+unless `SMOKE_USER` / `SMOKE_PIN` are present in the environment.
+
+**What.** `.github/workflows/verify-live.yml` now passes those two secrets through to the smoke step:
+
+```yaml
+SMOKE_USER: ${{ secrets.SMOKE_USER }}
+SMOKE_PIN: ${{ secrets.SMOKE_PIN }}
+```
+
+When both repository secrets are set, the smoke run logs in and **fails the workflow on a bad login**
+(`smoke-live.js` `checkAuthedRead` → `fail()` → `process.exit(1)`); when they are unset the leg logs `SKIP`
+and the anonymous checks run exactly as before. No change to `smoke-live.js` (it already supports the leg)
+and no app code touched.
+
+**Secrets to set** (**Settings → Secrets and variables → Actions**): **`SMOKE_USER`** (a real manager-tier
+login, e.g. `רועי`) and **`SMOKE_PIN`** (that user's PIN). `APP_URL` is already covered by the `vars.APP_URL`
+default, so no new URL secret is needed.
+
 ## [Unreleased] — UX — dashboard action buttons: in-flight spinners + חסום→תקוע rename
 
 **Why.** The dashboard's write buttons (אישור, לא אושר, הועבר לביצוע, דחה לתאריך, block) fired their POST
