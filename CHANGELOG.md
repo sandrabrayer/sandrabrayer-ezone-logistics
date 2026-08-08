@@ -3,6 +3,34 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX — dashboard action buttons: in-flight spinners + חסום→תקוע rename
+
+**Why.** The dashboard's write buttons (אישור, לא אושר, הועבר לביצוע, דחה לתאריך, block) fired their POST
+with no visible feedback — the button looked idle while the request was on the wire, inviting a second
+click (a double-submit) and leaving a "did that do anything?" dead moment. This extends the login button's
+loading pattern (#79) to every action button.
+
+**Task 1 — in-flight spinners (`src/dashboard.html`).** A small `setActLoading(btn, on)` helper mirrors the
+login shim's `setLoading`: on entry it disables the button, marks it `aria-busy`, clears the label, and drops
+an `.act-spin` span inside; on exit it restores the label and re-enables. `post(action, payload, btn)` now
+takes the triggering button, spins it while the request is on the wire, and restores it in a `finally` — so a
+failure returns the button for a retry, while a success re-renders the list (the button is replaced, no dead
+moment). The inline buttons pass `this`; the modal-driven actions (דחה לתאריך, הועבר לביצוע) keep their modal
+open and spin the confirm button (אישור דחייה / העבר) until the POST resolves. `aria-busy` doubles as the
+busy flag, guarding a double-submit. New CSS: `@keyframes ezspin` + `.act-spin` (tinted via `currentColor` so
+it reads on both go/danger variants).
+
+**Task 2 — חסום → תקוע rename.** The block button is relabelled **תקוע** ("stuck") with a tooltip: *בקשה
+שאינה יכולה להתקדם — ממתינה לחלק/ספק/גישה* (a request that cannot proceed — waiting on a part/supplier/access).
+Only the button label + tooltip change; the underlying `setBlocked` action and the `blocked`/`blocked_reason`
+data model are untouched.
+
+**Tests.** `test/dashboard-action-spinners.test.js` (10) — the real `setActLoading` + `post` are lifted from
+the source and driven against a deferred fetch to prove disabled+spinner in flight, restore on failure, reload
+on success, the double-submit guard, plus source assertions locking the wiring, the spinner CSS, the confirm-
+button spinners, and the תקוע rename + tooltip. `test/dashboard-approve-gate.test.js` updated for the new
+`doApprove('id', this)` call shape. Suite: 624 green.
+
 ## [Unreleased] — feature — secured server-to-server request intake; coordinator surfaces stripped
 
 **Why.** Coordinators no longer live in Logistics — they file requests from the separate
