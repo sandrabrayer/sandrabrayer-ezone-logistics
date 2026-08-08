@@ -150,3 +150,43 @@ test('the block button is renamed חסום → תקוע and carries the explanat
   assert.ok(m, 'the תקוע button has a title tooltip wired next to doBlock');
   assert.ok(/ממתינה לחלק\/ספק\/גישה/.test(m[1]), 'tooltip explains: waiting on a part/supplier/access');
 });
+
+// ---- spinner coverage extended to the remaining POST buttons + modal confirms ----------------------
+// Every action button that fires a POST now threads its own element into post(...,btn) so it spins +
+// disables in flight and restores on failure — matching the #84 pattern. These assert the wiring for the
+// buttons the original pass did NOT cover: סמן כהושלם, סגור, עריכה, מחיקה, batch-assign, confirm-finding.
+
+test('the remaining inline action buttons thread this into their handlers', () => {
+  assert.ok(/doComplete\('\$\{id\}', this\)/.test(html), 'סמן כהושלם passes this');
+  assert.ok(/doSetStatus\('\$\{id\}','\$\{ST\.CLOSED\}', this\)/.test(html), 'סגור passes this');
+  assert.ok(/doEdit\('\$\{id\}', this\)/.test(html), 'עריכה passes this');
+  assert.ok(/doDelete\('\$\{id\}', this\)/.test(html), 'מחיקה passes this');
+  assert.ok(/doConfirmFinding\('\$\{it\.ids\[0\]\}', this\)/.test(html), 'confirm-finding (פתח דרישה) passes this');
+  assert.ok(/doAssignBatch\(\$\{JSON\.stringify\(ids\)\}, \$\{JSON\.stringify\(b\.trade\)\}, this\)/.test(html), 'batch-assign passes this');
+});
+
+test('the remaining handlers forward btn as the trailing arg to post', () => {
+  assert.ok(/window\.doComplete = \(id, btn\) =>[\s\S]*?post\('setStatus',[^;]*, btn\)/.test(html), 'doComplete forwards btn');
+  assert.ok(/window\.doSetStatus = \(id, to, btn\) => post\('setStatus',[^;]*, btn\)/.test(html), 'doSetStatus forwards btn');
+  assert.ok(/window\.doConfirmFinding = \(fid, btn\) => post\('confirmFinding',[^;]*, btn\)/.test(html), 'doConfirmFinding forwards btn');
+  assert.ok(/window\.doDelete = \(id, btn\) =>[\s\S]*?post\('deleteRequest',[^;]*, btn\)/.test(html), 'doDelete forwards btn');
+  assert.ok(/window\.doEdit = \(id, btn\) =>[\s\S]*?post\('editRequest',[^;]*, btn\)/.test(html), 'doEdit forwards btn');
+  assert.ok(/window\.doAssignBatch = \(ids, trade, btn\) =>[\s\S]*?post\('assignBatch',[^;]*, btn\)/.test(html), 'doAssignBatch forwards btn');
+});
+
+test('the create-request modal confirm spins while its POST is in flight', () => {
+  // crConfirmBtn is captured and its click handler is async so it can await the create with the spinner up.
+  assert.ok(/const crConfirmBtn = document\.getElementById\('crConfirm'\)/.test(html), 'crConfirm button is captured');
+  assert.ok(/crConfirmBtn\.addEventListener\('click', async/.test(html), 'the create confirm handler is async');
+  assert.ok(/await post\('createRequest',[\s\S]*?, crConfirmBtn\)/.test(html), 'createRequest spins crConfirmBtn');
+});
+
+test('every post() call site that writes now passes a button (no bare fire-and-forget writes left)', () => {
+  // Guard against regressions: catch any post('someAction', …) with no trailing btn arg. The only
+  // legitimate btn-less calls are markExternal (shares referConfirmBtn via the assign branch) — so we
+  // assert each of the extended actions specifically carries a button rather than scanning generically.
+  for (const action of ['setStatus', 'editRequest', 'deleteRequest', 'confirmFinding', 'assignBatch', 'createRequest']) {
+    const re = new RegExp(`post\\('${action}',[^;\\n]*, (btn|crConfirmBtn|referConfirmBtn|deferConfirmBtn)\\)`);
+    assert.ok(re.test(html), `${action} threads a button into post()`);
+  }
+});

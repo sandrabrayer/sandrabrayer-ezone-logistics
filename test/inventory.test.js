@@ -14,7 +14,7 @@ import {
 } from '../src/inventory.js';
 import {
   HEADERS, INVENTORY_CATEGORIES, INVENTORY_COUNTERS, INVENTORY_HOUSE_COORDINATORS,
-  SEED_INVENTORY_ITEMS, BASE_UNITS,
+  SEED_INVENTORY_ITEMS, BASE_UNITS, SEED_USERS,
 } from '../src/schema.js';
 
 // ---- schema ----
@@ -53,18 +53,29 @@ test('categories are ONLY טואלטיקה / חומרי ניקוי (food is owne
 
 test('counters are the coordinators + backstop', () => {
   assert.deepEqual(INVENTORY_COUNTERS, ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי']);
-  assert.ok(INVENTORY_COUNTERS.includes('רמי'));  // backstop
-  assert.ok(INVENTORY_COUNTERS.includes('צחי'));  // backstop + שדה אליעזר coordinator
+  assert.ok(INVENTORY_COUNTERS.includes('רמי'));  // maintenance-lead backstop
+  assert.ok(INVENTORY_COUNTERS.includes('צחי'));  // maintenance-lead backstop (NOT a coordinator)
 });
 
-test('each open/pre-opening house maps to its coordinator (canonical names, HOUSE-IDS.md)', () => {
+test('only the four houses with a seeded coordinator map to one (canonical names, HOUSE-IDS.md)', () => {
+  // The two pre-opening houses (שדה אליעזר, רעננה הפרדס) have NO coordinator yet, so they are absent
+  // from the map and render blank. צחי is a maintenance lead (role: maintenance) — never a coordinator.
   assert.deepEqual(INVENTORY_HOUSE_COORDINATORS, {
     'קיסריה עפרוני': 'שירה', 'קיסריה ריהאב': 'יעקב', 'רעננה אשר': 'אורן',
-    'רמות השבים': 'אביב', 'שדה אליעזר': 'צחי',
+    'רמות השבים': 'אביב',
   });
   for (const who of Object.values(INVENTORY_HOUSE_COORDINATORS)) {
     assert.ok(INVENTORY_COUNTERS.includes(who), `${who} must be an accepted counter`);
   }
+});
+
+test('צחי is a maintenance lead, not a coordinator — absent from the roster map', () => {
+  // Regression: the רכז/ת column wrongly showed צחי for שדה אליעזר. He is role:maintenance in SEED_USERS,
+  // and no coordinator is seeded for that pre-opening house, so it must render blank.
+  assert.ok(!Object.values(INVENTORY_HOUSE_COORDINATORS).includes('צחי'), 'צחי must not be a coordinator');
+  assert.ok(!('שדה אליעזר' in INVENTORY_HOUSE_COORDINATORS), 'שדה אליעזר has no seeded coordinator yet');
+  const tzachi = SEED_USERS.find((u) => u.name === 'צחי');
+  assert.equal(tzachi.role, 'maintenance', 'צחי is a maintenance lead, confirming he is no coordinator');
 });
 
 test('seed catalog: active items are Logistics-only; מזון rows kept but retired (active=FALSE)', () => {

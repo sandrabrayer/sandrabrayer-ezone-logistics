@@ -161,11 +161,15 @@ function buildClientShim(names) {
   }
   // Version footer — small gray text on EVERY page (incl. the login screen), so anyone can see at a glance
   // which commit is live on each leg: Node (Railway) and Apps Script (Sheets backend). Non-secret; fetched
-  // from /version. pointer-events:none so it never blocks the UI.
+  // from /version. pointer-events:none so it never blocks the UI. Pinned to the bottom-LEFT corner: the
+  // sign-out control lives at the RTL inline-start (right edge on this Hebrew app), and the footer's own
+  // direction:ltr made inset-inline-end resolve to that same right edge, so it used to sit UNDER the
+  // sign-out button. Anchoring the footer with left:12px moves it to the opposite corner so both are always
+  // visible on every page; the app's RTL layout is untouched (only this fixed overlay changes side).
   function mountVersion(){
     function m(){
       if(!document.body||document.getElementById('ezone-ver'))return;
-      var v=el('div','position:fixed;bottom:12px;inset-inline-end:12px;z-index:99997;font-family:system-ui,Arial,sans-serif;font-size:11px;line-height:1.3;color:#7a8794;direction:ltr;opacity:.75;pointer-events:none;text-align:end','…');
+      var v=el('div','position:fixed;bottom:12px;left:12px;z-index:99997;font-family:system-ui,Arial,sans-serif;font-size:11px;line-height:1.3;color:#7a8794;direction:ltr;opacity:.75;pointer-events:none;text-align:start','…');
       v.id='ezone-ver';document.body.appendChild(v);
       origFetch('/version').then(function(r){return r.json();}).then(function(j){
         var n=String((j&&j.node&&j.node.commit)||'?').slice(0,7),g=String((j&&j.appsScript&&j.appsScript.commit)||'?').slice(0,7);

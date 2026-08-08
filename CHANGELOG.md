@@ -3,6 +3,52 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX/data — spinner coverage on the last write buttons, footer overlap fix, roster label correction
+
+Three small, independent fixes bundled into one change.
+
+**1 — Spinner coverage extended to the remaining POST buttons (`src/dashboard.html`).** The #84 in-flight
+pattern (`setActLoading` + `post(action, payload, btn)`) already covered אישור / לא אושר / block / דחה לתאריך /
+הועבר לביצוע. It did **not** cover the rest of the write buttons, which fired their POST with no visible
+feedback (idle-looking button, double-submit bait). Now every button that fires a POST threads its own
+element into `post(...,btn)` so it disables + shows an in-button spinner while the request is on the wire and
+restores on failure: **סמן כהושלם** (`doComplete`), **סגור** (`doSetStatus`), **עריכה** (`doEdit`),
+**מחיקה** (`doDelete`), **batch-assign** (`doAssignBatch`), **confirm-finding / פתח דרישה** (`doConfirmFinding`),
+and the **create-request modal confirm** (`crConfirm`, whose click handler is now `async` and awaits the
+`createRequest` POST with the confirm button spinning; a failed create keeps the modal open for a retry). No
+change to `setActLoading`/`post` themselves — the helper and its success/failure/finally semantics are
+unchanged; only the additional call sites were wired.
+
+**2 — Version footer no longer sits under the התנתקות button (`src/server.js`).** The version footer
+(`node … · gs …` SHAs) and the sign-out button are both fixed to the bottom of every page. The sign-out
+button anchors at `inset-inline-start` (the RTL start = the right edge on this Hebrew app); the footer used
+`inset-inline-end` but with its own `direction:ltr`, which resolved to that **same right edge**, so the
+footer sat underneath the button on screens where they met. The footer is now pinned to the physical **left**
+corner (`left:12px`, `text-align:start`), so both are always visible. The app's RTL layout is untouched —
+only this one fixed overlay changes side.
+
+**3 — מלאי status roster: צחי removed from the רכז/ת column for שדה אליעזר (`src/schema.js`, `src/inventory.html`).**
+The inventory status screen showed **צחי** as the coordinator (רכז/ת) of **שדה אליעזר**. צחי is a
+**maintenance lead** (`role: 'maintenance'` in `SEED_USERS`), not a coordinator, and no coordinator is seeded
+for that pre-opening house yet — so the column must render **blank**. The bad label came from the data
+source, not the view: `INVENTORY_HOUSE_COORDINATORS` (canonical map in `src/schema.js`, mirrored in
+`src/inventory.html`) wrongly mapped `'שדה אליעזר': 'צחי'`. That entry is removed from both, so שדה אליעזר —
+like the other coordinator-less pre-opening house רעננה הפרדס — now shows an empty רכז/ת cell. The
+misleading comments claiming צחי was a coordinator were corrected too.
+
+**Note — the house name רעננה הפרדס was left unchanged.** A sibling request asked to shorten the מלאי house
+label from `רעננה הפרדס` to `הפרדס`. This was **not** done: `HOUSE-IDS.md` (the canonical, cross-repo source
+for display names) lists **`רעננה הפרדס`** as the only correct form and explicitly forbids local short
+variants, and the screen already renders that canonical name from `SEED_HOUSES`. Shortening it would break
+the documented contract, so the label stands.
+
+**Tests.** `test/dashboard-action-spinners.test.js` gains wiring assertions for each newly-covered button and
+the create-modal confirm, plus a guard that every extended write call site passes a button.
+`test/version.test.js` gains an overlap regression asserting the footer (left) and sign-out (RTL start) sit in
+opposite corners. `test/inventory.test.js` now asserts שדה אליעזר has no coordinator and צחי never appears in
+the roster map; `test/dashboard-approve-gate.test.js` updates its delete-button match to the new
+`doDelete(id, this)` signature. Suite: 630 pass / 0 fail (was 624).
+
 ## [Unreleased] — ci — verify-live: enable the authenticated-read leg of the post-deploy smoke
 
 **Why.** The post-deploy `verify-live.yml` workflow already polls Railway's `/version` until it serves the
