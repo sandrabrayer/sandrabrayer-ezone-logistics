@@ -306,7 +306,16 @@
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
 
-    function showMsg(kind, text) { msg.className = 'msg ' + kind; msg.textContent = text; setTimeout(() => { if (kind === 'ok') msg.className = 'msg'; }, 4000); }
+    // Banner. EVERY banner — errors included — auto-clears after ~6s, and any new banner replaces the
+    // previous one immediately (so the next successful action clears a lingering error). A stuck error
+    // banner earlier read as "broken on load", so errors must never linger. One timer, reset each call.
+    let msgTimer = null;
+    function showMsg(kind, text) {
+      if (msgTimer) { clearTimeout(msgTimer); msgTimer = null; }
+      msg.className = 'msg ' + kind;
+      msg.textContent = text;
+      if (text) msgTimer = setTimeout(() => { msg.className = 'msg'; msg.textContent = ''; msgTimer = null; }, 6000);
+    }
     function who() { return document.getElementById('who').value; }
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
@@ -713,11 +722,18 @@
         showMsg('ok', 'בוצע.');
         await load();
       } catch (e) {
-        // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
-        // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
-        // role may not take (approve above threshold, delete), so this is a defensive fallback.
         const raw = String((e && e.message) || '');
-        showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+        if (/request not found/i.test(raw)) {
+          // The request was deleted since the board rendered — the user acted on a stale card. Show a
+          // clear Hebrew message (not the raw English) and refresh so the dead card disappears.
+          showMsg('err', 'הדרישה כבר לא קיימת — הלוח רוענן');
+          await load();
+        } else {
+          // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
+          // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
+          // role may not take (approve above threshold, delete), so this is a defensive fallback.
+          showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+        }
       } finally {
         if (btn) setActLoading(btn, false);
       }

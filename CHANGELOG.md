@@ -3,6 +3,28 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX — graceful "request not found" + self-clearing banners
+
+**Why.** Acting on a request that was DELETED since the board rendered (a stale card) surfaced the raw
+English server error "Request not found", left the dead card on the board, and — because error banners
+never auto-cleared — the message stuck forever (which earlier caused a "broken on load" misdiagnosis).
+
+**What (`src/dashboard.html`).**
+- **"Request not found" is handled gracefully.** `post()` now detects the server's `Request not found`
+  error and shows the Hebrew message **"הדרישה כבר לא קיימת — הלוח רוענן"** (never the raw English), then
+  **refreshes the board** (`load()`) so the stale card disappears on its own.
+- **All banners self-clear.** `showMsg` now auto-clears **every** banner (errors included) after ~6s, and
+  a new banner replaces the previous one immediately — so the next successful action clears a lingering
+  error, and no error banner can stick forever. One timer, reset on each call.
+
+**Tests.** `test/dashboard-notfound-refresh.test.js` — a `Request not found` POST shows the Hebrew message
+and re-fetches the board (refresh); the error banner is replaced by the next success (`בוצע.`); an error
+banner auto-clears when its timer fires. Suite: 681 pass / 0 fail.
+
+**Deploy note.** Client-side only (`dashboard.html`); no Apps Script change, no manual step.
+
+---
+
 ## [Unreleased] — fix — deferred tickets vanishing from the OpenTickets digest
 
 Live feedback after #89: a request in status `נדחה לתאריך` (deferred, waiting for a date) disappeared
