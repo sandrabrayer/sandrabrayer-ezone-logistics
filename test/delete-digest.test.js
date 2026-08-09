@@ -35,6 +35,20 @@ test('handleDeleteRequest_ removes the Requests row AND rebuilds the digest', ()
   assert.match(body, /writeAuditEntry\(/);
 });
 
+test('the rebuild runs SYNCHRONOUSLY in the same handler — deleteRow first, then rebuildDigest, then return', () => {
+  // Apps Script is synchronous: rebuildDigest() completes before the handler returns its JSON response, so
+  // the digest is already rebuilt by the time the delete call resolves — exactly like every other mutation
+  // (approve/reject/defer/setStatus all call rebuildDigest() before returning). Any lag a coordinator sees
+  // is their app's read cache (~5 min), NOT a missing rebuild.
+  const body = fnBody(code, 'function handleDeleteRequest_(');
+  const iDelete = body.indexOf('deleteRow(');
+  const iRebuild = body.indexOf('rebuildDigest()');
+  const iReturn = body.indexOf('return jsonOut_({ ok: true })');
+  assert.ok(iDelete !== -1 && iRebuild !== -1 && iReturn !== -1, 'all three steps present');
+  assert.ok(iDelete < iRebuild, 'the row is removed before the rebuild');
+  assert.ok(iRebuild < iReturn, 'the rebuild completes before the success response returns');
+});
+
 test('the digest rebuild reads LIVE Requests rows (a deleted row cannot survive it)', () => {
   const body = fnBody(digest, 'function buildOpenTicketRows_(');
   assert.match(body, /readObjects_\('Requests'\)/, 'OpenTickets is built from the current Requests rows');
