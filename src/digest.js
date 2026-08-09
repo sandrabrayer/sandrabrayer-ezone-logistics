@@ -97,15 +97,67 @@ export function buildWeeklyGrid(bucketByKey, weeks, nowIso, doneLabel, notDoneLa
   return rows;
 }
 
-// ---- Active-ticket filter ----
-// A ticket is included in OpenTickets when its status is NOT 'סגור' (closed) and NOT
-// 'לא מאושר' (not approved). Everything else — דרישה / ממתין לאישור / מאושר / נדחה לתאריך /
-// בביצוע / הושלם — is an open, actionable ticket a coordinator should see.
+// ---- Active-ticket filter (status only) ----
+// A status-only classification: 'סגור' (closed) and 'לא מאושר' (not approved) are the non-active
+// statuses; everything else — דרישה / ממתין לאישור / מאושר / נדחה לתאריך / בביצוע / הושלם — is an active
+// status. NOTE: the digest's REAL inclusion gate is `isDigestTicket` below (retention-aware) — this
+// helper stays as the plain status predicate other callers/tests use.
 export const EXCLUDED_TICKET_STATUSES = ['סגור', 'לא מאושר'];
 
-/** True when a ticket with this status belongs in the OpenTickets tab. */
+/** True when this status is an active (non-closed, non-rejected) status. */
 export function isActiveTicket(status) {
   return EXCLUDED_TICKET_STATUSES.indexOf(String(status == null ? '' : status).trim()) === -1;
+}
+
+// ---- Digest inclusion (retention-aware self-cleaning) ----
+// What actually appears in OpenTickets:
+//   - 'לא מאושר' (rejected) → NEVER shown.
+//   - terminal completions ('הושלם' / 'סגור') → shown only for a RETENTION WINDOW after completion
+//     (reuse Config.archive_after_days, default 7), then they DROP OUT so the list self-cleans. So a
+//     coordinator still sees what just finished, but old completions don't pile up.
+//   - everything else (active work) → always shown.
+// A terminal ticket with no parseable completion date is kept visible (we don't hide what we can't age,
+// same rule as the dashboard archive). Mirror of digestIncludeTicket_ in apps-script/digest.gs.
+export const REJECTED_TICKET_STATUS = 'לא מאושר';
+export const TERMINAL_TICKET_STATUSES = ['הושלם', 'סגור'];
+export const DIGEST_RETENTION_DAYS_DEFAULT = 7;
+
+/**
+ * True when a request belongs in OpenTickets right now.
+ * @param {object} req request row (reads .status, .completed_at)
+ * @param {number|string|Date} now current instant (Date, ms, or ISO string)
+ * @param {number} retentionDays how long a completed/closed ticket lingers (Config archive_after_days; default 7)
+ */
+export function isDigestTicket(req, now, retentionDays) {
+  const r = req || {};
+  const status = String(r.status == null ? '' : r.status).trim();
+  if (status === REJECTED_TICKET_STATUS) return false;              // rejected → never shown
+  if (TERMINAL_TICKET_STATUSES.indexOf(status) === -1) return true; // active → always shown
+  // Terminal (completed/closed): shown only within the retention window after completion.
+  const raw = r.completed_at;
+  if (raw == null || String(raw).trim() === '') return true;        // undateable completion → keep visible
+  const finished = new Date(raw).getTime();
+  if (Number.isNaN(finished)) return true;
+  const nowMs = now instanceof Date ? now.getTime() : (typeof now === 'number' ? now : new Date(now).getTime());
+  if (Number.isNaN(nowMs)) return true;
+  let n = Number(retentionDays);
+  if (!Number.isFinite(n) || n <= 0) n = DIGEST_RETENTION_DAYS_DEFAULT;
+  return Math.floor((nowMs - finished) / 86400000) <= n;            // within window → shown; older → dropped
+}
+
+// ---- Stable date normalization (YYYY-MM-DD) ----
+// Reduce a date-ish value to a stable 'YYYY-MM-DD' string so consumers parse it reliably — never a raw
+// Date serialization ("Mon Sep 01 2026 …"). A value already starting 'YYYY-MM-DD' is taken verbatim (no
+// timezone shift); a Date / other parseable form is reduced via ISO; blank / unparseable → ''. Mirror of
+// digestDateOnly_ in apps-script/digest.gs.
+export function dateOnly(v) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
+  const s = String(v);
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
 
 // ---- Money scrubber ----
@@ -190,9 +242,10 @@ export function openTicketRow(req, ctx) {
     scrubField(r.category),
     scrubField(r.urgency),
     scrubField(r.location_in_house),
-    // deferred_date (this change): Requests.deferred_until, scrubbed like the rest. Blank when the
-    // request was never deferred (scrubField('') === ''). The Coordinators app (PR #125) reads it here.
-    scrubField(r.deferred_until),
+    // deferred_date: Requests.deferred_until normalized to a stable 'YYYY-MM-DD' string (never a raw Date
+    // serialization), blank when the request was never deferred. The Coordinators app (PR #125) reads it
+    // here and parses the date — so the format must be stable, not a locale/Date .toString().
+    dateOnly(r.deferred_until),
   ];
 }
 

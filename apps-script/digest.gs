@@ -125,6 +125,29 @@ function digestIsActiveTicket_(status) {
   return DIGEST_EXCLUDED_STATUSES_.indexOf(String(status == null ? '' : status).trim()) === -1;
 }
 
+// Retention-aware inclusion (mirror of isDigestTicket in src/digest.js): 'לא מאושר' is never shown; a
+// terminal completion ('הושלם' / 'סגור') is shown only for retentionDays after completion, then drops
+// out so the list self-cleans; everything else (active) is always shown. Undateable completion → kept.
+var DIGEST_REJECTED_STATUS_ = 'לא מאושר';
+var DIGEST_TERMINAL_STATUSES_ = ['הושלם', 'סגור'];
+var DIGEST_RETENTION_DAYS_DEFAULT_ = 7;
+
+function digestIncludeTicket_(req, now, retentionDays) {
+  var r = req || {};
+  var status = String(r.status == null ? '' : r.status).replace(/^\s+|\s+$/g, '');
+  if (status === DIGEST_REJECTED_STATUS_) return false;
+  if (DIGEST_TERMINAL_STATUSES_.indexOf(status) === -1) return true;
+  var raw = r.completed_at;
+  if (raw == null || String(raw).replace(/^\s+|\s+$/g, '') === '') return true;
+  var finished = (raw instanceof Date) ? raw.getTime() : new Date(String(raw)).getTime();
+  if (isNaN(finished)) return true;
+  var nowMs = (now instanceof Date) ? now.getTime() : (typeof now === 'number' ? now : new Date(now).getTime());
+  if (isNaN(nowMs)) return true;
+  var n = Number(retentionDays);
+  if (!isFinite(n) || n <= 0) n = DIGEST_RETENTION_DAYS_DEFAULT_;
+  return Math.floor((nowMs - finished) / 86400000) <= n;
+}
+
 // Currency markers + adjacent digit groups. Word tokens (שח / NIS / ILS) are boundary-guarded
 // so they are never stripped from inside a real word (משחק, TENNIS). Bare counts stay.
 var DIGEST_MONEY_RE_ = new RegExp(
@@ -288,8 +311,10 @@ function digestWriteRows_(ss, tabName, headers, rows) {
 }
 
 /**
- * OpenTickets rows. One row per active ticket whose house maps to a coordinator house id.
- * Included when status is NOT 'סגור' and NOT 'לא מאושר'. Title is money-scrubbed.
+ * OpenTickets rows. One row per included ticket whose house maps to a coordinator house id. A ticket is
+ * included when it is active OR was completed/closed within the retention window (Config
+ * archive_after_days, default 7); 'לא מאושר' is never shown. Title is money-scrubbed. See
+ * digestIncludeTicket_ (mirror of isDigestTicket in src/digest.js).
  */
 function buildOpenTicketRows_() {
   var requests = readObjects_('Requests');
@@ -304,12 +329,19 @@ function buildOpenTicketRows_() {
     if (!latestAudit[rid] || ts > latestAudit[rid]) latestAudit[rid] = ts;
   });
 
+  // Retention window for completed/closed tickets — reuse the dashboard archive grace (archive_after_days).
+  // Missing/malformed Config → the default (7). getConfig coerces numeric keys.
+  var retentionDays = getConfig('archive_after_days');
+  if (typeof retentionDays !== 'number' || !isFinite(retentionDays) || retentionDays <= 0) {
+    retentionDays = DIGEST_RETENTION_DAYS_DEFAULT_;
+  }
+
   var now = new Date();
   var rows = [];
   requests.forEach(function (req) {
     var house = digestHouseId_(req.house);
     if (!house) return;                          // unmapped house → omitted
-    if (!digestIsActiveTicket_(req.status)) return;
+    if (!digestIncludeTicket_(req, now, retentionDays)) return;
     var id = String(req.id);
     var updatedAt = latestAudit[id] || digestIso_(req.created_at);
     // Aging facts for the coordinators app (increment 36) — non-financial. ticketAging is the shared
@@ -351,9 +383,10 @@ function digestOpenTicketRow_(req, ctx) {
     digestScrubField_(r.category),
     digestScrubField_(r.urgency),
     digestScrubField_(r.location_in_house),
-    // deferred_date (this change): Requests.deferred_until, scrubbed like the rest; blank when never
-    // deferred. The Coordinators app (PR #125) reads it here by this exact header name.
-    digestScrubField_(r.deferred_until),
+    // deferred_date: Requests.deferred_until normalized to a stable 'YYYY-MM-DD' string (never a raw Date
+    // serialization), blank when never deferred. The Coordinators app (PR #125) parses this date, so the
+    // format must be stable — digestDateOnly_ mirrors dateOnly in src/digest.js.
+    digestDateOnly_(r.deferred_until),
   ];
 }
 

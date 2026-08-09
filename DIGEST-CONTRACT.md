@@ -34,12 +34,19 @@ Tab OpenTickets — columns in this exact order:
   10 category          Requests.category (רכישה / תיקון / החלפה), single line, scrubbed
   11 urgency           Requests.urgency (רגיל / דחוף / חירום), single line, scrubbed
   12 location_in_house Requests.location_in_house, single line, scrubbed
-  13 deferred_date     Requests.deferred_until, single line, scrubbed; empty when not deferred
-Included when status is NOT 'סגור' and NOT 'לא מאושר'. Columns 7-9 are aging facts (non-financial);
-due_at itself and blocked_reason are NOT published. Columns 10-13 are non-financial request facts,
-APPENDED after the aging columns and money-scrubbed exactly like `title` (no price ever leaks); they
-are NOT length-capped. Column 13 (deferred_date) is empty for any request that was never deferred.
-estimated_cost / actual_cost remain unpublished.
+  13 deferred_date     Requests.deferred_until as a stable YYYY-MM-DD string; empty when not deferred
+
+Inclusion (retention-aware, self-cleaning): a ticket is published while it is ACTIVE, and a
+completed/closed ticket ('הושלם' / 'סגור') stays for a retention window of `archive_after_days` days
+(Config, default 7) AFTER completion (Requests.completed_at), then drops out — so coordinators see
+recent completions but the list self-cleans. 'לא מאושר' (rejected) is never published. A completed/closed
+ticket with no parseable completion date is kept (we do not hide what we cannot age).
+
+Columns 7-9 are aging facts (non-financial); due_at itself and blocked_reason are NOT published.
+Columns 10-13 are non-financial request facts, APPENDED after the aging columns and money-scrubbed
+exactly like `title` (no price ever leaks); they are NOT length-capped. Column 13 (deferred_date) is
+normalized to YYYY-MM-DD (never a raw Date serialization) so consumers parse it reliably, and is empty
+for any request that was never deferred. estimated_cost / actual_cost remain unpublished.
 
 Tab WeeklyCounts — columns in this exact order:
   1 house              house id

@@ -302,6 +302,7 @@
     const ARCHIVE_AFTER_DAYS_DEFAULT = 7;
     let archiveAfterDays = ARCHIVE_AFTER_DAYS_DEFAULT;
     let view = 'board'; // 'board' (active + recently completed) | 'archive' (read-only)
+    let filterHousePopulated = false; // the house filter is filled once; load() re-runs must not duplicate it
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
 
@@ -348,8 +349,15 @@
           if (Number.isFinite(a) && a > 0) archiveAfterDays = a;
         }
         allHouses = d.houses || [];
-        const sel = document.getElementById('filterHouse');
-        allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+        // Populate the house filter EXACTLY ONCE. load() re-runs on every write (post → load) and could be
+        // re-entered by other refreshes; appending unconditionally duplicated every option (regression the
+        // #75-era fix removed). The guard keeps the dropdown stable — and preserves the user's current
+        // selection — across reloads and view switches. The create-modal's crHouse resets its own innerHTML.
+        if (!filterHousePopulated) {
+          const sel = document.getElementById('filterHouse');
+          allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
+          filterHousePopulated = true;
+        }
         render();
       } catch (e) {
         board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';

@@ -3,6 +3,53 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix/contract — filter dedup, digest retention, deferred_date format
+
+Live feedback after #88. Four items — one dashboard regression fix and three digest corrections. No
+changes to the approval engine.
+
+**1 — Fix: the house filter dropdown no longer duplicates its options.** `load()` re-runs on every write
+(`post → load`) and could be re-entered by other refreshes; it appended the house `<option>`s
+unconditionally, so every house showed **twice** (a regression of the #75-era one-time-populate rule,
+resurfaced by the archive/view-toggle work). `load()` now fills the filter **exactly once** (guard flag),
+which also preserves the user's current selection across reloads and view switches. The create-modal's
+own `crHouse` select is unaffected (it resets its `innerHTML` before filling). Regression test:
+`test/dashboard-filter-once.test.js` — a reload and an archive/board view switch do not grow the filter.
+
+**2 — Confirmed: delete triggers the digest rebuild synchronously.** `handleDeleteRequest_` audits, then
+`deleteRow`, then `rebuildDigest()`, then returns — Apps Script runs synchronously, so the digest is
+rebuilt from the live `Requests` rows before the delete response resolves, exactly like every other
+mutation. Any lag a coordinator sees is their app's read cache (~5 min), not a missing rebuild. Locked by
+an ordering assertion in `test/delete-digest.test.js`.
+
+**3 — OpenTickets digest self-cleans completed/closed after a retention window.** Previously the digest
+showed `הושלם` **forever** and dropped `סגור` immediately. Now a completed/closed ticket stays for
+`archive_after_days` days after completion (reuse the dashboard archive grace, **default 7**), then drops
+out — so coordinators see recent completions but the list self-cleans. `לא מאושר` (rejected) is still
+never shown; a completed/closed ticket with no parseable completion date is kept (we don't hide what we
+can't age). New pure `isDigestTicket(req, now, retentionDays)` in `src/digest.js`, mirrored as
+`digestIncludeTicket_` in `apps-script/digest.gs` (the row loop reads `archive_after_days` from Config).
+
+**4 — Fix: `deferred_date` is written as a stable `YYYY-MM-DD` string.** Apps Script reads a date cell as
+a `Date` object; scrubbing it as free text would have published a raw locale serialization
+("Mon Sep 01 2026 …") that consumers can't parse reliably. The column now normalizes `deferred_until`
+via `dateOnly` (mirror of the existing `digestDateOnly_`): an ISO/`YYYY-MM-DD` value stays a date, a
+`Date` reduces to `YYYY-MM-DD`, blank stays blank.
+
+**Changed.** `src/dashboard.html` (filter one-time guard), `src/digest.js` + `apps-script/digest.gs`
+(retention filter + date normalization, kept byte-mirrored), `DIGEST-CONTRACT.md` (inclusion rule +
+column-13 format).
+
+**Tests.** `test/dashboard-filter-once.test.js` (new); additions to `test/digest.test.js` (retention
+inclusion, `dateOnly`, deferred_date from a real Date, source-scan for the retention filter) and
+`test/delete-digest.test.js` (synchronous ordering). Suite: 673 pass / 0 fail.
+
+**Deploy note.** `apps-script/**` deploys automatically via the clasp CI on merge to main. The digest
+rebuilds on the next write or the 15-minute trigger; no manual step (the retention window reuses the
+`archive_after_days` Config key already seeded).
+
+---
+
 ## [Unreleased] — contract — OpenTickets digest: append deferred_date (column 13)
 
 **Why.** The Coordinators app (their PR #125) wants to show *when* a deferred Logistics ticket is due to

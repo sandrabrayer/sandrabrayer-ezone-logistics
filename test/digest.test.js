@@ -8,6 +8,8 @@ import { dirname, join } from 'node:path';
 import {
   HOUSE_IDS, DIGEST_HOUSE_IDS, houseId,
   EXCLUDED_TICKET_STATUSES, isActiveTicket,
+  isDigestTicket, TERMINAL_TICKET_STATUSES, REJECTED_TICKET_STATUS, DIGEST_RETENTION_DAYS_DEFAULT,
+  dateOnly,
   scrubMoney, truncateTitle, formatTitle, TITLE_MAX,
   weekStart, recentWeekStarts,
   isShortage, shortageLabel, buildWeeklyGrid,
@@ -158,6 +160,72 @@ test('isActiveTicket trims and tolerates null/blank', () => {
   assert.equal(isActiveTicket('  סגור  '), false);
   assert.equal(isActiveTicket(''), true);
   assert.equal(isActiveTicket(null), true);
+});
+
+// ---- digest inclusion: retention-aware self-cleaning (completed/closed linger archive_after_days) ----
+
+const DNOW = '2026-08-09T12:00:00.000Z';
+const dNowMs = new Date(DNOW).getTime();
+const dDaysAgo = (n) => new Date(dNowMs - n * 86400000).toISOString();
+
+test('rejected (לא מאושר) tickets are never in the digest', () => {
+  assert.equal(REJECTED_TICKET_STATUS, 'לא מאושר');
+  assert.equal(isDigestTicket({ status: 'לא מאושר', completed_at: dDaysAgo(0) }, DNOW, 7), false);
+});
+
+test('active tickets are always in the digest, regardless of age', () => {
+  for (const s of ['דרישה', 'ממתין לאישור', 'מאושר', 'נדחה לתאריך', 'בביצוע']) {
+    assert.equal(isDigestTicket({ status: s, created_at: dDaysAgo(90) }, DNOW, 7), true, s);
+  }
+});
+
+test('completed/closed tickets linger for the retention window, then drop out', () => {
+  assert.deepEqual(TERMINAL_TICKET_STATUSES, ['הושלם', 'סגור']);
+  // within 7 days → shown (recent completion the coordinator should still see)
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(3) }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'סגור', completed_at: dDaysAgo(6) }, DNOW, 7), true);
+  // older than 7 days → dropped (self-cleaning)
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(8) }, DNOW, 7), false);
+  assert.equal(isDigestTicket({ status: 'סגור', completed_at: dDaysAgo(30) }, DNOW, 7), false);
+});
+
+test('the retention boundary is inclusive at exactly N days', () => {
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(7) }, DNOW, 7), true);  // exactly 7 → still shown
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(8) }, DNOW, 7), false); // 8 → dropped
+});
+
+test('a completed/closed ticket with no parseable completion date is kept (not hidden)', () => {
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: '' }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'סגור' }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'הושלם', completed_at: 'not-a-date' }, DNOW, 7), true);
+});
+
+test('a missing / bad retention window falls back to the default (7)', () => {
+  assert.equal(DIGEST_RETENTION_DAYS_DEFAULT, 7);
+  for (const bad of [undefined, null, 0, -3, NaN, 'x']) {
+    assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(7) }, DNOW, bad), true, `win=${bad}`);
+    assert.equal(isDigestTicket({ status: 'הושלם', completed_at: dDaysAgo(8) }, DNOW, bad), false, `win=${bad}`);
+  }
+});
+
+test('a custom retention window is honored', () => {
+  const req = { status: 'הושלם', completed_at: dDaysAgo(20) };
+  assert.equal(isDigestTicket(req, DNOW, 30), true);  // 20 <= 30 → still shown
+  assert.equal(isDigestTicket(req, DNOW, 14), false); // 20 > 14 → dropped
+});
+
+// ---- dateOnly: stable YYYY-MM-DD normalization ----
+
+test('dateOnly reduces any date-ish value to a stable YYYY-MM-DD (never a raw Date string)', () => {
+  assert.equal(dateOnly('2026-09-01'), '2026-09-01');                       // already ISO date → verbatim
+  assert.equal(dateOnly('2026-09-01T00:00:00.000Z'), '2026-09-01');         // ISO timestamp → date part
+  assert.equal(dateOnly(new Date('2026-09-01T00:00:00.000Z')), '2026-09-01'); // a real Date object
+  assert.equal(dateOnly(''), '');
+  assert.equal(dateOnly(null), '');
+  assert.equal(dateOnly(undefined), '');
+  assert.equal(dateOnly('not-a-date'), '');
+  // never a locale Date serialization like "Tue Sep 01 2026 …"
+  assert.doesNotMatch(dateOnly(new Date('2026-09-01T00:00:00.000Z')), /[A-Za-z]/);
 });
 
 // ---- money scrubber ----
@@ -336,6 +404,17 @@ test('openTicketRow: deferred_date is empty when the request was never deferred'
   assert.equal(blank[DIGEST_OPEN_HEADERS.indexOf('deferred_date')], '');
 });
 
+test('openTicketRow: deferred_date is a stable YYYY-MM-DD, even from a real Date value', () => {
+  const at = (row) => row[DIGEST_OPEN_HEADERS.indexOf('deferred_date')];
+  // A real Date object (how Apps Script reads a date cell) must normalize, not serialize to a locale string.
+  const fromDate = openTicketRow({ id: 'R-9', status: 'נדחה לתאריך', deferred_until: new Date('2026-09-01T00:00:00.000Z') }, SAMPLE_CTX);
+  assert.equal(at(fromDate), '2026-09-01');
+  assert.doesNotMatch(at(fromDate), /[A-Za-z]/, 'never a raw Date serialization');
+  // An ISO timestamp string collapses to the date part.
+  const fromIso = openTicketRow({ id: 'R-10', status: 'נדחה לתאריך', deferred_until: '2026-09-01T09:30:00.000Z' }, SAMPLE_CTX);
+  assert.equal(at(fromIso), '2026-09-01');
+});
+
 test('openTicketRow: the existing nine columns are byte-identical to the legacy assembly', () => {
   // Guards existing consumers: adding the three columns must not perturb columns 1-9 for any input.
   const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
@@ -368,12 +447,22 @@ test('openTicketRow tolerates missing fields — blanks, never a thrown error or
 
 test('the Apps Script writer builds rows via digestOpenTicketRow_ and appends the scrubbed fields', () => {
   // Source-level mirror check: the writer delegates row layout to digestOpenTicketRow_ and that builder
-  // scrubs category / urgency / location_in_house / deferred_date (so the .gs path matches the tested
-  // pure openTicketRow).
+  // scrubs category / urgency / location_in_house, and normalizes deferred_date (so the .gs path matches
+  // the tested pure openTicketRow).
   const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
   assert.ok(/rows\.push\(digestOpenTicketRow_\(req,/.test(gs), 'buildOpenTicketRows_ delegates to digestOpenTicketRow_');
   assert.ok(/digestScrubField_\(r\.category\)/.test(gs), 'category is scrubbed');
   assert.ok(/digestScrubField_\(r\.urgency\)/.test(gs), 'urgency is scrubbed');
   assert.ok(/digestScrubField_\(r\.location_in_house\)/.test(gs), 'location_in_house is scrubbed');
-  assert.ok(/digestScrubField_\(r\.deferred_until\)/.test(gs), 'deferred_date sources deferred_until, scrubbed');
+  // deferred_date is date-normalized (YYYY-MM-DD), NOT scrubbed as free text (would leak a raw Date).
+  assert.ok(/digestDateOnly_\(r\.deferred_until\)/.test(gs), 'deferred_date normalizes deferred_until to YYYY-MM-DD');
+});
+
+test('the Apps Script writer gates OpenTickets by the retention-aware filter (self-cleaning)', () => {
+  // Source-level mirror check: the digest filters via digestIncludeTicket_ (not the old status-only
+  // filter), reads the retention window from Config archive_after_days, and passes it in.
+  const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
+  assert.ok(/digestIncludeTicket_\(req,\s*now,\s*retentionDays\)/.test(gs), 'the row loop uses digestIncludeTicket_');
+  assert.ok(/getConfig\(['"]archive_after_days['"]\)/.test(gs), 'retention window reuses archive_after_days');
+  assert.ok(/DIGEST_TERMINAL_STATUSES_\s*=\s*\[\s*['"]הושלם['"]\s*,\s*['"]סגור['"]\s*\]/.test(gs), 'terminal statuses mirror src');
 });
