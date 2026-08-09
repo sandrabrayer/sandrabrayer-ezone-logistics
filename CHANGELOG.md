@@ -44,10 +44,10 @@ category is not a change (no gate, no special audit line). New pure helpers in `
 **Tests.** `test/archive.test.js` (new), `test/delete-digest.test.js` (new), `test/dashboard-defer-label.test.js`
 (new), plus additions to `test/edit.test.js` and `test/config.test.js`. Suite: 658 pass / 0 fail.
 
-**Deploy note.** `apps-script/Code.gs` + `setup.gs` must be repasted and redeployed as a NEW version for
-the category-change gate and the `archive_after_days` seed to take effect live (a re-run of
-`setupSheet()` upserts the new Config key without touching existing rows). The archive tab is
-client-side and needs no deploy beyond serving the updated `dashboard.html`.
+**Deploy note.** Apps Script deploys automatically via the clasp CI on merge to main — no manual
+`Code.gs` paste. The one manual step is running `setupSheet()` **once** after merge to seed the new
+`archive_after_days` Config key (an upsert by key — it adds the row without touching existing Config).
+The archive tab is client-side and needs no deploy beyond serving the updated `dashboard.html`.
 
 ---
 
