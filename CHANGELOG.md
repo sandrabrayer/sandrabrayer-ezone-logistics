@@ -3,6 +3,42 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — tooling/tests — regression hardening: baseline gate, digest lifecycle contract, drift guards
+
+Process hardening after a near-miss: work started against a wrong assumption about `main` (PR #93's code
+had merged but its CHANGELOG entry was dropped in a reconciliation, and the test count had drifted). Four
+guards so that can't silently happen again — no behavior change to the app.
+
+**1 — Baseline gate (`npm run baseline`).** `scripts/baseline.mjs` recomputes the top-3 `CHANGELOG.md`
+headings and the passing test count, compares them against a committed **`BASELINE.md`**, and exits
+non-zero on mismatch (it also fetches `origin/main`, best-effort, and flags a stale local checkout). Every
+task can gate on it before starting; every PR re-anchors `BASELINE.md` (now a checklist item). This PR also
+**restores the lost #93 CHANGELOG entry** ("rejected requests linger in OpenTickets for the archive
+window") in its correct merge position, so the record matches the code already on `main`.
+
+**2 — Digest lifecycle contract test.** `test/digest-lifecycle-contract.test.js` walks **every status ×
+dated/undated × in-window/past-window** and asserts the exact `isDigestTicket` verdict — locking the frozen
+contract: active work always shown; rejected ages off `rejected_at`; completed/closed age off
+`completed_at`; undateable resolutions kept; and each class ages off its OWN timestamp (a stray
+`completed_at` never ages a rejection, and vice-versa).
+
+**3 — Behavioral drift guards (`test/mirror-drift.test.js`).** The `MIRROR:<name>` text guards only cover
+blocks written verbatim on both sides; the digest filter and the transition table can't be (GAS idioms;
+`Set` vs array). Two new guards compare BEHAVIOR instead: a matrix asserts `isDigestTicket` (src) and
+`digestIncludeTicket_` (sandbox-evaluated from `apps-script/digest.gs`) return identical results across
+statuses/dates/windows; and the allowed status-transition **edge sets** are extracted from both
+`src/approval.js` and `apps-script/Code.gs` and compared (Hebrew edges), extending the `MIRROR:approval`
+routing guard to the transition table. Both were mutation-tested to confirm they fail on real drift.
+
+**4 — PR template.** `.github/PULL_REQUEST_TEMPLATE.md` with a checklist: baseline verified / tests green /
+CHANGELOG updated / `BASELINE.md` re-anchored / mirror drift, plus an explicit **`setupSheet()` needed
+after merge? yes-no** prompt for schema/header changes.
+
+**Deploy note.** Tooling + tests + docs only. No `src`/`apps-script` logic change, no Apps Script deploy,
+no manual step. `npm test` stays green.
+
+---
+
 ## [Unreleased] — UX — graceful "request not found" + self-clearing banners
 
 **Why.** Acting on a request that was DELETED since the board rendered (a stale card) surfaced the raw
@@ -22,6 +58,40 @@ and re-fetches the board (refresh); the error banner is replaced by the next suc
 banner auto-clears when its timer fires. Suite: 681 pass / 0 fail.
 
 **Deploy note.** Client-side only (`dashboard.html`); no Apps Script change, no manual step.
+
+---
+
+## [Unreleased] — UX/digest — rejected requests linger in OpenTickets for the archive window
+
+Rejected requests (`לא מאושר`) dropped out of the coordinators' OpenTickets digest **immediately** on
+rejection, so a coordinator never saw that a manager had just turned a request down. They now follow the
+**same retention model already used for completed/closed**: a rejected ticket stays visible for the
+existing archive window (`Config.archive_after_days`, default 7 days) after the rejection, then drops out
+so the list still self-cleans.
+
+**Inclusion rule (both mirrors, kept in sync under the drift guard).** `isDigestTicket` (`src/digest.js`)
+and its mirror `digestIncludeTicket_` (`apps-script/digest.gs`) now age a rejected ticket off its rejection
+instant, exactly as a completed/closed ticket ages off `completed_at`: within the window → shown, past it →
+dropped, and an undateable rejection (no parseable date) is kept visible (we don't hide what we can't age).
+Active statuses — `דרישה` / `ממתין לאישור` / `מאושר` / `נדחה לתאריך` / `בביצוע` — are unaffected and always
+shown.
+
+**Rejection timestamp.** A new `rejected_at` column is **appended** to the Requests sheet (append-only,
+never reorders existing columns) on both `src/schema.js` and `apps-script/setup.gs`. `handleReject_` (and
+the generic `handleSetStatus_` reject path) stamp it at the `→ לא מאושר` transition, mirroring how
+`completed_at` is stamped at completion.
+
+**Tests.** `test/digest.test.js` — rejected within the window included, past the window dropped, the
+boundary day (exactly N → shown, N+1 → dropped), undateable-kept, a stray `completed_at` never ages a
+rejection, and a custom window. `test/digest-deferred-inclusion.test.js` — the full-vocabulary walk now
+expects a recently-rejected ticket shown and an aged one dropped. `test/schema.test.js` and
+`test/mirror-drift.test.js` — the 31-column Requests header with `rejected_at` appended last, mirrored
+across `schema.js` and `setup.gs`. `DIGEST-CONTRACT.md` updated to describe rejected retention.
+
+**Deploy note.** `rejected_at` is append-only on the Requests sheet — **existing sheets need a one-time
+`setupSheet()` run after merge** to gain the column. Until then the stamp is silently skipped and rejected
+tickets fall back to the undateable→kept behavior (visible, never wrongly hidden), so there is no broken
+interim state.
 
 ---
 

@@ -112,6 +112,7 @@ test('events.js MIRROR:events matches apps-script/Code.gs (exceptional-events re
 // evaluate the file in a sandbox and pull the seeds out. Function bodies (which reference Apps Script
 // globals) are only PARSED here, never run, so no Apps Script stubs are needed.
 import { HEADERS as SCHEMA_HEADERS, SEED_HOUSES, SEED_USERS, SEED_INVENTORY_ITEMS, SEED_CONFIG } from '../src/schema.js';
+import { isDigestTicket } from '../src/digest.js';
 
 function loadSetupGs() {
   const src = readFileSync(join(root, 'apps-script/setup.gs'), 'utf8');
@@ -209,4 +210,99 @@ test('Events header + event_types config mirror between schema.js and setup.gs (
   ]);
   assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'event_types'));
   assert.ok(SEED_CONFIG.some((o) => o.key === 'event_types'));
+});
+
+// ---- Behavioral drift guards: logic parity between src modules and their apps-script mirrors ----
+// The MIRROR:<name> text guards above catch drift in blocks written VERBATIM on both sides. The digest
+// filter and the transition table can't be verbatim-fenced — apps-script/digest.gs uses GAS idioms (var,
+// isNaN, a .replace trim, Date-cell handling) and the transition table uses arrays vs Sets — so text
+// comparison would false-positive on legitimate idiom differences. Instead we compare BEHAVIOR: run the
+// same inputs through both copies and assert identical results. Any real logic divergence fails the build.
+
+// digest.gs is pure data + function declarations at top level (no Apps Script calls run on load), so it
+// evaluates in a sandbox exactly like setup.gs. We pull out the mirror function and exercise it.
+function loadDigestGs() {
+  const src = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
+  // eslint-disable-next-line no-new-func
+  const fn = new Function(src + '\n;return { digestIncludeTicket_: digestIncludeTicket_ };');
+  return fn();
+}
+
+test('digest inclusion does NOT drift: src isDigestTicket ⇄ apps-script digestIncludeTicket_ (behavioral matrix)', () => {
+  const { digestIncludeTicket_ } = loadDigestGs();
+  const NOW = '2026-08-09T12:00:00.000Z';
+  const nowMs = new Date(NOW).getTime();
+  const stamp = (n) => new Date(nowMs - n * 86400000).toISOString();
+  // Every status × dated/undated (rejected_at and completed_at independently) × window, over three
+  // now-shapes (ISO string / ms number / Date) — the request-row data both copies actually see.
+  const statuses = ['דרישה', 'ממתין לאישור', 'מאושר', 'נדחה לתאריך', 'בביצוע',
+    'הושלם', 'סגור', 'לא מאושר', '', 'unknown-status'];
+  const dates = ['', undefined, null, 'not-a-date', stamp(0), stamp(6), stamp(7), stamp(8), stamp(30)];
+  const windows = [undefined, null, 0, -3, 'x', 7, 14, 30];
+  const nows = [NOW, nowMs, new Date(NOW)];
+  let checked = 0;
+  for (const status of statuses) {
+    for (const completed_at of dates) {
+      for (const rejected_at of dates) {
+        const req = { status, completed_at, rejected_at };
+        for (const w of windows) {
+          for (const nowArg of nows) {
+            const a = isDigestTicket(req, nowArg, w);
+            const b = digestIncludeTicket_(req, nowArg, w);
+            assert.equal(a, b,
+              `DRIFT: status=${status} completed_at=${completed_at} rejected_at=${rejected_at} w=${w} now=${typeof nowArg}`);
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 2000, `matrix ran (${checked} cases)`);
+});
+
+// ---- Approval status-transition edges must not drift (extends the MIRROR:approval routing guard) ----
+// MIRROR:approval fences the amount-routing block only. The allowed-transition table lives outside it and
+// is written with different idioms on each side (src: `new Set([S.X])`, Code.gs: `[ST.X]`), so we compare
+// the resolved Hebrew edge sets rather than the text. Divergence in what transitions are legal fails here.
+function statusMap(src, name) {
+  const m = src.match(new RegExp('\\b' + name + '\\s*=\\s*\\{([\\s\\S]*?)\\}'));
+  assert.ok(m, `no ${name} status map found`);
+  const map = {};
+  const re = /(\w+)\s*:\s*'([^']+)'/g;
+  let x;
+  while ((x = re.exec(m[1]))) map[x[1]] = x[2];
+  return map;
+}
+function transitionEdges(src, mapName, transVar) {
+  const map = statusMap(src, mapName);
+  const edges = {};
+  // TRANSITIONS[S.FROM] = new Set([S.A, S.B]);  OR  TRANSITIONS_[ST.FROM] = [ST.A, ST.B];
+  const re = new RegExp(transVar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+    '\\[' + mapName + '\\.(\\w+)\\]\\s*=\\s*(?:new Set\\()?\\[([^\\]]*)\\]', 'g');
+  let x;
+  while ((x = re.exec(src))) {
+    const from = map[x[1]];
+    assert.ok(from, `unmapped from-status ${x[1]}`);
+    const tos = (x[2].match(new RegExp(mapName + '\\.(\\w+)', 'g')) || [])
+      .map((t) => {
+        const key = t.split('.')[1];
+        assert.ok(map[key], `unmapped to-status ${key}`);
+        return map[key];
+      })
+      .sort();
+    edges[from] = tos;
+  }
+  return edges;
+}
+
+test('status-transition edges do NOT drift: src/approval.js ⇄ apps-script/Code.gs (Hebrew edge sets)', () => {
+  const approval = readFileSync(join(root, 'src/approval.js'), 'utf8');
+  const codeGs = readFileSync(join(root, 'apps-script/Code.gs'), 'utf8');
+  const a = transitionEdges(approval, 'S', 'TRANSITIONS');
+  const b = transitionEdges(codeGs, 'ST', 'TRANSITIONS_');
+  assert.ok(Object.keys(a).length >= 8, 'src transition table parsed all from-statuses');
+  assert.deepEqual(a, b, 'the allowed status transitions diverge between src/approval.js and Code.gs');
+  // Lock the safety-critical invariant on BOTH sides: rejected + closed are terminal (no outgoing edges).
+  assert.deepEqual(a['לא מאושר'], []);
+  assert.deepEqual(a['סגור'], []);
 });
