@@ -785,6 +785,8 @@ function buildNewRequest_(input) {
     plan_id: '',
     // Compliance (עמידה באמות מידה). Blank for a user-filed request; set by createComplianceRequest_.
     compliance_id: '',
+    // Rejection retention. Blank until the request is rejected (status → לא מאושר); set at that transition.
+    rejected_at: '',
   };
 }
 
@@ -878,8 +880,10 @@ function handleReject_(p, actor) {
     return jsonOut_({ ok: false, error: 'Cannot reject from status "' + req.status + '"' });
   }
   if (!actorMayApprove_(actor, req)) return forbidden_();
+  // Stamp the rejection instant so the digest can age the rejected ticket out of OpenTickets after the
+  // retention window (mirrors completed_at for completions).
   updateRequest_(p.id,
-    { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },
+    { status: ST.NOT_APPROVED, rejection_reason: p.reason || '', rejected_at: new Date().toISOString() },
     req.status, ST.NOT_APPROVED, actor.name, p.reason || '');
   rebuildDigest();
   return jsonOut_({ ok: true });
@@ -974,6 +978,9 @@ function handleSetStatus_(p, actor) {
     if (p.actual_cost != null) fields.actual_cost = p.actual_cost;
     if (p.completion_notes) fields.completion_notes = p.completion_notes;
   }
+  // A rejection reaching the generic status setter still stamps rejected_at (digest retention key),
+  // matching handleReject_ so both paths age out consistently.
+  if (p.to === ST.NOT_APPROVED) fields.rejected_at = new Date().toISOString();
   updateRequest_(p.id, fields, req.status, p.to, actor.name, p.note || '');
   // Preventive maintenance: a completed plan-linked request writes its completion date back to the
   // plan's last_done (no-op for a normal request — plan_id blank).
