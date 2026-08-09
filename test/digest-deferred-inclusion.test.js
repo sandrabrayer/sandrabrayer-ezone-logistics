@@ -14,10 +14,11 @@ import { STATUSES } from '../src/schema.js';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NOW = '2026-08-09T12:00:00.000Z';
 
-// Expected digest membership per the intended rule: everything EXCEPT (a) rejected — never, and
-// (b) completed/closed OLDER than archive_after_days. A completed/closed ticket within the window stays.
-const RECENT = '2026-08-08T00:00:00.000Z'; // 1 day ago → completed/closed still shown
-const OLD = '2026-06-01T00:00:00.000Z';    // >7 days ago → completed/closed dropped
+// Expected digest membership per the intended rule: everything EXCEPT (a) rejected OLDER than
+// archive_after_days and (b) completed/closed OLDER than archive_after_days. A rejected ticket within the
+// window (aged off rejected_at) stays, exactly like a recently completed/closed one.
+const RECENT = '2026-08-08T00:00:00.000Z'; // 1 day ago → rejected + completed/closed still shown
+const OLD = '2026-06-01T00:00:00.000Z';    // >7 days ago → rejected + completed/closed dropped
 
 test('a deferred request is INCLUDED in the digest, with its deferred_date', () => {
   const deferred = {
@@ -30,7 +31,8 @@ test('a deferred request is INCLUDED in the digest, with its deferred_date', () 
   assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('deferred_date')], '2026-08-19', 'the deferral date is shown');
 });
 
-test('the FULL status vocabulary: only rejected (always) and aged completed/closed drop out', () => {
+test('the FULL status vocabulary: only aged rejected and aged completed/closed drop out', () => {
+  // Every status shown when RECENT: active always, and rejected/completed/closed within the window.
   const expected = {
     [STATUSES.REQUEST]: true,
     [STATUSES.PENDING_APPROVAL]: true,
@@ -39,14 +41,16 @@ test('the FULL status vocabulary: only rejected (always) and aged completed/clos
     [STATUSES.IN_PROGRESS]: true,
     [STATUSES.COMPLETED]: true,     // recent completion → shown within the window
     [STATUSES.CLOSED]: true,        // recently closed → shown within the window
-    [STATUSES.NOT_APPROVED]: false, // rejected → never shown
+    [STATUSES.NOT_APPROVED]: true,  // recently rejected → now shown within the window (aged off rejected_at)
   };
   for (const [status, shown] of Object.entries(expected)) {
     const terminal = status === STATUSES.COMPLETED || status === STATUSES.CLOSED;
-    const req = { status, completed_at: terminal ? RECENT : '' };
+    const rejected = status === STATUSES.NOT_APPROVED;
+    const req = { status, completed_at: terminal ? RECENT : '', rejected_at: rejected ? RECENT : '' };
     assert.equal(isDigestTicket(req, NOW, 7), shown, `${status} should be ${shown ? 'shown' : 'hidden'}`);
   }
-  // and the self-cleaning half: an OLD completed/closed ticket drops out (but never the active ones)
+  // and the self-cleaning half: OLD rejected + OLD completed/closed tickets drop out (but never the active ones)
+  assert.equal(isDigestTicket({ status: STATUSES.NOT_APPROVED, rejected_at: OLD }, NOW, 7), false);
   assert.equal(isDigestTicket({ status: STATUSES.COMPLETED, completed_at: OLD }, NOW, 7), false);
   assert.equal(isDigestTicket({ status: STATUSES.CLOSED, completed_at: OLD }, NOW, 7), false);
   // a deferred ticket is NEVER age-gated, no matter how long ago it was created/deferred

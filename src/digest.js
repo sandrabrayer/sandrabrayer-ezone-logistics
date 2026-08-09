@@ -111,12 +111,15 @@ export function isActiveTicket(status) {
 
 // ---- Digest inclusion (retention-aware self-cleaning) ----
 // What actually appears in OpenTickets:
-//   - 'לא מאושר' (rejected) → NEVER shown.
+//   - 'לא מאושר' (rejected) → shown only for a RETENTION WINDOW after the rejection (keyed off
+//     Requests.rejected_at), then DROPS OUT. A coordinator still sees what a manager just turned down —
+//     a decision they may want to see or revisit — but old rejections don't pile up.
 //   - terminal completions ('הושלם' / 'סגור') → shown only for a RETENTION WINDOW after completion
-//     (reuse Config.archive_after_days, default 7), then they DROP OUT so the list self-cleans. So a
-//     coordinator still sees what just finished, but old completions don't pile up.
+//     (keyed off Requests.completed_at), then they DROP OUT so the list self-cleans. So a coordinator
+//     still sees what just finished, but old completions don't pile up.
 //   - everything else (active work) → always shown.
-// A terminal ticket with no parseable completion date is kept visible (we don't hide what we can't age,
+// Both self-cleaning classes reuse the SAME window (Config.archive_after_days, default 7). A rejected or
+// terminal ticket with no parseable resolution date is kept visible (we don't hide what we can't age,
 // same rule as the dashboard archive). Mirror of digestIncludeTicket_ in apps-script/digest.gs.
 export const REJECTED_TICKET_STATUS = 'לא מאושר';
 export const TERMINAL_TICKET_STATUSES = ['הושלם', 'סגור'];
@@ -124,18 +127,20 @@ export const DIGEST_RETENTION_DAYS_DEFAULT = 7;
 
 /**
  * True when a request belongs in OpenTickets right now.
- * @param {object} req request row (reads .status, .completed_at)
+ * @param {object} req request row (reads .status, .completed_at, .rejected_at)
  * @param {number|string|Date} now current instant (Date, ms, or ISO string)
- * @param {number} retentionDays how long a completed/closed ticket lingers (Config archive_after_days; default 7)
+ * @param {number} retentionDays how long a rejected / completed / closed ticket lingers (Config archive_after_days; default 7)
  */
 export function isDigestTicket(req, now, retentionDays) {
   const r = req || {};
   const status = String(r.status == null ? '' : r.status).trim();
-  if (status === REJECTED_TICKET_STATUS) return false;              // rejected → never shown
-  if (TERMINAL_TICKET_STATUSES.indexOf(status) === -1) return true; // active → always shown
-  // Terminal (completed/closed): shown only within the retention window after completion.
-  const raw = r.completed_at;
-  if (raw == null || String(raw).trim() === '') return true;        // undateable completion → keep visible
+  const rejected = status === REJECTED_TICKET_STATUS;
+  const terminal = TERMINAL_TICKET_STATUSES.indexOf(status) !== -1;
+  if (!rejected && !terminal) return true;                          // active → always shown
+  // Rejected / completed / closed: shown only within the retention window after the resolution. Rejected
+  // ages off its rejection timestamp; completed/closed off completion — same window, same undateable rule.
+  const raw = rejected ? r.rejected_at : r.completed_at;
+  if (raw == null || String(raw).trim() === '') return true;        // undateable resolution → keep visible
   const finished = new Date(raw).getTime();
   if (Number.isNaN(finished)) return true;
   const nowMs = now instanceof Date ? now.getTime() : (typeof now === 'number' ? now : new Date(now).getTime());

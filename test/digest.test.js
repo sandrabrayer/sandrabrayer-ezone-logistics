@@ -168,9 +168,33 @@ const DNOW = '2026-08-09T12:00:00.000Z';
 const dNowMs = new Date(DNOW).getTime();
 const dDaysAgo = (n) => new Date(dNowMs - n * 86400000).toISOString();
 
-test('rejected (לא מאושר) tickets are never in the digest', () => {
+test('rejected (לא מאושר) tickets linger for the retention window, then drop out', () => {
   assert.equal(REJECTED_TICKET_STATUS, 'לא מאושר');
-  assert.equal(isDigestTicket({ status: 'לא מאושר', completed_at: dDaysAgo(0) }, DNOW, 7), false);
+  // within the window → still shown (a coordinator should see a just-turned-down request)
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(0) }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(6) }, DNOW, 7), true);
+  // past the window → dropped (self-cleaning, same model as completed/closed)
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(8) }, DNOW, 7), false);
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(30) }, DNOW, 7), false);
+});
+
+test('the rejected retention boundary is inclusive at exactly N days', () => {
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(7) }, DNOW, 7), true);  // exactly 7 → still shown
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: dDaysAgo(8) }, DNOW, 7), false); // 8 → dropped
+});
+
+test('a rejected ticket with no parseable rejection date is kept (not hidden)', () => {
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: '' }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'לא מאושר' }, DNOW, 7), true);
+  assert.equal(isDigestTicket({ status: 'לא מאושר', rejected_at: 'not-a-date' }, DNOW, 7), true);
+  // rejected ages off rejected_at, NOT completed_at — a stray completed_at must never age a rejection
+  assert.equal(isDigestTicket({ status: 'לא מאושר', completed_at: dDaysAgo(30) }, DNOW, 7), true);
+});
+
+test('rejected honors a custom retention window (keyed off rejected_at)', () => {
+  const req = { status: 'לא מאושר', rejected_at: dDaysAgo(20) };
+  assert.equal(isDigestTicket(req, DNOW, 30), true);  // 20 <= 30 → still shown
+  assert.equal(isDigestTicket(req, DNOW, 14), false); // 20 > 14 → dropped
 });
 
 test('active tickets are always in the digest, regardless of age', () => {

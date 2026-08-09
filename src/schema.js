@@ -40,6 +40,9 @@ export const HEADERS = {
     'plan_id',             // MaintenancePlan.id that generated this request; blank for normal requests.
     // ---- Compliance (עמידה באמות מידה) — APPENDED at the end (never reorder earlier columns) ----
     'compliance_id',       // Compliance.id that generated this renewal request; blank for normal requests.
+    // ---- Rejection retention — APPENDED at the end (never reorder earlier columns) ----
+    'rejected_at',         // ISO when the request was rejected (status → לא מאושר). Ages the digest's
+                           // rejected-ticket retention window, mirroring completed_at for completions.
   ],
 
   // Self-owned house list (NOT fed from Dashboard). §4.

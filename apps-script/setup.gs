@@ -26,6 +26,9 @@ var HEADERS = {
     // Compliance (עמידה באמות מידה) — compliance_id APPENDED at the end (existing sheets gain it via the
     // append branch in setupSheet()). Blank for normal requests.
     'compliance_id',
+    // Rejection retention — rejected_at APPENDED at the end (existing sheets gain it via the append
+    // branch in setupSheet()). ISO when the request was rejected; blank until then.
+    'rejected_at',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
