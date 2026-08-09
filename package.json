@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "test:watch": "node --test --watch test/*.test.js",
+    "baseline": "node scripts/baseline.mjs",
     "smoke": "node test/smoke-live.js"
   },
   "engines": {
