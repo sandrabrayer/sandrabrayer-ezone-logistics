@@ -30,7 +30,7 @@ var DIGEST_WEEKS_ = 8;
 // after them (this change) — never reorder/remove (consumers read by header name). No financial fields:
 // the three new columns are non-financial request facts, money-scrubbed like `title`. Mirror of
 // DIGEST_OPEN_HEADERS in src/digest.js.
-var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked', 'category', 'urgency', 'location_in_house'];
+var DIGEST_OPEN_HEADERS_ = ['house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked', 'category', 'urgency', 'location_in_house', 'deferred_date'];
 var DIGEST_WEEKLY_HEADERS_ = ['house', 'weekStart', 'status', 'shortagesSummary', 'updatedAt'];
 
 // Weekly-count status vocabulary (Hebrew display values are the stored values).
@@ -347,10 +347,13 @@ function digestOpenTicketRow_(req, ctx) {
     c.daysOpen == null ? '' : c.daysOpen,
     c.overdue,
     c.blocked,
-    // ---- APPENDED (this change): non-financial request facts, scrubbed like title ----
+    // ---- APPENDED: non-financial request facts, scrubbed like title ----
     digestScrubField_(r.category),
     digestScrubField_(r.urgency),
     digestScrubField_(r.location_in_house),
+    // deferred_date (this change): Requests.deferred_until, scrubbed like the rest; blank when never
+    // deferred. The Coordinators app (PR #125) reads it here by this exact header name.
+    digestScrubField_(r.deferred_until),
   ];
 }
 

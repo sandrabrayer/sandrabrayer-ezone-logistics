@@ -3,6 +3,41 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — contract — OpenTickets digest: append deferred_date (column 13)
+
+**Why.** The Coordinators app (their PR #125) wants to show *when* a deferred Logistics ticket is due to
+resume, so a coordinator can triage a `נדחה לתאריך` ticket without opening Logistics. The deferral date is
+a non-financial request fact, safe to publish.
+
+**What.** One **append-only** column at the END of the OpenTickets header, after the increment's
+category / urgency / location_in_house columns — the frozen-contract order is now:
+
+```
+1 house  2 ticketId  3 title  4 status  5 openedDate  6 updatedAt  7 daysOpen  8 overdue  9 blocked
+10 category  11 urgency  12 location_in_house  13 deferred_date
+```
+
+- `deferred_date` — `Requests.deferred_until`, money-scrubbed and single-lined like the other appended
+  fields, **empty when the request was never deferred**. The Coordinators app reads it by this exact
+  header name.
+
+**Contract invariants held.** Columns 1-12 are **byte-identical** and keep their exact positions
+(append-only — never reordered or removed; consumers read by header name). **No financial field is
+published** — the value runs through the **same money scrubber as `title`** (`scrubField`). `estimated_cost`
+/ `actual_cost` / `due_at` / `blocked_reason` remain unpublished.
+
+**Changed.** `src/digest.js` (`DIGEST_OPEN_HEADERS` + `openTicketRow`), `apps-script/digest.gs`
+(`DIGEST_OPEN_HEADERS_` + `digestOpenTicketRow_`, kept byte-mirrored), `DIGEST-CONTRACT.md` (column 13).
+
+**Tests.** `test/digest.test.js` — deferred_date appended as column 13 (1-12 byte-identical), the value
+sources `deferred_until`, and it is empty when not deferred; the src↔Apps Script header + row mirror
+guards extended. Suite: 660 pass / 0 fail.
+
+**Deploy note.** `apps-script/**` changes deploy automatically via the clasp CI on merge to main — no
+manual step for this column (the digest rebuilds on the next write or the 15-minute trigger).
+
+---
+
 ## [Unreleased] — UX/dashboard — defer label, completed-request archive, category correction
 
 Four coordinator-facing changes from live feedback, all on the Roy/Sandra dashboard + the mirrored

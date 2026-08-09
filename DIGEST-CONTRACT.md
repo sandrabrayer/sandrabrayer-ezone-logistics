@@ -34,10 +34,12 @@ Tab OpenTickets — columns in this exact order:
   10 category          Requests.category (רכישה / תיקון / החלפה), single line, scrubbed
   11 urgency           Requests.urgency (רגיל / דחוף / חירום), single line, scrubbed
   12 location_in_house Requests.location_in_house, single line, scrubbed
+  13 deferred_date     Requests.deferred_until, single line, scrubbed; empty when not deferred
 Included when status is NOT 'סגור' and NOT 'לא מאושר'. Columns 7-9 are aging facts (non-financial);
-due_at itself and blocked_reason are NOT published. Columns 10-12 are non-financial request facts,
+due_at itself and blocked_reason are NOT published. Columns 10-13 are non-financial request facts,
 APPENDED after the aging columns and money-scrubbed exactly like `title` (no price ever leaks); they
-are NOT length-capped. estimated_cost / actual_cost remain unpublished.
+are NOT length-capped. Column 13 (deferred_date) is empty for any request that was never deferred.
+estimated_cost / actual_cost remain unpublished.
 
 Tab WeeklyCounts — columns in this exact order:
   1 house              house id
