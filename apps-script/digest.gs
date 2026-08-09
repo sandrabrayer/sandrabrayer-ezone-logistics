@@ -125,9 +125,10 @@ function digestIsActiveTicket_(status) {
   return DIGEST_EXCLUDED_STATUSES_.indexOf(String(status == null ? '' : status).trim()) === -1;
 }
 
-// Retention-aware inclusion (mirror of isDigestTicket in src/digest.js): 'לא מאושר' is never shown; a
-// terminal completion ('הושלם' / 'סגור') is shown only for retentionDays after completion, then drops
-// out so the list self-cleans; everything else (active) is always shown. Undateable completion → kept.
+// Retention-aware inclusion (mirror of isDigestTicket in src/digest.js): 'לא מאושר' (rejected) is shown
+// only for retentionDays after the rejection (Requests.rejected_at); a terminal completion ('הושלם' /
+// 'סגור') is shown only for retentionDays after completion (Requests.completed_at); both then drop out so
+// the list self-cleans; everything else (active) is always shown. Undateable resolution → kept.
 var DIGEST_REJECTED_STATUS_ = 'לא מאושר';
 var DIGEST_TERMINAL_STATUSES_ = ['הושלם', 'סגור'];
 var DIGEST_RETENTION_DAYS_DEFAULT_ = 7;
@@ -135,9 +136,10 @@ var DIGEST_RETENTION_DAYS_DEFAULT_ = 7;
 function digestIncludeTicket_(req, now, retentionDays) {
   var r = req || {};
   var status = String(r.status == null ? '' : r.status).replace(/^\s+|\s+$/g, '');
-  if (status === DIGEST_REJECTED_STATUS_) return false;
-  if (DIGEST_TERMINAL_STATUSES_.indexOf(status) === -1) return true;
-  var raw = r.completed_at;
+  var rejected = status === DIGEST_REJECTED_STATUS_;
+  var terminal = DIGEST_TERMINAL_STATUSES_.indexOf(status) !== -1;
+  if (!rejected && !terminal) return true;
+  var raw = rejected ? r.rejected_at : r.completed_at;
   if (raw == null || String(raw).replace(/^\s+|\s+$/g, '') === '') return true;
   var finished = (raw instanceof Date) ? raw.getTime() : new Date(String(raw)).getTime();
   if (isNaN(finished)) return true;

@@ -182,13 +182,21 @@ test('Compliance header + Requests compliance_id + config mirror between schema.
   assert.deepEqual(gs.HEADERS.Compliance, SCHEMA_HEADERS.Compliance);
   assert.deepEqual(SCHEMA_HEADERS.Compliance,
     ['id', 'house', 'item', 'expires_at', 'reminder_days', 'doc_url', 'notes', 'active']);
-  // compliance_id is appended to Requests on BOTH sides, at the very end.
+  // compliance_id is appended to Requests on BOTH sides (now second-to-last, just before rejected_at).
   assert.ok(gs.HEADERS.Requests.includes('compliance_id'), 'setup.gs Requests missing compliance_id');
-  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 1], 'compliance_id');
-  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 1], 'compliance_id');
+  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 2], 'compliance_id');
+  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 2], 'compliance_id');
   // compliance_reminder_days is seeded on both sides (the SEED_CONFIG deep-equal below also covers it).
   assert.ok(gs.SEED_CONFIG.some((a) => a[0] === 'compliance_reminder_days'));
   assert.ok(SEED_CONFIG.some((o) => o.key === 'compliance_reminder_days'));
+});
+
+test('Requests rejected_at mirrors between schema.js and setup.gs, appended last (rejection retention)', () => {
+  const gs = loadSetupGs();
+  // rejected_at is appended to Requests on BOTH sides, at the very end (append-only, never reordered).
+  assert.ok(gs.HEADERS.Requests.includes('rejected_at'), 'setup.gs Requests missing rejected_at');
+  assert.equal(gs.HEADERS.Requests[gs.HEADERS.Requests.length - 1], 'rejected_at');
+  assert.equal(SCHEMA_HEADERS.Requests[SCHEMA_HEADERS.Requests.length - 1], 'rejected_at');
 });
 
 test('Events header + event_types config mirror between schema.js and setup.gs (exceptional-events register)', () => {

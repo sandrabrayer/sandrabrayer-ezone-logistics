@@ -40,8 +40,10 @@ Inclusion (retention-aware, self-cleaning): every ACTIVE ticket is published —
 מאושר / נדחה לתאריך (deferred, waiting for a date) / בביצוע are ALWAYS published, regardless of age. A
 completed/closed ticket ('הושלם' / 'סגור') stays for a retention window of `archive_after_days` days
 (Config, default 7) AFTER completion (Requests.completed_at), then drops out — so coordinators see recent
-completions but the list self-cleans. 'לא מאושר' (rejected) is the ONLY status never published. A
-completed/closed ticket with no parseable completion date is kept (we do not hide what we cannot age).
+completions but the list self-cleans. 'לא מאושר' (rejected) follows the SAME retention model, aged off its
+rejection instant (Requests.rejected_at): it stays for the same `archive_after_days` window after being
+rejected — so coordinators still see a just-turned-down request — then drops out. A rejected or
+completed/closed ticket with no parseable resolution date is kept (we do not hide what we cannot age).
 The rebuild isolates each request: a single malformed row is logged and skipped, never aborting the whole
 tab — so one bad request can never make the other (active/deferred) tickets vanish.
 

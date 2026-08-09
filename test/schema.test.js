@@ -22,19 +22,20 @@ test('Events sheet has the append-only exceptional-events columns', () => {
   ]);
 });
 
-test('Requests sheet has all 30 columns; compliance_id appended last (compliance tracker)', () => {
-  assert.equal(HEADERS.Requests.length, 30);
+test('Requests sheet has all 31 columns; rejected_at appended last (digest rejection retention)', () => {
+  assert.equal(HEADERS.Requests.length, 31);
   assert.equal(HEADERS.Requests[0], 'id');
-  // compliance_id is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
-  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'compliance_id');
+  // rejected_at is APPEND-ONLY at the very end; execution_status keeps its position (index 23).
+  assert.equal(HEADERS.Requests[HEADERS.Requests.length - 1], 'rejected_at');
   assert.equal(HEADERS.Requests[23], 'execution_status');
-  // The SLA columns (36) and plan_id (maintenance) stay put just before compliance_id.
+  // The SLA columns (36), plan_id (maintenance) and compliance_id stay put just before rejected_at.
   assert.equal(HEADERS.Requests[27], 'blocked_at');
   assert.equal(HEADERS.Requests[28], 'plan_id');
+  assert.equal(HEADERS.Requests[29], 'compliance_id');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
     'deferred_until', 'assigned_to', 'assignment_type', 'trade', 'batch_id', 'execution_status',
-    'due_at', 'blocked', 'blocked_reason', 'blocked_at', 'plan_id', 'compliance_id']) {
+    'due_at', 'blocked', 'blocked_reason', 'blocked_at', 'plan_id', 'compliance_id', 'rejected_at']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
 });
