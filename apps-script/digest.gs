@@ -208,14 +208,19 @@ function digestRecentWeekStarts_(now, n) {
 // ---- Date coercion (sheet cells may hand back a Date OR a string) ----
 
 /** Best-effort YYYY-MM-DD from a cell value (Date or ISO/parseable string). '' when unusable. */
+// A Date read from a Sheet date cell (e.g. Requests.deferred_until) is midnight in the SCRIPT timezone;
+// reducing it with toISOString() (UTC) shifts the calendar day back one for any positive-offset zone
+// (Asia/Jerusalem: 19/08 midnight → 18/08 21:00Z → "2026-08-18"). Format Date objects in the SCRIPT
+// timezone so the emitted day matches what the sheet shows. A value already 'YYYY-MM-DD…' (an ISO string,
+// how created_at arrives) is taken verbatim — no zone conversion, no shift.
 function digestDateOnly_(v) {
   if (v == null || v === '') return '';
-  if (v instanceof Date) return isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   var s = String(v);
-  var m = s.match(/^(\d{4}-\d{2}-\d{2})/); // already ISO-ish
+  var m = s.match(/^(\d{4}-\d{2}-\d{2})/); // already ISO-ish (date-only or ISO timestamp) → verbatim date
   if (m) return m[1];
   var d = new Date(s);
-  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 /** Best-effort ISO 8601 UTC from a cell value (Date or parseable string). '' when unusable. */
@@ -339,25 +344,32 @@ function buildOpenTicketRows_() {
   var now = new Date();
   var rows = [];
   requests.forEach(function (req) {
-    var house = digestHouseId_(req.house);
-    if (!house) return;                          // unmapped house → omitted
-    if (!digestIncludeTicket_(req, now, retentionDays)) return;
-    var id = String(req.id);
-    var updatedAt = latestAudit[id] || digestIso_(req.created_at);
-    // Aging facts for the coordinators app (increment 36) — non-financial. ticketAging is the shared
-    // SLA logic (defined in Code.gs, same Apps Script project).
-    var aging = ticketAging(req, now);
-    // digestOpenTicketRow_ fixes the column order (mirror of openTicketRow in src/digest.js); we pass
-    // the sheet-resolved facts and it lays out + scrubs the request-derived text (title + the three
-    // appended non-financial columns).
-    rows.push(digestOpenTicketRow_(req, {
-      house: house,
-      openedDate: digestDateOnly_(req.created_at),
-      updatedAt: updatedAt,
-      daysOpen: aging.days_open,
-      overdue: aging.overdue,
-      blocked: aging.blocked,
-    }));
+    // Per-request isolation: a single malformed request (bad date, odd field) must NEVER abort the whole
+    // rebuild — that would leave the OpenTickets tab stale and make OTHER live tickets (a just-deferred
+    // request among them) silently vanish from the coordinators app. Log the offender and skip only it.
+    try {
+      var house = digestHouseId_(req.house);
+      if (!house) return;                          // unmapped house → omitted
+      if (!digestIncludeTicket_(req, now, retentionDays)) return;
+      var id = String(req.id);
+      var updatedAt = latestAudit[id] || digestIso_(req.created_at);
+      // Aging facts for the coordinators app (increment 36) — non-financial. ticketAging is the shared
+      // SLA logic (defined in Code.gs, same Apps Script project).
+      var aging = ticketAging(req, now);
+      // digestOpenTicketRow_ fixes the column order (mirror of openTicketRow in src/digest.js); we pass
+      // the sheet-resolved facts and it lays out + scrubs the request-derived text (title + the appended
+      // non-financial columns).
+      rows.push(digestOpenTicketRow_(req, {
+        house: house,
+        openedDate: digestDateOnly_(req.created_at),
+        updatedAt: updatedAt,
+        daysOpen: aging.days_open,
+        overdue: aging.overdue,
+        blocked: aging.blocked,
+      }));
+    } catch (err) {
+      Logger.log('buildOpenTicketRows_: skipped request ' + (req && req.id) + ' — ' + (err && err.message ? err.message : err));
+    }
   });
   return rows;
 }

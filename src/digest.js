@@ -148,8 +148,11 @@ export function isDigestTicket(req, now, retentionDays) {
 // ---- Stable date normalization (YYYY-MM-DD) ----
 // Reduce a date-ish value to a stable 'YYYY-MM-DD' string so consumers parse it reliably — never a raw
 // Date serialization ("Mon Sep 01 2026 …"). A value already starting 'YYYY-MM-DD' is taken verbatim (no
-// timezone shift); a Date / other parseable form is reduced via ISO; blank / unparseable → ''. Mirror of
-// digestDateOnly_ in apps-script/digest.gs.
+// timezone shift); a Date / other parseable form is reduced via ISO; blank / unparseable → ''.
+// NOTE: the Apps Script mirror digestDateOnly_ formats bare Date objects in the SCRIPT timezone (not UTC),
+// because a Sheet date cell is midnight in that zone and a UTC reduction would shift the day back one. The
+// real deferred_until data is a 'YYYY-MM-DD' string (from the dashboard's date input), which BOTH sides
+// take verbatim — so they agree on live data; the Date branch differs only to stay correct per source.
 export function dateOnly(v) {
   if (v == null || v === '') return '';
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);

@@ -3,6 +3,46 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — fix — deferred tickets vanishing from the OpenTickets digest
+
+Live feedback after #89: a request in status `נדחה לתאריך` (deferred, waiting for a date) disappeared
+from the coordinators' OpenTickets digest — observed live for a request deferred to 19/08/2026.
+
+**Root cause — not the inclusion filter (verified).** `isDigestTicket` / `digestIncludeTicket_` already
+include every active status: only `לא מאושר` (rejected) is always excluded, and only completed/closed
+tickets past the retention window drop out. Deferred is active → always included. A full-vocabulary
+simulation confirmed the deferred ticket is present with `deferred_date = 2026-08-19`. So the drop was
+**not** the inclusion rule. Two real defects around it could make a live deferred ticket vanish or read
+wrong — both fixed:
+
+**1 — Rebuild is now isolated per request (the vanish fix).** `buildOpenTicketRows_` iterated the requests
+with no per-row guard: a single malformed request (a bad date, an odd field) throwing anywhere in the row
+build would abort the **whole** `forEach`, `rebuildDigest()` would catch it, and the OpenTickets tab would
+be left **stale** — so a freshly-deferred request never landed and appeared "gone". Each request is now
+built inside a `try/catch`: a failing row is logged (`Logger.log`) and **skipped**, never taking the tab —
+or the other active/deferred tickets — down with it.
+
+**2 — `deferred_date` timezone day-shift.** A Sheet date cell (`Requests.deferred_until`) is read as a
+`Date` at midnight in the **script** timezone; reducing it via `toISOString()` (UTC) shifted the calendar
+day back one for a positive-offset zone (Asia/Jerusalem: 19/08 → `2026-08-18`). `digestDateOnly_` now
+formats `Date` objects with `Utilities.formatDate(…, Session.getScriptTimeZone(), 'yyyy-MM-dd')`, so the
+emitted day matches the sheet. A `'YYYY-MM-DD'` string (how the dashboard writes it) is still taken
+verbatim on both the pure and Apps Script sides.
+
+**Verified: no status is silently dropped.** New `test/digest-deferred-inclusion.test.js` asserts the
+deferred ticket is in the digest with its `deferred_date`, walks the **full status vocabulary** (only
+rejected always out; completed/closed out only when aged; everything else — incl. deferred — always in),
+and source-guards the per-request isolation and the script-timezone date format.
+
+**Changed.** `apps-script/digest.gs` (per-request `try/catch`; `digestDateOnly_` script-timezone format),
+`src/digest.js` (comment on the intentional Date-branch mirror divergence), `DIGEST-CONTRACT.md` (active
+statuses always published; per-row isolation; timezone note).
+
+**Deploy note.** `apps-script/**` deploys automatically via the clasp CI on merge to main. The digest
+rebuilds on the next write or the 15-minute trigger; no manual step.
+
+---
+
 ## [Unreleased] — fix/contract — filter dedup, digest retention, deferred_date format
 
 Live feedback after #88. Four items — one dashboard regression fix and three digest corrections. No
