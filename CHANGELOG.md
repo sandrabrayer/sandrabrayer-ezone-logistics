@@ -3,6 +3,54 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Unreleased] — UX/dashboard — defer label, completed-request archive, category correction
+
+Four coordinator-facing changes from live feedback, all on the Roy/Sandra dashboard + the mirrored
+Apps Script handlers. No changes to the frozen digest contract or the approval engine.
+
+**1 — Defer button label matches the status vocabulary.** The defer action button read the bare
+imperative **דחה לתאריך**; every other surface (the DEFERRED status, the board group title, `schema.js`
+/ `approval.js`) uses the status word **נדחה לתאריך**. The button now reads **נדחה לתאריך** so the label
+and the resulting status are the same words.
+
+**2 — Completed/closed requests archive after a grace period.** Completed (**הושלם**) / closed
+(**סגור**) requests whose completion is older than `archive_after_days` (new Config key, **default 7**)
+leave the main board for a new read-only **ארכיון** tab. The board now shows only active work + recently
+completed; the archive is still house/lead-filterable (searchable) and read-only (no action buttons). The
+grace boundary is **strictly more than N days** (exactly N stays on the board); a request with no
+parseable `completed_at` is never archived (kept visible — we don't hide what we can't age); a blank /
+zero / negative window falls back to the default 7, never 0.
+
+- **Added** `src/archive.js` — pure `isArchived` / `partitionByArchive` (unit-tested), mirrored inline in
+  `src/dashboard.html` (the board is the only place that partitions).
+- **Changed** `src/config.js` + `apps-script/Code.gs` (numeric coercion), `apps-script/setup.gs` +
+  `src/schema.js` (`SEED_CONFIG`) — seed `archive_after_days = 7`, coerced to a number on read.
+- **Changed** `src/dashboard.html` — לוח פעיל / ארכיון tab toggle; the board filters archived rows out.
+
+**3 — Deleted test requests leave the OpenTickets digest (confirmed).** Deletion (`handleDeleteRequest_`,
+exec-only) removes the row from `Requests` **and** calls `rebuildDigest()`, which is a full
+wipe-and-rewrite from the **live** `Requests` rows (`buildOpenTicketRows_` → `readObjects_('Requests')`).
+A deleted request has no row to rebuild from, so it cannot reappear in OpenTickets — coordinators stop
+seeing junk test requests on the next rebuild. Already correct; now locked by a source-level guard test.
+
+**4 — Category correction (רכישה→תיקון) via the edit modal — manager-only, audited.** `category` was
+already an editable field, but the עריכה modal didn't offer it and a change wasn't logged as such. The
+edit modal now offers a category prompt **to the exec UI only**; the server (`handleEditRequest_`) rejects
+a category change from anyone but management (`ops_manager` / `ceo`) and logs it as a **category change**
+(`קטגוריה שונתה: <from> → <to> (<actor>)`) rather than a generic "edited". A no-op re-send of the same
+category is not a change (no gate, no special audit line). New pure helpers in `src/edit.js`
+(`canEditCategory` / `isCategoryChange` / `categoryChangeNote`), mirrored in `handleEditRequest_`.
+
+**Tests.** `test/archive.test.js` (new), `test/delete-digest.test.js` (new), `test/dashboard-defer-label.test.js`
+(new), plus additions to `test/edit.test.js` and `test/config.test.js`. Suite: 658 pass / 0 fail.
+
+**Deploy note.** `apps-script/Code.gs` + `setup.gs` must be repasted and redeployed as a NEW version for
+the category-change gate and the `archive_after_days` seed to take effect live (a re-run of
+`setupSheet()` upserts the new Config key without touching existing rows). The archive tab is
+client-side and needs no deploy beyond serving the updated `dashboard.html`.
+
+---
+
 ## [Unreleased] — contract — OpenTickets digest: append category / urgency / location_in_house
 
 **Why.** The coordinators app reads the read-only OpenTickets digest to triage Logistics tickets, but the

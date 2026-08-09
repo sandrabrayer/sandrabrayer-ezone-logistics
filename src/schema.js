@@ -273,6 +273,10 @@ export const SEED_CONFIG = [
   // tunable in the Sheet with NO deploy. A malformed/blank spec is logged and the entry form falls back
   // to אחר only — never a silently wrong category set.
   { key: 'event_types', value: 'בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר' },
+  // archive_after_days — completed (הושלם) / closed (סגור) requests whose completion is older than this
+  // many days leave the main dashboard board for the read-only ארכיון tab (still searchable). Tunable in
+  // the Sheet with NO deploy; coerced to a number. Blank/malformed → the UI default (7).
+  { key: 'archive_after_days', value: '7' },
 ];
 
 // ---- Roles + user seed (increment 30) ----
