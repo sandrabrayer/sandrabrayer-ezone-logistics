@@ -3,38 +3,27 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
-## [Unreleased] — UX/digest — rejected requests linger in OpenTickets for the archive window
+## [Unreleased] — UX — graceful "request not found" + self-clearing banners
 
-Rejected requests (`לא מאושר`) dropped out of the coordinators' OpenTickets digest **immediately** on
-rejection, so a coordinator never saw that a manager had just turned a request down. They now follow the
-**same retention model already used for completed/closed**: a rejected ticket stays visible for the
-existing archive window (`Config.archive_after_days`, default 7 days) after the rejection, then drops out
-so the list still self-cleans.
+**Why.** Acting on a request that was DELETED since the board rendered (a stale card) surfaced the raw
+English server error "Request not found", left the dead card on the board, and — because error banners
+never auto-cleared — the message stuck forever (which earlier caused a "broken on load" misdiagnosis).
 
-**Inclusion rule (both mirrors, kept in sync under the drift guard).** `isDigestTicket` (`src/digest.js`)
-and its mirror `digestIncludeTicket_` (`apps-script/digest.gs`) now age a rejected ticket off its rejection
-instant, exactly as a completed/closed ticket ages off `completed_at`: within the window → shown, past it →
-dropped, and an undateable rejection (no parseable date) is kept visible (we don't hide what we can't age).
-Active statuses — `דרישה` / `ממתין לאישור` / `מאושר` / `נדחה לתאריך` / `בביצוע` — are unaffected and always
-shown.
+**What (`src/dashboard.html`).**
+- **"Request not found" is handled gracefully.** `post()` now detects the server's `Request not found`
+  error and shows the Hebrew message **"הדרישה כבר לא קיימת — הלוח רוענן"** (never the raw English), then
+  **refreshes the board** (`load()`) so the stale card disappears on its own.
+- **All banners self-clear.** `showMsg` now auto-clears **every** banner (errors included) after ~6s, and
+  a new banner replaces the previous one immediately — so the next successful action clears a lingering
+  error, and no error banner can stick forever. One timer, reset on each call.
 
-**Rejection timestamp.** A new `rejected_at` column is **appended** to the Requests sheet (append-only,
-never reorders existing columns) on both `src/schema.js` and `apps-script/setup.gs`. `handleReject_` (and
-the generic `handleSetStatus_` reject path) stamp it at the `→ לא מאושר` transition, mirroring how
-`completed_at` is stamped at completion. **Existing sheets need a one-time `setupSheet()` run after merge**
-to gain the appended `rejected_at` column; until then the stamp is silently skipped and rejected tickets
-fall back to the undateable→kept behavior (visible, never wrongly hidden).
+**Tests.** `test/dashboard-notfound-refresh.test.js` — a `Request not found` POST shows the Hebrew message
+and re-fetches the board (refresh); the error banner is replaced by the next success (`בוצע.`); an error
+banner auto-clears when its timer fires. Suite: 681 pass / 0 fail.
 
-**Tests.** `test/digest.test.js` — rejected within the window included, past the window dropped, the
-boundary day (exactly N → shown, N+1 → dropped), undateable-kept, a stray `completed_at` never ages a
-rejection, and a custom window. `test/digest-deferred-inclusion.test.js` — the full-vocabulary walk now
-expects a recently-rejected ticket shown and an aged one dropped. `test/schema.test.js` and
-`test/mirror-drift.test.js` — the 31-column Requests header with `rejected_at` appended last, mirrored
-across `schema.js` and `setup.gs`. `DIGEST-CONTRACT.md` updated to describe rejected retention.
+**Deploy note.** Client-side only (`dashboard.html`); no Apps Script change, no manual step.
 
-**Changed.** `src/digest.js`, `apps-script/digest.gs` (retention-aware rejected inclusion), `src/schema.js`,
-`apps-script/setup.gs` (appended `rejected_at`), `apps-script/Code.gs` (stamp `rejected_at` on rejection;
-new-request default), `DIGEST-CONTRACT.md`, and the tests above.
+---
 
 ## [Unreleased] — fix — deferred tickets vanishing from the OpenTickets digest
 
