@@ -172,6 +172,10 @@
         </select>
       </span>
       <span><button class="act go" id="openCreate" type="button">＋ דרישה חדשה</button></span>
+      <span class="viewtabs" role="tablist" aria-label="תצוגה">
+        <button class="act go" id="tabBoard" type="button" role="tab" aria-selected="true">לוח פעיל</button>
+        <button class="act" id="tabArchive" type="button" role="tab" aria-selected="false">ארכיון</button>
+      </span>
     </div>
 
     <div class="msg" id="msg"></div>
@@ -293,6 +297,11 @@
     let allInspections = [];
     let allHouses = [];
     let threshold = THRESHOLD_DEFAULT;
+    // Archive (grace period): completed/closed requests older than this many days leave the active board
+    // for the read-only ארכיון tab. Overridden from Config.archive_after_days when present. Default 7.
+    const ARCHIVE_AFTER_DAYS_DEFAULT = 7;
+    let archiveAfterDays = ARCHIVE_AFTER_DAYS_DEFAULT;
+    let view = 'board'; // 'board' (active + recently completed) | 'archive' (read-only)
     const msg = document.getElementById('msg');
     const board = document.getElementById('board');
 
@@ -334,6 +343,10 @@
         if (d.config && d.config.approval_threshold != null) {
           threshold = Number(d.config.approval_threshold);
         }
+        if (d.config && d.config.archive_after_days != null) {
+          const a = Number(d.config.archive_after_days);
+          if (Number.isFinite(a) && a > 0) archiveAfterDays = a;
+        }
         allHouses = d.houses || [];
         const sel = document.getElementById('filterHouse');
         allHouses.forEach(h => { const o = document.createElement('option'); o.value = h.name; o.textContent = h.name; sel.appendChild(o); });
@@ -350,8 +363,62 @@
       return allRequests.filter(r => (!h || r.house === h) && (!lead || r.assigned_to === lead));
     }
 
+    // Mirror of src/archive.js isArchived: a completed (הושלם) / closed (סגור) request whose completion
+    // is STRICTLY MORE than archiveAfterDays days old leaves the active board for the read-only ארכיון
+    // tab. An undateable completion (no completed_at) is never archived — we do not hide what we can't age.
+    const ARCHIVABLE_STATUSES = [ST.COMPLETED, ST.CLOSED];
+    function isArchivedUI(r, nowMs) {
+      if (!ARCHIVABLE_STATUSES.includes(r.status)) return false;
+      if (!r.completed_at) return false;
+      const t = new Date(r.completed_at).getTime();
+      if (Number.isNaN(t)) return false;
+      let n = Number(archiveAfterDays);
+      if (!Number.isFinite(n) || n <= 0) n = ARCHIVE_AFTER_DAYS_DEFAULT;
+      const days = Math.floor((nowMs - t) / 86400000);
+      return days > n;
+    }
+
+    const tabBoard = document.getElementById('tabBoard');
+    const tabArchive = document.getElementById('tabArchive');
+    tabBoard.addEventListener('click', () => { if (view !== 'board') { view = 'board'; render(); } });
+    tabArchive.addEventListener('click', () => { if (view !== 'archive') { view = 'archive'; render(); } });
+    function syncViewTabs(archivedCount) {
+      tabBoard.setAttribute('aria-selected', view === 'board' ? 'true' : 'false');
+      tabArchive.setAttribute('aria-selected', view === 'archive' ? 'true' : 'false');
+      if (view === 'board') { tabBoard.classList.add('go'); tabArchive.classList.remove('go'); }
+      else { tabArchive.classList.add('go'); tabBoard.classList.remove('go'); }
+      tabArchive.textContent = 'ארכיון' + (archivedCount ? ' (' + archivedCount + ')' : '');
+    }
+
+    // A read-only archive card: no action buttons (the archive is read-only), completion date shown.
+    function archiveCard(r) {
+      const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
+      const when = r.completed_at ? fmtDate(r.completed_at) : '';
+      return `<div class="req" style="border-inline-start:4px solid #8b93a0;opacity:.9">
+        <div class="head"><div>
+          <div class="title">${escapeHtml(r.description || r.id)}</div>
+          <div class="meta">${escapeHtml(meta)}${r.location_in_house ? ' · ' + escapeHtml(r.location_in_house) : ''} · <span class="pill">${escapeHtml(r.status)}</span>${when ? ' · הושלם ' + when : ''}</div>
+        </div></div>
+      </div>`;
+    }
+
+    function renderArchive(archived) {
+      document.getElementById('attention').innerHTML = '';
+      document.getElementById('counters').innerHTML = '';
+      if (!archived.length) { board.innerHTML = '<p class="empty">אין דרישות בארכיון (הושלמו/נסגרו מעבר לתקופת החסד).</p>'; return; }
+      const nowMs = Date.now();
+      const items = archived.slice().sort((a, b) => agingSort(a, b, nowMs));
+      board.innerHTML = `<div class="group"><h2><span class="dot" style="background:#8b93a0"></span><span style="border-inline-start:4px solid #8b93a0;padding-inline-start:8px">ארכיון — הושלמו/נסגרו (לקריאה בלבד)</span> <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(r => archiveCard(r)).join('')}</div>`;
+    }
+
     function render() {
-      const reqs = filtered();
+      const nowMs0 = Date.now();
+      const all = filtered();
+      const archived = all.filter(r => isArchivedUI(r, nowMs0));
+      syncViewTabs(archived.length);
+      if (view === 'archive') { renderArchive(archived); return; }
+      // Board view: active work + recently-completed (within the grace window); archived rows drop out.
+      const reqs = all.filter(r => !isArchivedUI(r, nowMs0));
       renderAttention(reqs);
       // counters
       const open = reqs.filter(r => ![ST.CLOSED, ST.NOT_APPROVED, ST.COMPLETED].includes(r.status)).length;
@@ -574,7 +641,7 @@
           // Show a clear, NON-clickable status instead of a button that would 403 on click.
           btns.push('<button class="act" disabled title="דרישה מעל סף האישור — טעונה אישור מנהלת התפעול (אולגה)">ממתין לאישור אולגה</button>');
         }
-        btns.push(`<button class="act" onclick="doDefer('${id}')">דחה לתאריך</button>`);
+        btns.push(`<button class="act" onclick="doDefer('${id}')">נדחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
         btns.push(`<button class="act go" onclick="doAssign('${id}')">הועבר לביצוע</button>`);
       } else if (s === ST.IN_PROGRESS) {
@@ -765,7 +832,15 @@
       const description = prompt('תיאור:', r.description || ''); if (description === null) return;
       const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
       const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
-      post('editRequest', { id, by: who(), description, location_in_house, estimated_cost }, btn);
+      const payload = { id, by: who(), description, location_in_house, estimated_cost };
+      // Category correction (רכישה→תיקון) is manager-only — mirror of Code.gs canEditCategory / isManagement_.
+      // Only the exec UI is offered the prompt; the server re-checks the role and rejects a category change
+      // from anyone else. A blank / unchanged answer sends no category (no-op, not a change).
+      if (isExecUI()) {
+        const category = prompt('קטגוריה (רכישה / תיקון / החלפה):', r.category || ''); if (category === null) return;
+        if (category && category !== r.category) payload.category = category;
+      }
+      post('editRequest', payload, btn);
     };
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

@@ -42,12 +42,22 @@ test('OpenTickets carries daysOpen / overdue / blocked, appended after the origi
 
 test('OpenTickets appends category / urgency / location_in_house AFTER the existing nine columns', () => {
   // Append-only contract: the nine existing columns are byte-identical and keep their exact positions;
-  // the three new non-financial request facts are added strictly at the end, in this order.
+  // the three non-financial request facts are added strictly at the end, in this order.
   assert.deepEqual(DIGEST_OPEN_HEADERS.slice(0, 9), [
     'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
   ]);
-  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(9), ['category', 'urgency', 'location_in_house']);
-  assert.equal(DIGEST_OPEN_HEADERS.length, 12);
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(9, 12), ['category', 'urgency', 'location_in_house']);
+});
+
+test('OpenTickets appends deferred_date as column 13, AFTER the existing twelve (byte-identical 1-12)', () => {
+  // Append-only contract: columns 1-12 are byte-identical and keep their exact positions; deferred_date
+  // (read by the Coordinators app, PR #125, under this exact header name) is added strictly at the end.
+  assert.deepEqual(DIGEST_OPEN_HEADERS.slice(0, 12), [
+    'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
+    'category', 'urgency', 'location_in_house',
+  ]);
+  assert.equal(DIGEST_OPEN_HEADERS[12], 'deferred_date');
+  assert.equal(DIGEST_OPEN_HEADERS.length, 13);
 });
 
 test('the Apps Script writer header array mirrors src exactly (byte-for-byte, same order)', () => {
@@ -285,6 +295,7 @@ const SAMPLE_REQ = {
   category: 'תיקון',
   urgency: 'דחוף',
   location_in_house: 'מטבח — ליד\nהכיור 250 שח',
+  deferred_until: '2026-09-01',
 };
 const SAMPLE_CTX = {
   house: 'pardes',
@@ -295,23 +306,34 @@ const SAMPLE_CTX = {
   blocked: false,
 };
 
-test('openTicketRow lays out all twelve columns in DIGEST_OPEN_HEADERS order', () => {
+test('openTicketRow lays out all thirteen columns in DIGEST_OPEN_HEADERS order', () => {
   const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
   assert.equal(row.length, DIGEST_OPEN_HEADERS.length, 'one cell per header');
   assert.deepEqual(row, [
     'pardes', 'R-42', 'נזילה מתחת לכיור', 'מאושר', '2026-08-01', '2026-08-05T09:00:00.000Z',
     7, false, false,
-    'תיקון', 'דחוף', 'מטבח — ליד הכיור',
+    'תיקון', 'דחוף', 'מטבח — ליד הכיור', '2026-09-01',
   ]);
 });
 
-test('openTicketRow: the appended columns carry the scrubbed request facts at 10/11/12', () => {
+test('openTicketRow: the appended columns carry the scrubbed request facts at 10/11/12/13', () => {
   const row = openTicketRow(SAMPLE_REQ, SAMPLE_CTX);
   const at = (name) => row[DIGEST_OPEN_HEADERS.indexOf(name)];
   assert.equal(at('category'), 'תיקון');
   assert.equal(at('urgency'), 'דחוף');
   // Money scrubbed AND single-lined (250 שח removed, newline collapsed).
   assert.equal(at('location_in_house'), 'מטבח — ליד הכיור');
+  // deferred_date carries Requests.deferred_until (this request is deferred).
+  assert.equal(at('deferred_date'), '2026-09-01');
+});
+
+test('openTicketRow: deferred_date is empty when the request was never deferred', () => {
+  const notDeferred = { id: 'R-7', description: 'צביעה', status: 'מאושר' }; // no deferred_until
+  const row = openTicketRow(notDeferred, SAMPLE_CTX);
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('deferred_date')], '');
+  // an explicit blank string is equally empty
+  const blank = openTicketRow({ id: 'R-8', deferred_until: '' }, SAMPLE_CTX);
+  assert.equal(blank[DIGEST_OPEN_HEADERS.indexOf('deferred_date')], '');
 });
 
 test('openTicketRow: the existing nine columns are byte-identical to the legacy assembly', () => {
@@ -335,20 +357,23 @@ test('openTicketRow: the existing nine columns are byte-identical to the legacy 
 
 test('openTicketRow tolerates missing fields — blanks, never a thrown error or a leaked undefined', () => {
   const row = openTicketRow({ id: 'R-1', status: 'דרישה' }, { house: 'sde-eliezer' });
-  assert.equal(row.length, 12);
+  assert.equal(row.length, 13);
   assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('category')], '');
   assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('urgency')], '');
   assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('location_in_house')], '');
+  assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('deferred_date')], ''); // missing deferred_until → ''
   assert.equal(row[DIGEST_OPEN_HEADERS.indexOf('daysOpen')], '');   // null daysOpen → '' (unchanged rule)
   assert.equal(row[1], 'R-1');
 });
 
-test('the Apps Script writer builds rows via digestOpenTicketRow_ and appends the three scrubbed fields', () => {
+test('the Apps Script writer builds rows via digestOpenTicketRow_ and appends the scrubbed fields', () => {
   // Source-level mirror check: the writer delegates row layout to digestOpenTicketRow_ and that builder
-  // scrubs category / urgency / location_in_house (so the .gs path matches the tested pure openTicketRow).
+  // scrubs category / urgency / location_in_house / deferred_date (so the .gs path matches the tested
+  // pure openTicketRow).
   const gs = readFileSync(join(root, 'apps-script/digest.gs'), 'utf8');
   assert.ok(/rows\.push\(digestOpenTicketRow_\(req,/.test(gs), 'buildOpenTicketRows_ delegates to digestOpenTicketRow_');
   assert.ok(/digestScrubField_\(r\.category\)/.test(gs), 'category is scrubbed');
   assert.ok(/digestScrubField_\(r\.urgency\)/.test(gs), 'urgency is scrubbed');
   assert.ok(/digestScrubField_\(r\.location_in_house\)/.test(gs), 'location_in_house is scrubbed');
+  assert.ok(/digestScrubField_\(r\.deferred_until\)/.test(gs), 'deferred_date sources deferred_until, scrubbed');
 });

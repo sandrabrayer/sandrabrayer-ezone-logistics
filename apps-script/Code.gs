@@ -22,7 +22,7 @@
 var DEPLOY_COMMIT = 'DEV';
 
 // ---- Coercion (mirror of src/config.js) ----
-var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days'];
+var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days', 'archive_after_days'];
 var BOOLEAN_KEYS = ['emergency_bypasses_approval'];
 var TRUE_STRINGS = ['true', 'TRUE', 'True', '1', 'yes', 'YES'];
 
@@ -2687,6 +2687,15 @@ function handleEditRequest_(p, actor) {
     var f = EDITABLE_FIELDS_[i];
     if (Object.prototype.hasOwnProperty.call(p, f)) fields[f] = p[f];
   }
+  // Category correction (רכישה→תיקון) is a MANAGER-side decision — mirror of src/edit.js
+  // canEditCategory (canManage). A category change is management-only and is audited AS a category
+  // change; other EDITABLE_FIELDS keep the shared pre-approval edit rule above. A no-op re-send of the
+  // same category is not a change (no gate, no special note).
+  var catChanged = Object.prototype.hasOwnProperty.call(fields, 'category') &&
+    fields.category != null && String(fields.category) !== '' &&
+    VALID_CATEGORIES.indexOf(String(fields.category)) !== -1 &&
+    String(req.category == null ? '' : req.category) !== String(fields.category);
+  if (catChanged && !isManagement_(actor.role)) return forbidden_();
   var merged = {
     house: fields.house != null ? fields.house : req.house,
     category: fields.category != null ? fields.category : req.category,
@@ -2702,7 +2711,13 @@ function handleEditRequest_(p, actor) {
   if (fields.urgency != null) {
     fields.due_at = deriveDueAt(req.created_at, merged.urgency, slaSpec_(), function (m) { Logger.log(m); });
   }
-  updateRequest_(p.id, fields, req.status, req.status, actor.name, 'נערך ע"י ' + actor.name);
+  // A category correction is logged AS a category change (from → to + actor); any other edit keeps the
+  // generic note. Mirror of src/edit.js categoryChangeNote.
+  var editNote = catChanged
+    ? ('קטגוריה שונתה: ' + (req.category == null || req.category === '' ? '—' : req.category) +
+       ' → ' + (fields.category == null || fields.category === '' ? '—' : fields.category) + ' (' + actor.name + ')')
+    : ('נערך ע"י ' + actor.name);
+  updateRequest_(p.id, fields, req.status, req.status, actor.name, editNote);
   rebuildDigest();
   return jsonOut_({ ok: true });
 }

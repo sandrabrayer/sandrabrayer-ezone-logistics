@@ -32,11 +32,12 @@ export const DIGEST_HOUSE_IDS = [
 
 // The OpenTickets tab columns, in order (append-only). Mirror of DIGEST_OPEN_HEADERS_ in
 // apps-script/digest.gs. daysOpen / overdue / blocked appended in increment 36; category / urgency /
-// location_in_house appended after them (this change). No financial fields — the three new columns are
-// non-financial request facts, money-scrubbed like `title` before they are published.
+// location_in_house appended after them; deferred_date appended after those (this change, read by the
+// Coordinators app's PR #125 under that exact header name). No financial fields — every appended column
+// is a non-financial request fact, money-scrubbed like `title` before it is published.
 export const DIGEST_OPEN_HEADERS = [
   'house', 'ticketId', 'title', 'status', 'openedDate', 'updatedAt', 'daysOpen', 'overdue', 'blocked',
-  'category', 'urgency', 'location_in_house',
+  'category', 'urgency', 'location_in_house', 'deferred_date',
 ];
 
 /** Map a stored Hebrew house name to its digest id, or null when it does not map. */
@@ -169,7 +170,7 @@ export function scrubField(value) {
 
 /**
  * Build ONE OpenTickets row as a flat array in DIGEST_OPEN_HEADERS order.
- * @param {object} req request row (reads .id, .description, .status, .category, .urgency, .location_in_house)
+ * @param {object} req request row (reads .id, .description, .status, .category, .urgency, .location_in_house, .deferred_until)
  * @param {object} ctx sheet-resolved facts: { house, openedDate, updatedAt, daysOpen, overdue, blocked }
  */
 export function openTicketRow(req, ctx) {
@@ -185,10 +186,13 @@ export function openTicketRow(req, ctx) {
     c.daysOpen == null ? '' : c.daysOpen,
     c.overdue,
     c.blocked,
-    // ---- APPENDED (this change): non-financial request facts, scrubbed like title ----
+    // ---- APPENDED: non-financial request facts, scrubbed like title ----
     scrubField(r.category),
     scrubField(r.urgency),
     scrubField(r.location_in_house),
+    // deferred_date (this change): Requests.deferred_until, scrubbed like the rest. Blank when the
+    // request was never deferred (scrubField('') === ''). The Coordinators app (PR #125) reads it here.
+    scrubField(r.deferred_until),
   ];
 }
 

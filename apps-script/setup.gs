@@ -184,6 +184,10 @@ var SEED_CONFIG = [
   // event_types (exceptional-events register) — pipe-separated allowed categories, tunable in the Sheet
   // with no deploy. Upserted by key. Malformed/blank → the entry form falls back to אחר only (logged).
   ['event_types', 'בטיחות|תרופות|התנהגות|תשתיות|תברואה|אחר'],
+  // archive_after_days — completed (הושלם) / closed (סגור) requests whose completion is older than this
+  // many days leave the main dashboard board for the read-only ארכיון tab (still searchable). Tunable in
+  // the Sheet with no deploy; coerced to a number. Upserted by key. Blank/malformed → the UI default (7).
+  ['archive_after_days', '7'],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites
