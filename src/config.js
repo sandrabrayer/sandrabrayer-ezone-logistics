@@ -11,6 +11,7 @@
 export const NUMERIC_KEYS = new Set([
   'approval_threshold',
   'batching_window_days', // reserved for the batching increment
+  'archive_after_days',   // digest grace window for terminal requests (see DIGEST-CONTRACT.md)
 ]);
 
 export const BOOLEAN_KEYS = new Set([

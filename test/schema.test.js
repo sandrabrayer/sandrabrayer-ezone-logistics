@@ -9,12 +9,12 @@ test('all five sheets are defined', () => {
   assert.deepEqual(SHEET_NAMES.sort(), ['AuditLog', 'Config', 'Houses', 'Requests', 'Technicians']);
 });
 
-test('Requests sheet has all 22 spec columns in order', () => {
-  assert.equal(HEADERS.Requests.length, 22);
+test('Requests sheet has all 23 spec columns in order', () => {
+  assert.equal(HEADERS.Requests.length, 23);
   assert.equal(HEADERS.Requests[0], 'id');
   // Spot-check the fields downstream logic depends on exist.
   for (const col of ['estimated_cost', 'urgency', 'status', 'approval_required',
-    'deferred_until', 'assigned_to', 'assignment_type', 'batch_id']) {
+    'rejected_at', 'deferred_until', 'assigned_to', 'assignment_type', 'batch_id']) {
     assert.ok(HEADERS.Requests.includes(col), `Requests missing column: ${col}`);
   }
 });
@@ -51,8 +51,11 @@ test('seeded technicians are the two internal leads', () => {
   assert.deepEqual(SEED_TECHNICIANS.map((t) => t.name).sort(), ['צחי', 'רמי']);
 });
 
-test('Config seeds the threshold and the emergency-bypass flag', () => {
+test('Config seeds the threshold, emergency-bypass flag, and digest archive window', () => {
   const keys = SEED_CONFIG.map((c) => c.key);
   assert.ok(keys.includes('approval_threshold'));
   assert.ok(keys.includes('emergency_bypasses_approval'));
+  assert.ok(keys.includes('archive_after_days'));
+  const archive = SEED_CONFIG.find((c) => c.key === 'archive_after_days');
+  assert.equal(archive.value, '7'); // rejected/completed/closed linger 7 days by default
 });

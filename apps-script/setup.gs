@@ -15,8 +15,8 @@ var HEADERS = {
   Requests: [
     'id', 'created_at', 'created_by', 'house', 'category', 'description', 'location_in_house',
     'urgency', 'estimated_cost', 'attachment_url', 'status', 'approval_required', 'approved_by',
-    'approved_at', 'rejection_reason', 'deferred_until', 'assigned_to', 'assignment_type',
-    'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
+    'approved_at', 'rejection_reason', 'rejected_at', 'deferred_until', 'assigned_to',
+    'assignment_type', 'batch_id', 'completed_at', 'actual_cost', 'completion_notes',
   ],
   Houses: ['name', 'technician', 'cluster', 'status'],
   Config: ['key', 'value'],
@@ -41,6 +41,7 @@ var SEED_TECHNICIANS = [
 var SEED_CONFIG = [
   ['approval_threshold', '3000'],
   ['emergency_bypasses_approval', 'TRUE'],
+  ['archive_after_days', '7'],
 ];
 
 function setupSheet() {

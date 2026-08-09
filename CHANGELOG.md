@@ -3,6 +3,54 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Digest] — Rejected requests linger in the OpenTickets digest before archiving
+
+**What:** The OpenTickets digest inclusion rule (`isDigestTicket` / `digestIncludeTicket_`) now
+keeps a **rejected** request (`לא מאושר`) in the digest for `archive_after_days` days after
+rejection — the **same grace window as completed/closed** — then drops it out. Previously a rejected
+request would have left the digest immediately. A coordinator must *see* that their request was
+denied, not have it silently vanish.
+
+**Added**
+- `src/digest.js` — pure, testable rule: `isDigestTicket(req, now, archiveAfterDays)` (live statuses
+  always in; completed/closed/rejected linger for the window, then drop; unknown status out),
+  `digestArchiveAnchor` (per-status aging timestamp with `updated_at`/`created_at` fallbacks),
+  `digestStatusTone` (rejected → `red`), and `selectDigestTickets`. `Code.gs` mirrors it.
+- `test/digest.test.js` — locks the behavior: rejected **visible within the window with its red
+  status**, **drops out after** the window, does not vanish on day 0, ages on the same window as
+  completed/closed, the window is `archive_after_days`-driven (not hardcoded), and the no-timestamp
+  fail-safe keeps a row visible rather than disappearing.
+- `DIGEST-CONTRACT.md` — canonical description of the inclusion rule, status classes, aging anchors,
+  the window boundary, and the display tone (rejected → red).
+- `archive_after_days` Config key (default `7`) — the digest grace window, typed as a number via
+  `src/config.js`; seeded by `src/schema.js` / `apps-script/setup.gs`.
+- `rejected_at` column on `Requests` — stamped by the `reject` action so rejection aging has a real
+  anchor (Requests is now 23 columns).
+
+**Changed**
+- `apps-script/Code.gs` — new `?action=digest` route returns the filtered digest; `digestIncludeTicket_`
+  / `getDigest` mirror `src/digest.js`; the `reject` handler now stamps `rejected_at`; `archive_after_days`
+  added to the numeric-coercion list.
+- `test/schema.test.js` — Requests column count 22 → 23 (adds `rejected_at`); Config-seed test now
+  also locks `archive_after_days` = 7.
+- `test/config.test.js` — locks `archive_after_days` coercing to a `number`.
+
+**Why:** A denial is information the coordinator needs. Dropping a rejected request from the digest
+the instant it is denied reads as "lost" or "still pending", never "rejected". Giving rejection the
+same short grace window as completed/closed — surfaced in red — guarantees the outcome is seen before
+the row becomes archive-only. The rule lives in one pure module (locked by tests) and is mirrored in
+`Code.gs`, matching the config/approval pattern so the two runtimes can't drift.
+
+**Deploy note:** the updated `apps-script/Code.gs` must be pasted into the Apps Script editor and
+redeployed as a NEW VERSION. `setupSheet()` provisions the `rejected_at` column and the
+`archive_after_days` Config row on a **fresh** Sheet only (it never rewrites an existing header row
+or reseeds a non-empty Config tab), so on an **existing** Sheet add the `rejected_at` header column
+and the `archive_after_days` = 7 Config row by hand. Until then the code degrades safely:
+`getDigest` defaults the window to 7 when the Config row is missing, and existing rejected rows with
+no `rejected_at` fall back to `created_at` for aging (and stay visible if none resolves).
+
+---
+
 ## [Increment 3 · step 2] — Roy/Sandra dashboard (board + actions)
 
 **What:** The dashboard where Roy and Sandra see requests by status and act on them. Wires to the

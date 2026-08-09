@@ -21,6 +21,12 @@ test('emergency_bypasses_approval comes back as a BOOLEAN', () => {
   assert.equal(coerceConfigValue('emergency_bypasses_approval', ''), false);
 });
 
+test('archive_after_days comes back as a NUMBER (the digest window must not be a string)', () => {
+  const v = coerceConfigValue('archive_after_days', '7');
+  assert.equal(typeof v, 'number');
+  assert.equal(v, 7);
+});
+
 test('unknown keys pass through as strings untouched', () => {
   assert.equal(coerceConfigValue('some_future_text_key', 'hello'), 'hello');
 });

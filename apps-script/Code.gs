@@ -15,7 +15,7 @@
  */
 
 // ---- Coercion (mirror of src/config.js) ----
-var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days'];
+var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days', 'archive_after_days'];
 var BOOLEAN_KEYS = ['emergency_bypasses_approval'];
 var TRUE_STRINGS = ['true', 'TRUE', 'True', '1', 'yes', 'YES'];
 
@@ -120,6 +120,7 @@ function doGet(e) {
     case 'houses':      result = getHouses(); break;
     case 'technicians': result = getTechnicians(); break;
     case 'requests':    result = getRequests(); break;
+    case 'digest':      result = getDigest(); break;
     case 'config':      result = getAllConfig(); break;
     default:
       return jsonOut_({ ok: false, error: 'Unknown or missing action' });
@@ -193,7 +194,7 @@ function buildNewRequest_(input) {
     attachment_url: '',          // 2b
     status: STATUS_REQUEST,      // דרישה
     approval_required: '',       // increment 3
-    approved_by: '', approved_at: '', rejection_reason: '',
+    approved_by: '', approved_at: '', rejection_reason: '', rejected_at: '',
     deferred_until: '', assigned_to: '', assignment_type: '', batch_id: '',
     completed_at: '', actual_cost: '', completion_notes: '',
   };
@@ -304,8 +305,10 @@ function handleReject_(p) {
   if (!canApprove_(p.by, req.estimated_cost, req.urgency)) {
     return jsonOut_({ ok: false, error: 'Not authorized for this amount' });
   }
+  // Stamp rejected_at so the request ages out of the OpenTickets digest on the archive window
+  // (it stays visible, in red, for archive_after_days days) rather than vanishing immediately.
   updateRequest_(p.id,
-    { status: ST.NOT_APPROVED, rejection_reason: p.reason || '' },
+    { status: ST.NOT_APPROVED, rejection_reason: p.reason || '', rejected_at: new Date().toISOString() },
     req.status, ST.NOT_APPROVED, p.by, p.reason || '');
   return jsonOut_({ ok: true });
 }
@@ -357,4 +360,52 @@ function handleSetStatus_(p) {
   }
   updateRequest_(p.id, fields, req.status, p.to, p.by, p.note || '');
   return jsonOut_({ ok: true });
+}
+
+// ===== OpenTickets digest inclusion (mirrors src/digest.js — keep in sync; DIGEST-CONTRACT.md) =====
+//
+// Live requests are always in the digest. Terminal requests (completed / closed / rejected) linger
+// for archive_after_days days from their aging anchor, then drop out. Rejected (לא מאושר) shares
+// that grace window so a coordinator SEES a denial before it archives, instead of it vanishing.
+
+var DIGEST_ACTIVE_ = [ST.REQUEST, ST.PENDING, ST.APPROVED, ST.DEFERRED, ST.IN_PROGRESS];
+var DIGEST_ARCHIVING_ = [ST.COMPLETED, ST.CLOSED, ST.NOT_APPROVED];
+var DAY_MS_ = 24 * 60 * 60 * 1000;
+
+/** Timestamp aging starts from, per status. Falls back so pre-existing rows never silently vanish. */
+function digestArchiveAnchor_(req) {
+  if (req.status === ST.NOT_APPROVED) {
+    return req.rejected_at || req.updated_at || req.created_at || '';
+  }
+  if (req.status === ST.COMPLETED || req.status === ST.CLOSED) {
+    return req.completed_at || req.updated_at || req.created_at || '';
+  }
+  return '';
+}
+
+/** Should this request appear in the OpenTickets digest now? */
+function digestIncludeTicket_(req, now, archiveAfterDays) {
+  if (!req || !req.status) return false;
+  if (DIGEST_ACTIVE_.indexOf(req.status) !== -1) return true;
+  if (DIGEST_ARCHIVING_.indexOf(req.status) === -1) return false;
+
+  var anchor = digestArchiveAnchor_(req);
+  if (!anchor) return true; // no anchor yet → keep visible rather than vanish (fail-safe)
+  var anchorMs = new Date(anchor).getTime();
+  if (isNaN(anchorMs)) return true;
+
+  var nowMs = now ? new Date(now).getTime() : new Date().getTime();
+  var ageDays = (nowMs - anchorMs) / DAY_MS_;
+  return ageDays < Number(archiveAfterDays); // visible FOR the window, then drops
+}
+
+/** The filtered OpenTickets digest — served via doGet ?action=digest. */
+function getDigest() {
+  // Default to 7 when the Config row is absent (older Sheets) — getConfig returns null, and
+  // Number(null) is 0, which would wrongly archive every terminal request immediately.
+  var raw = getConfig('archive_after_days');
+  var days = Number(raw);
+  if (raw === null || raw === '' || isNaN(days)) days = 7;
+  var now = new Date();
+  return getRequests().filter(function (r) { return digestIncludeTicket_(r, now, days); });
 }

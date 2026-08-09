@@ -22,6 +22,7 @@ export const HEADERS = {
     'approved_by',
     'approved_at',
     'rejection_reason',
+    'rejected_at',         // when the request was rejected — drives digest aging (see DIGEST-CONTRACT.md)
     'deferred_until',
     'assigned_to',         // Rami / Tzachi / external technician
     'assignment_type',     // internal / external
@@ -101,4 +102,7 @@ export const SEED_TECHNICIANS = [
 export const SEED_CONFIG = [
   { key: 'approval_threshold', value: '3000' },
   { key: 'emergency_bypasses_approval', value: 'TRUE' },
+  // Days a terminal request (completed / closed / rejected) lingers in the OpenTickets digest
+  // before it drops out and becomes archive-only. See DIGEST-CONTRACT.md.
+  { key: 'archive_after_days', value: '7' },
 ];
