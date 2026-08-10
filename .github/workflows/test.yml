@@ -1,10 +1,15 @@
 name: tests
 
-# Runs the node:test suite on every pull request and every push to main.
+# Runs the node:test suite on every pull request (any base branch) and on every push to the
+# repo's integration branch. The PR trigger is the primary gate — it fires on all PRs regardless
+# of branch names. The push list covers the current default branch (claude/awesome-keller-u0l53)
+# and `main`, so direct pushes to the integration branch are also checked now and after any rename.
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - claude/awesome-keller-u0l53
 
 jobs:
   test:
