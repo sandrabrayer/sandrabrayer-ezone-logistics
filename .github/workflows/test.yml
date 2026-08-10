@@ -1,0 +1,32 @@
+name: tests
+
+# Runs the node:test suite on every pull request and every push to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines.node is ">=18"; verify against the oldest supported and current LTS.
+        node-version: ['18', '20']
+    name: node ${{ matrix.node-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # No runtime or dev dependencies and no lockfile: the suite uses Node's built-in
+      # node:test, so there is nothing to install. If deps are added later, add a
+      # `npm ci` step here (and commit the resulting package-lock.json).
+
+      - name: Run tests
+        run: npm test

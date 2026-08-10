@@ -3,6 +3,37 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Testing] — Frontend server tests + CI workflow
+
+**What:** Closed the one real gap in the test suite (the HTTP frontend was untested) and wired the
+suite to run automatically in CI. No product behavior changed.
+
+**Added**
+- `test/server.test.js` — 8 tests for `src/server.js`: `/` and `/index.html` serve the request
+  form (200, `text/html`), `/dashboard` and `/dashboard.html` serve the board, unknown routes
+  return `404 Not found`, and the `APPS_SCRIPT_EXEC_URL` is injected into `<head>` as
+  `window.__EXEC_URL__`, JSON-encoded (injection-safe) and present even when empty. Tests run
+  against an ephemeral local port with a **dummy** `.invalid` exec URL — they never contact the
+  live Apps Script backend, and no real secrets appear in the file.
+- `.github/workflows/test.yml` — GitHub Actions workflow running `npm test` on every pull request
+  and every push to `main`, across Node 18 and 20 (matching `engines.node >= 18`).
+
+**Changed**
+- `src/server.js` — small testability refactor: exported `createRequestHandler` / `createAppServer`
+  / `loadEnv`, and the process now only starts listening when the file is run directly
+  (`node src/server.js`). Behavior when started via `npm start` is unchanged (same routes, same
+  env injection, same startup log). This lets tests exercise the routes without the module
+  self-starting a server or making any outbound call.
+
+**Why:** the pure business logic (schema, config, request, approval routing) was already well
+covered, but the frontend server had zero tests. Locking its routes and the env-URL injection —
+and running everything in CI on every PR and push to main — means regressions surface before merge.
+
+**Testing discipline:** all external HTTP is avoided entirely; the exec URL is only ever injected,
+never fetched, and tests use an unroutable dummy value to prove it. Total suite: 44 tests.
+
+---
+
 ## [Increment 3 · step 2] — Roy/Sandra dashboard (board + actions)
 
 **What:** The dashboard where Roy and Sandra see requests by status and act on them. Wires to the

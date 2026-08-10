@@ -48,6 +48,14 @@ npm install      # no runtime deps yet; installs nothing beyond what's listed
 npm test         # runs the node:test suite in test/
 ```
 
+The suite covers the data model (`schema`), config coercion (`config`), request build/validation
+(`request`), the approval engine + status transitions (`approval`), and the frontend HTTP server
+routes + env-URL injection (`server`). Tests are fully offline — they never contact the live Google
+Apps Script backend and contain no real secrets (the server tests use a dummy `.invalid` exec URL).
+
+**Continuous integration:** `.github/workflows/test.yml` runs `npm test` on every pull request and
+every push to `main`, across Node 18 and 20. A green check means the whole suite passed on both.
+
 > **Test runner note:** this scaffold uses Node's built-in `node:test` (zero dependencies).
 > When you open the Claude Code session, confirm what `sandrabrayer/ezone-outpatient` uses
 > (`cat package.json` → `scripts`/`devDependencies`). If Outpatient standardizes on another
