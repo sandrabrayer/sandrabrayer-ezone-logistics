@@ -56,13 +56,13 @@ test('NO role sees the removed "אירועים חריגים" (/events) or "דר�
 test('managers still see their real nav pages (dashboard…management); the removal did not blank the nav', () => {
   const nav = runShim('ops_manager', '/dashboard');
   const got = hrefs(nav);
-  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management']);
+  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management', '/help']);
 });
 
 test('field_ops nav excludes /management, /events and / ', () => {
   const got = hrefs(runShim('field_ops', '/dashboard'));
   assert.ok(!got.includes('/management') && !got.includes('/events') && !got.includes('/'));
-  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
+  assert.deepEqual(got, ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help']);
 });
 
 test('logged-out (no session) → no nav links at all', () => {

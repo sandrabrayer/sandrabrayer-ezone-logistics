@@ -64,6 +64,9 @@ var DOCUMENT_ROUTES = [
   '/reports', '/reports.html',
   '/workorders', '/workorders.html',
   '/management', '/management.html',
+  // /help is token-gated server-side; listing it here keeps its shim-routed (non-navigate) fetch
+  // NETWORK-FIRST too, so a cached copy can never answer for the server's auth check.
+  '/help', '/help.html',
 ];
 // Note: '/events' (אירועים חריגים) was removed from the app; no route entry remains.
 function isNetworkFirst(url) {

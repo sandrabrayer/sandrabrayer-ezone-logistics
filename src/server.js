@@ -230,6 +230,19 @@ function buildClientShim(names) {
     if(document.body)mount();else document.addEventListener('DOMContentLoaded',mount);
   });}
   function ensureAuth(){if(TOKEN)return Promise.resolve();if(!authPromise)authPromise=doLogin();return authPromise;}
+  // /help is the one HTML route the server gates on the session token (401 + loader shell without it).
+  // The shell's loader fetches '/help' through this wrapper, so the Bearer token is attached (after the
+  // login overlay when no session is stored) and the full guide replaces the shell. Same 401-retry as
+  // the data routes: an expired token clears the session and re-prompts once.
+  function helpRoute(init){
+    return ensureAuth().then(function(){
+      var headers=Object.assign({},(init&&init.headers)||{});headers['Authorization']='Bearer '+TOKEN;
+      return origFetch('/help',Object.assign({},init,{headers:headers})).then(function(r){
+        if(r.status===401){TOKEN=null;authPromise=null;clearSession();return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return origFetch('/help',Object.assign({},init,{headers:headers}));});}
+        return r;
+      });
+    });
+  }
   function route(url,init){
     var method=String((init&&init.method)||'GET').toUpperCase();
     return ensureAuth().then(function(){
@@ -247,6 +260,7 @@ function buildClientShim(names) {
   window.fetch=function(input,init){
     var url=(typeof input==='string')?input:((input&&input.url)||'');
     if(url.indexOf('/api/exec')===0)return route(url,init||{});
+    if(url==='/help'||url==='/help.html'||url.indexOf('/help?')===0)return helpRoute(init||{});
     return origFetch(input,init);
   };
 })();</script>`;
@@ -254,6 +268,28 @@ function buildClientShim(names) {
 
 // The default shim (fallback names), exported for the shim-behavior tests that run it in a sandbox.
 const CLIENT_SHIM = buildClientShim(DEFAULT_LOGIN_NAMES);
+
+// The anonymous /help response body (served with HTTP status 401): a minimal shell that carries the
+// injected auth shim and re-fetches /help — the shim attaches the Bearer token (showing the login
+// overlay first when no session is stored) and the served guide replaces this shell via document.write.
+// It holds NO guide content, so an anonymous caller never sees the help text; API/test callers just see
+// the 401 status. This keeps plain <a href="/help"> navigation and browser refresh working while the
+// route itself stays token-gated server-side.
+const HELP_SHELL = `<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EZone לוגיסטיקה — מדריך</title>
+<style>body{margin:0;background:#15171c;color:#8b93a0;font-family:'Heebo',"Segoe UI",system-ui,-apple-system,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;font-size:1rem}</style>
+</head>
+<body>
+<p>טוען…</p>
+<script>
+window.fetch('/help').then(function(r){if(!r.ok)throw new Error('unauthorized');return r.text();}).then(function(t){document.open();document.write(t);document.close();}).catch(function(){document.body.textContent='נדרשת התחברות כדי לצפות בדף זה.';});
+</script>
+</body>
+</html>`;
 
 const PUBLIC_ASSETS = {
   '/manifest.json':        { file: 'manifest.json',        type: 'application/manifest+json; charset=utf-8' },
@@ -816,6 +852,22 @@ export async function requestHandler(req, res) {
       return;
     }
     return notFound(res);
+  }
+
+  // /help (מדריך) — the static in-app guide. Unlike the public HTML routes below, this page is served
+  // ONLY to a valid session token: Bearer → 200 + the full guide; anonymous/invalid → 401 + the loader
+  // shell (no guide content), whose shim-routed re-fetch attaches the token so real navigation still
+  // works. Any authenticated role gets it; the nav shows it to the login roster (see src/access.js).
+  if (path === '/help' || path === '/help.html') {
+    const shim = buildClientShim(await getLoginNames());
+    if (!authFromRequest(req)) {
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(HELP_SHELL.replace('</head>', HEAD_INJECT + shim + '</head>'));
+    }
+    let html = readFileSync(join(__dirname, 'help.html'), 'utf8');
+    html = html.replace('</head>', HEAD_INJECT + shim + '</head>');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(html);
   }
 
   // HTML routes — inject the PWA head links. (No secret is injected: data goes through the
