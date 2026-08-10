@@ -3,6 +3,36 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [CI] — Verify Live: deploy-aware SHA gate (no false fail on non-runtime pushes)
+
+**What:** Fixed the "Verify Live (Railway Node leg)" workflow so it no longer fails when a push to `main`
+changes nothing Railway deploys. Railway rebuilds only when the pushed range touches files the Node build
+consumes; a tests/docs/other-leg-only commit (e.g. the tests-only merge `0967c41`) is correctly SKIPPED,
+so production keeps serving the previous, functionally identical build and `/version` keeps returning the
+previous SHA. The old workflow polled `/version` until `node.commit == github.sha` on **every** push, so
+those runs timed out and failed falsely. No product behavior changed; `src/server.js` is untouched.
+
+**Changed**
+- `.github/workflows/verify-live.yml` — added a `detect` step that diffs the pushed range
+  (`before..after`; first-parent for `workflow_dispatch`) against a runtime path filter
+  (`src/`, `public/`, `package.json`, `package-lock.json`). It then branches:
+  - **runtime paths changed →** unchanged STRICT behavior: poll `/version` until `node.commit` equals this
+    exact SHA (timeout → loud failure), then run the full smoke suite with the `EXPECTED_COMMIT` gate.
+  - **no runtime paths changed →** assert LIVENESS only: confirm the live app responds and passes
+    `smoke-live.js` **without** the SHA gate, so a down/crash-looping app still fails loudly, but a skipped
+    redeploy does not. An unresolvable diff base (initial/force push, root-commit dispatch) fails safe to
+    strict. Checkout now uses `fetch-depth: 0` so the range diff is computable.
+
+**Added**
+- `test/verify-live-workflow.test.js` — locks the fix: the runtime filter counts `src/**`/`package.json`
+  as deploy-triggering and the real `0967c41` file set (tests + docs) as non-runtime; the workflow keeps
+  both a SHA-gated strict leg and a no-SHA liveness leg, and fails loudly on a dead site in either.
+
+**Why:** the check existed to prove Railway actually serves a merged commit, but it conflated "Railway did
+not redeploy" (correct for an identical build) with "Railway is stale/broken" (a real failure). The gate is
+now aligned with Railway's own watch-path behavior: strict for real code, liveness-only otherwise.
+
+---
 ## [Testing] — Frontend server tests + CI workflow
 
 **What:** Added a dedicated HTTP-layer test for the frontend gateway server and wired the suite to
