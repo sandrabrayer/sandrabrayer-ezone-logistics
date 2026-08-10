@@ -3,6 +3,26 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Testing] — Frontend server tests + CI workflow
+
+**What:** Added a dedicated HTTP-layer test for the frontend gateway server and wired the suite to
+run automatically in CI. No product behavior changed; `src/server.js` is unchanged from `main`.
+
+**Added**
+- `test/server.test.js` — tests the frontend gateway's HTTP contract against the real
+  `requestHandler` exported by `src/server.js`: `/`, `/index.html`, `/dashboard`, `/dashboard.html`
+  serve their pages (200, `text/html`), unknown routes return `404 Not found`, and every served HTML
+  route carries the injected auth client-shim in `<head>`. Runs fully offline on an ephemeral local
+  port — it never contacts the live Apps Script backend and holds no secrets.
+- `.github/workflows/test.yml` — GitHub Actions workflow running `npm test` on every pull request
+  and on every push to the integration branch, across Node 18 and 20 (matching `engines.node >= 18`),
+  with least-privilege `permissions` and in-progress-cancel `concurrency`.
+
+**Why:** the branch that introduced these was based on an older tree whose server predated the
+Increment-30 auth gateway. The server test was re-pointed at the current gateway so it locks the
+routes and shim injection as they actually ship, and the workflow makes the whole suite a merge gate.
+
+---
 ## [Unreleased] — tooling/tests — regression hardening: baseline gate, digest lifecycle contract, drift guards
 
 Process hardening after a near-miss: work started against a wrong assumption about `main` (PR #93's code

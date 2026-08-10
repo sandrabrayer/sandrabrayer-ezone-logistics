@@ -10,12 +10,12 @@ count after the PR's changes. Because it is committed, the anchor moves forward 
 
 ## Top 3 CHANGELOG headings
 
-1. ## [Unreleased] — tooling/tests — regression hardening: baseline gate, digest lifecycle contract, drift guards
-2. ## [Unreleased] — UX — graceful "request not found" + self-clearing banners
-3. ## [Unreleased] — UX/digest — rejected requests linger in OpenTickets for the archive window
+1. ## [Testing] — Frontend server tests + CI workflow
+2. ## [Unreleased] — tooling/tests — regression hardening: baseline gate, digest lifecycle contract, drift guards
+3. ## [Unreleased] — UX — graceful "request not found" + self-clearing banners
 
 ## Test count
 
 `npm test` (the CI gate, `node --test test/*.test.js` — excludes the live `smoke-live.js`):
 
-tests-passing: 693
+tests-passing: 700

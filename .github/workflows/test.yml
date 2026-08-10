@@ -1,15 +1,19 @@
 name: Tests
 
-# Runs the full unit suite (node --test test/*.test.js) on every PR and every push to main, so nothing
-# can merge or land red. This is the gate the three login regressions (#59, #61-branch, #62) needed:
-# a PR whose suite fails cannot be merged. The live smoke test (test/smoke-live.js) is separate and NOT
-# run here — it needs the deployed URL + secrets; run it by hand after each merge (see README).
-
+# Runs the full unit suite (npm test → node --test test/*.test.js) on every pull request (any base
+# branch — the primary merge gate) and on every push to the integration branch, so nothing can merge
+# or land red. This is the gate the login regressions (#59, #61-branch, #62) needed. The live smoke
+# test (test/smoke-live.js) is separate and NOT run here — it needs the deployed URL + secrets; run it
+# by hand after each merge (see README).
+#
+# The push branch list covers both `main` and the current default (claude/awesome-keller-u0l53) so
+# direct pushes to the integration branch are checked now and after any future rename.
 on:
   pull_request:
   push:
     branches:
       - main
+      - claude/awesome-keller-u0l53
 
 permissions:
   contents: read
@@ -21,15 +25,22 @@ concurrency:
 jobs:
   node-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines.node is ">=18"; verify the oldest supported (18), the prior LTS (20), and current (22).
+        node-version: ['18', '20', '22']
+    name: node ${{ matrix.node-version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node
+      - name: Set up Node ${{ matrix.node-version }}
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
 
-      # Zero-dependency project: nothing to install. Run the suite directly.
+      # Zero-dependency project: the suite uses Node's built-in node:test, so there is nothing to
+      # install. If deps are added later, add an `npm ci` step here (and commit package-lock.json).
       - name: Run unit tests
         run: npm test
