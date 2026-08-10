@@ -1,4 +1,3 @@
-[HOUSE-IDS.md](https://github.com/user-attachments/files/30533796/HOUSE-IDS.md)
 # HOUSE-IDS.md — canonical house identifiers and display names (E-ZONE)
 
 **Status:** canonical. This file is identical in every E-ZONE repo. Do not edit one copy —
@@ -16,18 +15,25 @@ Two things live in this file and they are **not** the same thing:
 |---|---|---|---|---|
 | רמות השבים | `ramot-hashavim` | Ramot HaShavim | `sharon` | פתוח |
 | רעננה אשר | `raanana-asher` | Ra'anana Asher | `sharon` | פתוח |
-| רעננה הפרדס | `raanana-hapardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
-| עפרוני קיסריה | `caesarea-ofroni` | Efroni Caesarea | `caesarea` | פתוח |
-| ריהאב קיסריה | `caesarea-rehab` | Rehab Caesarea | `caesarea` | פתוח |
+| רעננה הפרדס | `pardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
+| קיסריה עפרוני | `caesarea-ofroni` | Caesarea Efroni | `caesarea` | פתוח |
+| קיסריה ריהאב | `caesarea-rehab` | Caesarea Rehab | `caesarea` | פתוח |
 | שדה אליעזר | `sde-eliezer` | Sde Eliezer | `north` | טרום-פתיחה |
 
 **The Hebrew display names above are the only correct forms.** Every app must show exactly
-these strings — no local variants, no reordering (it is "עפרוני קיסריה", not "קיסריה עפרוני").
+these strings — no local variants, no reordering (city first: it is "קיסריה עפרוני", not "עפרוני קיסריה").
 
-`raanana-hapardes` and `sde-eliezer` are **reserved now** so no app invents an id for them
-later under pressure. Both are pre-opening but already have activity.
+`sde-eliezer` is **reserved now** so no app invents an id for it
+later under pressure. Both `pardes` and `sde-eliezer` are pre-opening but already have activity.
 
-### Note on `caesarea-ofroni`
+### Note on short ids `pardes` and `caesarea-ofroni`
+
+`pardes` is short and unqualified, and `caesarea-ofroni` uses a spelling the display name does
+not. Both are **already shipped in `ezone-kitchen`**, so both stay. Ids are internal keys, not
+labels — an ugly id costs nothing, a renamed id costs a cross-repo migration. Do not "improve"
+either one in a single repo; that silently breaks every consumer of the digest.
+
+### Note on `caesarea-ofroni` spelling
 
 The display name and English form use **עפרוני / Efroni**. The id keeps the `ofroni` spelling
 because it is already frozen in `ezone-kitchen` and in `DIGEST-CONTRACT.md`. This mismatch is
@@ -53,12 +59,12 @@ same thing as the internal maintenance lead.
 
 | Cluster | Houses | Maintenance lead |
 |---|---|---|
-| `sharon` | `raanana-asher`, `ramot-hashavim`, `raanana-hapardes` | רמי |
+| `sharon` | `raanana-asher`, `ramot-hashavim`, `pardes` | רמי |
 | `caesarea` | `caesarea-ofroni`, `caesarea-rehab` | צחי |
 | `north` | `sde-eliezer` | צחי |
 
 צחי covers both `caesarea` and `north`, but they are **separate clusters** — שדה אליעזר is far
-north and must not be auto-batched with עפרוני + ריהאב just because they share a lead.
+north and must not be auto-batched with קיסריה עפרוני + קיסריה ריהאב just because they share a lead.
 
 ## Rules
 

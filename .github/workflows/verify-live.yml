@@ -1,0 +1,57 @@
+name: Verify Live (Railway Node leg)
+
+# Proves the RAILWAY (Node) leg actually serves the merged commit — the leg unit tests can't see and the
+# clasp workflow doesn't cover. Railway auto-deploys `main` on its own schedule, so after a merge this
+# polls the live /version until node.commit == the merge SHA (or times out), then runs the full smoke
+# suite. Runs in GitHub Actions (which can reach the public Railway URL) — not from a dev machine.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: verify-live
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Wait for Railway to serve this commit, then smoke-test the live app
+        env:
+          # The public app URL. Override with a repo variable APP_URL if the host ever changes.
+          APP_URL: ${{ vars.APP_URL || 'https://ezone-logistics.up.railway.app' }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          # Optional: enable the authenticated-read leg (login + one authed pageData read). When both are
+          # set, smoke-live.js logs in as SMOKE_USER and FAILS the run on a bad login; unset → that leg SKIPs.
+          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_PIN: ${{ secrets.SMOKE_PIN }}
+        run: |
+          echo "Verifying ${APP_URL} serves ${EXPECTED_COMMIT} (Railway auto-deploys main; allowing time to propagate)…"
+          attempt=0; max=20; delay=15; live=""
+          while [ "$attempt" -lt "$max" ]; do
+            attempt=$((attempt + 1))
+            live="$(curl -fsSL --max-time 20 "${APP_URL}/version" 2>/dev/null || true)"
+            echo "attempt ${attempt}/${max}: /version = ${live:-<unreachable>}"
+            if printf '%s' "$live" | grep -q "\"commit\":\"${EXPECTED_COMMIT}\""; then
+              echo "Railway is serving ${EXPECTED_COMMIT}. Running the full smoke suite (EXPECTED_COMMIT gate + home + login-401)…"
+              node test/smoke-live.js
+              exit $?
+            fi
+            sleep "$delay"
+          done
+          echo "::error::Railway did NOT serve ${EXPECTED_COMMIT} at ${APP_URL}/version within ~$((max * delay))s. Likely causes: the Railway deploy is still building/failed, the Railway-connected branch is not 'main', or the Node app is crash-looping (e.g. a required env var such as SHARED_ACCESS_CODE is unset → the server refuses to start → /version unreachable). Check the Railway dashboard. Last /version seen: ${live:-<unreachable>}"
+          exit 1

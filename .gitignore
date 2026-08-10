@@ -11,9 +11,10 @@ credentials.json
 client_secret*.json
 service-account*.json
 
-# Apps Script local tooling (clasp), if used
-.clasp.json
+# Apps Script credentials (clasp) — NEVER commit. These hold OAuth tokens.
+# (.clasp.json IS committed — it holds only the non-secret Script ID.)
 .clasprc.json
+.clasp.local.json
 
 # Logs / OS / editor
 *.log

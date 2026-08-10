@@ -1,26 +1,29 @@
-// test/server.test.js — locks the frontend HTTP layer: routing + env-URL injection.
+// test/server.test.js — locks the frontend gateway's HTTP contract: the HTML page routes, the 404
+// behavior, and the safety of the injected data sentinel.
 //
-// These tests start the real server on an ephemeral port (127.0.0.1:0) and make LOCAL requests
-// only. Nothing here ever contacts the live Google Apps Script backend: the exec URL is a DUMMY,
-// obviously-unroutable value, and the server's job is merely to INJECT it into the HTML (the
-// browser would use it later) — it never fetches it. Proof: GET / still returns 200 instantly
-// even though DUMMY_EXEC_URL points at a `.invalid` host that could never resolve.
+// This branch originally targeted the pre-auth server (a `createAppServer({execUrl})` factory that
+// injected the raw Apps Script exec URL as window.__EXEC_URL__). Since then, `main` replaced that with
+// the Increment-30 auth gateway: pages no longer receive the raw backend URL at all — the injected
+// sentinel points at the same-origin, Bearer-gated proxy `/api/exec`, and the real exec URL stays a
+// server-side secret. The test below was re-pointed at that gateway (via the exported `requestHandler`)
+// so it locks the routes and the injection *as they actually ship* — and asserts the security property
+// the original test cared about: the raw backend URL never appears in page source.
+//
+// Runs the real requestHandler on an ephemeral port (127.0.0.1:0), fully offline: no subprocess, no
+// fixed port, and never a call to the live Apps Script backend (the login roster falls back to the
+// built-in default names when the backend is unreachable, so page rendering needs no network).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAppServer } from '../src/server.js';
-
-// Dummy value — never a real deployment id, never a real secret. `.invalid` is reserved by RFC 2606
-// and can never resolve, so if any code ever tried to actually call it, the test would hang/fail.
-const DUMMY_EXEC_URL = 'https://script.google.example.invalid/macros/s/DUMMY_DEPLOY_ID/exec';
+import { createServer } from 'node:http';
+import { requestHandler } from '../src/server.js';
 
 let server;
 let base;
 
 before(async () => {
-  server = createAppServer({ execUrl: DUMMY_EXEC_URL });
+  server = createServer(requestHandler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
-  base = `http://127.0.0.1:${port}`;
+  base = `http://127.0.0.1:${server.address().port}`;
 });
 
 after(() => new Promise((resolve) => server.close(resolve)));
@@ -31,12 +34,13 @@ test('GET / responds 200 with the request-form HTML', async () => {
   assert.match(res.headers.get('content-type'), /text\/html/);
   const body = await res.text();
   assert.match(body, /<!DOCTYPE html>/i);
-  assert.match(body, /EZone/); // the form page title/branding
+  assert.match(body, /EZone/); // the page title/branding
 });
 
 test('GET /index.html serves the same form page', async () => {
   const res = await fetch(`${base}/index.html`);
   assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
   const body = await res.text();
   assert.match(body, /<!DOCTYPE html>/i);
 });
@@ -52,6 +56,7 @@ test('GET /dashboard responds 200 with the dashboard HTML', async () => {
 test('GET /dashboard.html serves the same dashboard page', async () => {
   const res = await fetch(`${base}/dashboard.html`);
   assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
 });
 
 test('unknown routes respond 404 Not found', async () => {
@@ -61,44 +66,26 @@ test('unknown routes respond 404 Not found', async () => {
   assert.equal(body, 'Not found');
 });
 
-test('the exec URL is injected into <head> as window.__EXEC_URL__', async () => {
+test('the data sentinel is injected into <head>, before the page scripts run', async () => {
   const res = await fetch(`${base}/`);
   const body = await res.text();
-  // Injected exactly as JSON — this is what the browser reads to know where to POST.
+  // The gateway injects a same-origin sentinel that page scripts read to know where to POST.
   assert.ok(
-    body.includes(`window.__EXEC_URL__=${JSON.stringify(DUMMY_EXEC_URL)}`),
-    'expected injected window.__EXEC_URL__ script tag',
+    body.includes("window.__EXEC_URL__='/api/exec'"),
+    'expected the injected window.__EXEC_URL__ sentinel',
   );
-  // Injected before </head> so it is defined before the page scripts run.
+  // Injected before </head> so it is defined before the page's own scripts run.
   assert.ok(body.indexOf('window.__EXEC_URL__') < body.indexOf('</head>'));
 });
 
-test('exec URL is JSON-encoded, not raw-concatenated (injection safety)', async () => {
-  // A value with a quote must be safely escaped by JSON.stringify, not break out of the string.
-  const tricky = 'https://x.invalid/"+alert(1)+"/exec';
-  const s = createAppServer({ execUrl: tricky });
-  await new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
-  try {
-    const { port } = s.address();
-    const res = await fetch(`http://127.0.0.1:${port}/`);
-    const body = await res.text();
-    assert.ok(body.includes(`window.__EXEC_URL__=${JSON.stringify(tricky)}`));
-    assert.ok(!body.includes('"+alert(1)+"')); // the raw unescaped form must NOT appear
-  } finally {
-    await new Promise((resolve) => s.close(resolve));
-  }
-});
-
-test('with no exec URL configured the server still serves pages (empty injection)', async () => {
-  const s = createAppServer({ execUrl: '' });
-  await new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
-  try {
-    const { port } = s.address();
-    const res = await fetch(`http://127.0.0.1:${port}/`);
-    assert.equal(res.status, 200);
-    const body = await res.text();
-    assert.ok(body.includes('window.__EXEC_URL__=""'));
-  } finally {
-    await new Promise((resolve) => s.close(resolve));
+test('the RAW Apps Script backend URL is never injected into page source (injection/secret safety)', async () => {
+  // The security property this file guards: pages talk to the Bearer-gated `/api/exec` proxy, so the
+  // real Google exec URL must NOT leak into the HTML the browser receives. A regression that reverted
+  // to injecting the raw exec URL (the pre-auth behavior) would surface one of these markers.
+  for (const path of ['/', '/index.html', '/dashboard', '/dashboard.html']) {
+    const body = await (await fetch(`${base}${path}`)).text();
+    assert.ok(body.includes("window.__EXEC_URL__='/api/exec'"), `${path}: sentinel must be the proxy path`);
+    assert.ok(!/script\.google\.com/.test(body), `${path}: raw Apps Script host leaked into page source`);
+    assert.ok(!/macros\/s\/[^/]+\/exec/.test(body), `${path}: raw /macros/s/.../exec deployment URL leaked`);
   }
 });
