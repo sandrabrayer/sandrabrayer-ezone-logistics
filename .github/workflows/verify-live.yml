@@ -4,6 +4,15 @@ name: Verify Live (Railway Node leg)
 # clasp workflow doesn't cover. Railway auto-deploys `main` on its own schedule, so after a merge this
 # polls the live /version until node.commit == the merge SHA (or times out), then runs the full smoke
 # suite. Runs in GitHub Actions (which can reach the public Railway URL) — not from a dev machine.
+#
+# Railway only rebuilds when a push changes files it actually deploys; a commit that touches nothing the
+# build consumes (tests, docs, other-leg files) is intentionally SKIPPED, so production keeps serving the
+# previous, functionally identical build and /version keeps returning the previous SHA. Gating the strict
+# SHA match on EVERY push therefore failed those runs falsely (e.g. the tests-only merge 0967c41). So this
+# first asks "did this push change anything Railway deploys?" (src/, public/, package.json[-lock]):
+#   • runtime paths changed  → STRICT: poll /version until node.commit == this SHA, then the full smoke suite.
+#   • no runtime paths changed → Railway won't redeploy; assert LIVENESS only (site up + smoke, no SHA gate).
+# Either way a broken/unreachable live site still fails the run loudly.
 
 on:
   push:
@@ -24,13 +33,59 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Need the pushed range's history so we can diff the before/after SHAs (default depth 1 has only HEAD).
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: '22'
 
+      - name: Detect whether this push changed anything Railway deploys
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          # Railway rebuilds only when the pushed range touches files the Node build consumes/serves. Keep
+          # this list aligned with what `node src/server.js` actually ships:
+          #   src/**            — the server + every served HTML/JS/asset (incl. src/public/**)
+          #   public/**         — top-level static assets, if any ever move here
+          #   package.json      — dependencies, engines, and the `start` script
+          #   package-lock.json — the resolved dependency tree (build input, if/when a lockfile is added)
+          # If Railway's watch paths are later pinned in-repo (railway.json/toml `watchPatterns`), mirror them here.
+          RUNTIME_RE='^(src/|public/|package(-lock)?\.json$)'
+
+          # Pick the diff base. push: the range's `before` tip. dispatch: HEAD's first parent (this commit's
+          # own net change). If we can't resolve a real base (initial push, force-push, root commit), be
+          # STRICT — assume a deploy is expected rather than silently skipping the SHA gate.
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            base="$(git rev-parse --verify --quiet "${HEAD_SHA}^" || true)"
+          else
+            base="${BEFORE_SHA}"
+          fi
+
+          if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No resolvable diff base (initial/force push, or manual run on a root commit) — treating as a runtime change (strict SHA gate)."
+            echo "runtime_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "${base}" "${HEAD_SHA}")"
+          echo "Changed files (${base}..${HEAD_SHA}):"
+          printf '  %s\n' ${changed:-<none>}
+          if printf '%s\n' "${changed}" | grep -Eq "${RUNTIME_RE}"; then
+            echo "→ A Railway-deployed path changed. Railway should redeploy → require the live build to serve this exact SHA."
+            echo "runtime_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "→ No Railway-deployed path changed. Railway correctly skips redeploying an identical build → assert liveness only (no SHA gate)."
+            echo "runtime_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Wait for Railway to serve this commit, then smoke-test the live app
+        if: steps.detect.outputs.runtime_changed == 'true'
         env:
           # The public app URL. Override with a repo variable APP_URL if the host ever changes.
           APP_URL: ${{ vars.APP_URL || 'https://ezone-logistics.up.railway.app' }}
@@ -54,4 +109,32 @@ jobs:
             sleep "$delay"
           done
           echo "::error::Railway did NOT serve ${EXPECTED_COMMIT} at ${APP_URL}/version within ~$((max * delay))s. Likely causes: the Railway deploy is still building/failed, the Railway-connected branch is not 'main', or the Node app is crash-looping (e.g. a required env var such as SHARED_ACCESS_CODE is unset → the server refuses to start → /version unreachable). Check the Railway dashboard. Last /version seen: ${live:-<unreachable>}"
+          exit 1
+
+      - name: Assert the live app is healthy (no Railway redeploy expected for this commit)
+        if: steps.detect.outputs.runtime_changed == 'false'
+        env:
+          APP_URL: ${{ vars.APP_URL || 'https://ezone-logistics.up.railway.app' }}
+          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_PIN: ${{ secrets.SMOKE_PIN }}
+        run: |
+          # This commit changed nothing Railway builds, so it will keep serving the previous (functionally
+          # identical) build — /version will NOT advance to this SHA and asserting it would fail falsely.
+          # We still prove the live site is up and responding correctly: run smoke-live WITHOUT EXPECTED_COMMIT
+          # (no SHA gate), so a down/crash-looping/broken app still fails this run loudly.
+          unset EXPECTED_COMMIT
+          echo "No Railway-deployed paths changed in this push; not gating on the deploy SHA. Checking live health at ${APP_URL}…"
+          attempt=0; max=6; delay=10; live=""
+          while [ "$attempt" -lt "$max" ]; do
+            attempt=$((attempt + 1))
+            live="$(curl -fsSL --max-time 20 "${APP_URL}/version" 2>/dev/null || true)"
+            echo "attempt ${attempt}/${max}: /version = ${live:-<unreachable>}"
+            if printf '%s' "$live" | grep -q '"commit"'; then
+              echo "Live app is reachable. Running the smoke suite (liveness: /version + home + login-401; no SHA gate)…"
+              node test/smoke-live.js
+              exit $?
+            fi
+            sleep "$delay"
+          done
+          echo "::error::The live app at ${APP_URL}/version was unreachable within ~$((max * delay))s even though no redeploy was expected — production appears DOWN or crash-looping (e.g. a required env var such as SHARED_ACCESS_CODE is unset). Check the Railway dashboard. Last /version seen: ${live:-<unreachable>}"
           exit 1
