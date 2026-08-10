@@ -10,12 +10,12 @@ count after the PR's changes. Because it is committed, the anchor moves forward 
 
 ## Top 3 CHANGELOG headings
 
-1. ## [CI] — Verify Live: deploy-aware SHA gate (no false fail on non-runtime pushes)
-2. ## [Testing] — Frontend server tests + CI workflow
-3. ## [Unreleased] — tooling/tests — regression hardening: baseline gate, digest lifecycle contract, drift guards
+1. ## [Feature] — In-app help guide (/help, מדריך)
+2. ## [CI] — Verify Live: deploy-aware SHA gate (no false fail on non-runtime pushes)
+3. ## [Testing] — Frontend server tests + CI workflow
 
 ## Test count
 
 `npm test` (the CI gate, `node --test test/*.test.js` — excludes the live `smoke-live.js`):
 
-tests-passing: 707
+tests-passing: 715

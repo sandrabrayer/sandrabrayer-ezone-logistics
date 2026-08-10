@@ -11,7 +11,7 @@ import { ROLE } from '../src/roles.js';
 
 const ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO];
 // Nav-cleanup: the standalone '/' (דרישה חדשה) and '/events' (אירועים חריגים) are no longer nav pages.
-const ALL_PAGES = ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management'];
+const ALL_PAGES = ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management', '/help'];
 const READS = ['houses', 'config', 'requests', 'users', 'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts', 'events'];
 const WRITES = ['createRequest', 'createEvent', 'updateEvent', 'managementData', 'approve', 'reject', 'defer', 'assign', 'setStatus', 'setExecution', 'setBlocked', 'createInspection', 'addFinding', 'confirmFinding', 'deleteRequest', 'editRequest', 'submitInventory'];
 
@@ -20,7 +20,7 @@ const WRITES = ['createRequest', 'createEvent', 'updateEvent', 'managementData',
 const PAGE_EXPECT = {
   coordinator: [],
   maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
+  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help'],
   ops_manager: ALL_PAGES.slice(),
   ceo: ALL_PAGES.slice(),
 };
@@ -67,7 +67,7 @@ test('unknown / blank role fails closed to NO nav pages', () => {
 test('navByRole renders exactly the permitted links, in canonical order', () => {
   const nav = navByRole();
   assert.deepEqual(nav.coordinator.map((l) => l.href), [], 'coordinator has no nav tab (request form + events removed)');
-  assert.deepEqual(nav.field_ops.map((l) => l.href), ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
+  assert.deepEqual(nav.field_ops.map((l) => l.href), ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help']);
   assert.ok(!nav.field_ops.some((l) => l.href === '/management'), 'field_ops nav has no management link');
   assert.ok(!Object.values(nav).some((links) => links.some((l) => l.href === '/events' || l.href === '/')), 'no role has a /events or / nav link');
   assert.deepEqual(nav.ops_manager.map((l) => l.href), ALL_PAGES);

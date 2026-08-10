@@ -3,6 +3,46 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Feature] — In-app help guide (/help, מדריך)
+
+**What:** Added a static Hebrew RTL help page at `/help` ("מדריך"), linked from the header nav on every
+page for both login-roster roles (field_ops, ops_manager; ceo inherits it via the full nav set). The page
+documents: who does what (רכזים ← רועי ← אולגה ← רמי/צחי), the status flow
+(דרישה → ממתין לאישור → מאושר → בביצוע → הושלם → סגור, plus לא מאושר and נדחה לתאריך), the approvals
+table (up-to-threshold רועי · above-threshold אולגה · חירום = documented auto-approval · deferral = רועי
+at any amount), internal (רמי/צחי by cluster) vs external dispatch + cluster visit batching, and where the
+weekly inventory count lands in the digest (WeeklyCounts). The approval threshold is **read live from
+Config (`approval_threshold`)** via the Bearer-gated config read — never hardcoded in the page.
+
+**Auth:** unlike the public HTML shells, `/help` is token-gated server-side: a valid session token
+(Bearer) → 200 with the guide; anonymous/invalid → **401** whose body is only a small loader shell (no
+guide content) carrying the auth shim — the shell re-fetches `/help` through the shim, which attaches the
+token (login overlay first when no stored session), so plain nav clicks and refresh still work.
+
+**Changed**
+- `src/access.js` — `/help` (מדריך) added to `NAV_ALL` and to the field_ops nav set (ops_manager/ceo get
+  it via `NAV_ALL`); nav/page-access matrices updated accordingly.
+- `src/server.js` — the token-gated `/help` route + the `HELP_SHELL` 401 body; the client shim routes
+  `fetch('/help')` with the Bearer token (same 401-clear-and-retry as the data routes).
+- `src/public/sw.js` — `/help` + `/help.html` listed in `DOCUMENT_ROUTES` (network-first) so a cached
+  copy never answers for the server's auth check.
+- `src/*.html` (dashboard/workorders/inventory/inspection/reports/management) — static nav carries the
+  מדריך link (the shim still rewrites the nav per role at runtime).
+- `test/access.test.js`, `test/nav-events.test.js` — nav-matrix expectations include `/help`.
+
+**Added**
+- `src/help.html` — the guide page, styled with the existing app CSS (RTL, Heebo, same tokens); the
+  threshold spans are filled client-side from `action=config`.
+- `test/help-page.test.js` — locks the gate (anonymous/garbage/forged → 401 with no guide content in the
+  body; valid token → 200 with "מדריך"/"ממתין לאישור"/"חירום" for both roles), the no-hardcoded-threshold
+  guard, the dashboard nav link, the role-nav matrix, and the SW network-first listing.
+
+**Why:** the approval/dispatch rules live in several heads and documents; a short in-app guide gives
+every manager the same answer without leaving the app. Static content only — no new Apps Script
+endpoints, no sheet changes, no Code.gs changes (the nav is rendered by the Node shim, not server-side
+in Apps Script).
+
+---
 ## [CI] — Verify Live: deploy-aware SHA gate (no false fail on non-runtime pushes)
 
 **What:** Fixed the "Verify Live (Railway Node leg)" workflow so it no longer fails when a push to `main`

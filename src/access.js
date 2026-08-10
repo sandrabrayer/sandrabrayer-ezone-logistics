@@ -75,13 +75,16 @@ const NAV_ALL = [
   { href: '/inspection', label: 'בקרה' },
   { href: '/reports', label: 'דוחות' },
   { href: '/management', label: 'ניהול תפעולי רשת' },
+  { href: '/help', label: 'מדריך' },
 ];
 const NAV_HREFS_BY_ROLE = {
   // coordinator no longer has a nav tab here (דרישה חדשה + אירועים חריגים removed). '/' still serves, so a
   // coordinator session lands on the root; retiring/re-homing the role is the separate architecture work.
   coordinator: [],
   maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
+  // /help (מדריך): the static in-app guide — a login-roster page (field_ops + ops_manager; ceo has
+  // everything via NAV_ALL). Server-gated in src/server.js (valid session token required).
+  field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help'],
   ops_manager: NAV_ALL.map((l) => l.href),
   ceo: NAV_ALL.map((l) => l.href),
 };
