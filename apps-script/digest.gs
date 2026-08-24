@@ -39,9 +39,10 @@ var DIGEST_NOT_DONE_ = 'לא בוצעה';
 
 // ---- Pure helpers (mirror of src/digest.js) ----
 
-// House id map — ALL SIX houses (increment 33). הפרדס (pardes) / שדה אליעזר (sde-eliezer)
-// are pre-opening but already have activity, so a gap now shows as 'לא בוצעה' instead of the house
-// being invisible. Any house that does not map is OMITTED, never guessed. Keys are the CANONICAL
+// House id map — ALL SIX houses (increment 33). הפרדס (pardes) OPENED in Aug 2026 and is a regular
+// open house; שדה אליעזר (sde-eliezer) is still pre-opening but already has activity, so a gap shows
+// as 'לא בוצעה' instead of the house being invisible. Consumers (ezone-coordinators) key on the id
+// 'pardes' — DIGEST-CONTRACT.md. Any house that does not map is OMITTED, never guessed. Keys are the CANONICAL
 // Hebrew display names (HOUSE-IDS.md); values are the FROZEN ids, shared with ezone-kitchen. The
 // mapping applies at the digest boundary ONLY — Logistics keys on the house name internally.
 var DIGEST_HOUSE_IDS_ = {
