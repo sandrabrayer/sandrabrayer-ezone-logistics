@@ -25,7 +25,7 @@ const HOUSES = [
   { name: 'רמות השבים', status: 'open' },
   { name: 'רעננה אשר', status: 'open' },
   { name: 'שדה אליעזר', status: 'pre-opening' },
-  { name: 'רעננה הפרדס', status: 'pre-opening' },
+  { name: 'רעננה הפרדס', status: 'open' }, // opened Aug 2026
 ];
 
 // ---- requests SLA / delays ----
@@ -129,9 +129,9 @@ test('buildManagementSummary bundles SLA, recurring defects, and both readiness 
   const m = buildManagementSummary(data, NOW);
   assert.ok(m.requests && typeof m.requests.openCount === 'number');
   assert.ok(Array.isArray(m.recurringDefects));
-  // opening readiness only covers pre-opening houses (שדה אליעזר, רעננה הפרדס)
-  assert.deepEqual(m.openingReadiness.map((h) => h.house), ['שדה אליעזר', 'רעננה הפרדס']);
-  // emergency readiness covers every house
+  // opening readiness only covers pre-opening houses — רעננה הפרדס opened (Aug 2026), so only שדה אליעזר
+  assert.deepEqual(m.openingReadiness.map((h) => h.house), ['שדה אליעזר']);
+  // emergency readiness covers every house, open and pre-opening alike
   assert.deepEqual(m.emergencyReadiness.map((h) => h.house), ['רמות השבים', 'רעננה אשר', 'שדה אליעזר', 'רעננה הפרדס']);
   // no removed panels leak back in
   assert.equal(m.defectClosure, undefined);

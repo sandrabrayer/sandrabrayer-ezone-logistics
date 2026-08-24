@@ -21,7 +21,8 @@ const ID_TO_NAME = {
   'sde-eliezer': 'שדה אליעזר',
 };
 const MAPS = { idToName: ID_TO_NAME };
-const OPEN = ['ramot-hashavim', 'raanana-asher', 'caesarea-ofroni', 'caesarea-rehab'];
+// The five OPEN houses (רעננה הפרדס opened Aug 2026; only sde-eliezer is pre-opening in the seed).
+const OPEN = ['ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab'];
 const NOW = '2026-07-31';
 const DEF = 30; // Config default reminder window
 const logger = () => { const out = []; const fn = (m) => out.push(m); fn.out = out; return fn; };

@@ -71,3 +71,42 @@ test('the old id `raanana-hapardes` appears NOWHERE in production digest sources
     assert.ok(src.includes('pardes'), `${f} must use the pardes id`);
   }
 });
+
+// ---- רעננה הפרדס OPENED (Aug 2026): the canonical five open houses ----
+// The ecosystem's live house set is now FIVE open houses (the original four + pardes);
+// שדה אליעזר stays the only pre-opening house. This guard fails loudly if any enumeration —
+// the Node seeds, the digest maps on either side, or the Apps Script seed — drops one of the
+// five or regresses pardes to pre-opening.
+
+const OPEN_FIVE = ['ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab'];
+
+test('SEED_HOUSES marks exactly the canonical five as open; שדה אליעזר is the only pre-opening house', () => {
+  const openIds = SEED_HOUSES.filter((h) => h.status === 'open').map((h) => HOUSE_IDS[h.name]).sort();
+  assert.deepEqual(openIds, [...OPEN_FIVE].sort());
+  const pre = SEED_HOUSES.filter((h) => h.status === 'pre-opening').map((h) => h.name);
+  assert.deepEqual(pre, ['שדה אליעזר']);
+  assert.equal(SEED_HOUSES.find((h) => h.name === 'רעננה הפרדס').status, 'open');
+});
+
+test('every enumeration covers the canonical five open houses (label רעננה הפרדס ↔ id pardes)', () => {
+  // Node-side digest map + order.
+  for (const id of OPEN_FIVE) {
+    assert.ok(Object.values(HOUSE_IDS).includes(id), `HOUSE_IDS missing ${id}`);
+    assert.ok(DIGEST_HOUSE_IDS.includes(id), `DIGEST_HOUSE_IDS missing ${id}`);
+  }
+  assert.equal(HOUSE_IDS['רעננה הפרדס'], 'pardes');
+  // Apps Script mirrors (evaluated in a sandbox — pure top-level data, no GAS call runs on load).
+  const digestGs = new Function(
+    readFileSync(join(root, 'apps-script/digest.gs'), 'utf8') +
+    '\n;return { map: DIGEST_HOUSE_IDS_, order: DIGEST_HOUSE_ID_ORDER_ };')();
+  for (const id of OPEN_FIVE) {
+    assert.ok(Object.values(digestGs.map).includes(id), `digest.gs map missing ${id}`);
+    assert.ok(digestGs.order.includes(id), `digest.gs order missing ${id}`);
+  }
+  assert.equal(digestGs.map['רעננה הפרדס'], 'pardes');
+  const setupGs = new Function(
+    readFileSync(join(root, 'apps-script/setup.gs'), 'utf8') + '\n;return { SEED_HOUSES: SEED_HOUSES };')();
+  const gsOpenIds = setupGs.SEED_HOUSES.filter((h) => h[3] === 'open').map((h) => HOUSE_IDS[h[0]]).sort();
+  assert.deepEqual(gsOpenIds, [...OPEN_FIVE].sort());
+  assert.deepEqual(setupGs.SEED_HOUSES.find((h) => h[0] === 'רעננה הפרדס')[3], 'open');
+});

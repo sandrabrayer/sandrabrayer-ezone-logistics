@@ -7,10 +7,11 @@
 // and NO financial fields, ever. See DIGEST-CONTRACT.md for the frozen schema.
 
 // ---- House id map ----
-// ALL SIX houses (increment 33). הפרדס (pardes) and שדה אליעזר (sde-eliezer) are
-// pre-opening but already have activity, so they now appear in the digest — a gap shows as
-// 'לא בוצעה', which is the honest state, rather than the house being invisible. Any house name
-// that does not map is still OMITTED, never guessed.
+// ALL SIX houses (increment 33). הפרדס (pardes) OPENED in Aug 2026 and is a regular open house;
+// שדה אליעזר (sde-eliezer) is still pre-opening but already has activity, so it appears in the
+// digest too — a gap shows as 'לא בוצעה', which is the honest state, rather than the house being
+// invisible. Consumers (ezone-coordinators) key on the id 'pardes' — see DIGEST-CONTRACT.md. Any
+// house name that does not map is still OMITTED, never guessed.
 //
 // Keys are the CANONICAL Hebrew display names (HOUSE-IDS.md); values are the FROZEN ids, shared
 // with ezone-kitchen so every E-Zone app keys houses on one namespace. The id — never the Hebrew

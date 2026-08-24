@@ -20,8 +20,8 @@ const ID_TO_NAME = {
   'sde-eliezer': 'שדה אליעזר',
 };
 const MAPS = { idToName: ID_TO_NAME };
-// The four OPEN houses (pardes + sde-eliezer are pre-opening in the seed).
-const OPEN = ['ramot-hashavim', 'raanana-asher', 'caesarea-ofroni', 'caesarea-rehab'];
+// The five OPEN houses (רעננה הפרדס opened Aug 2026; only sde-eliezer is pre-opening in the seed).
+const OPEN = ['ramot-hashavim', 'raanana-asher', 'pardes', 'caesarea-ofroni', 'caesarea-rehab'];
 const NOW = '2026-07-31';
 const logger = () => { const out = []; const fn = (m) => out.push(m); fn.out = out; return fn; };
 
@@ -230,7 +230,7 @@ test('"all" expands to every OPEN house — one request each, none for a duplica
   assert.equal(g.toCreate.length, OPEN.length - 1);
   assert.equal(g.skippedDuplicate, 1);
   assert.ok(g.toCreate.every((t) => t.planId === 'MPALL'));
-  assert.deepEqual(g.toCreate.map((t) => t.houseId).sort(), ['caesarea-ofroni', 'caesarea-rehab', 'ramot-hashavim'].sort());
+  assert.deepEqual(g.toCreate.map((t) => t.houseId).sort(), ['caesarea-ofroni', 'caesarea-rehab', 'pardes', 'ramot-hashavim'].sort());
 });
 
 test('generation: malformed rows are skipped + logged; unknown house id never generates', () => {

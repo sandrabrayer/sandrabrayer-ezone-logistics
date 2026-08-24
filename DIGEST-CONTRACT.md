@@ -14,8 +14,9 @@ coordinators repo.
 
 House ids (v2, increment 33 — all six houses): ramot-hashavim (רמות השבים) ·
 raanana-asher (רעננה אשר) · pardes (רעננה הפרדס) · caesarea-ofroni (קיסריה עפרוני) ·
-caesarea-rehab (קיסריה ריהאב) · sde-eliezer (שדה אליעזר). רעננה הפרדס and שדה אליעזר are
-pre-opening but already have activity, so they are included — a gap surfaces as 'לא בוצעה'
+caesarea-rehab (קיסריה ריהאב) · sde-eliezer (שדה אליעזר). רעננה הפרדס (pardes) opened in
+August 2026 and is a regular open house; שדה אליעזר is still pre-opening but already has
+activity, so it is included too — a gap surfaces as 'לא בוצעה'
 rather than the house being invisible. Houses that do not map are omitted, never guessed. Display
 names are the canonical forms from HOUSE-IDS.md (the single source). The house-id vocabulary is
 SHARED with ezone-kitchen so all E-Zone apps key houses on one namespace; ids apply at the digest

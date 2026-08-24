@@ -131,8 +131,9 @@
     // Logistics owns ONLY טואלטיקה + חומרי ניקוי (food is owned by ezone-kitchen).
     const CATEGORIES = ['טואלטיקה', 'חומרי ניקוי'];
     const COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב', 'צחי', 'רועי', 'רמי'];
-    // Only the four houses with a seeded coordinator are listed. The pre-opening houses (שדה אליעזר,
-    // רעננה הפרדס) have no coordinator yet → blank in the רכז/ת column. צחי is a maintenance lead, not a
+    // Only the four houses with a seeded coordinator are listed. רעננה הפרדס is OPEN (Aug 2026) but has
+    // no coordinator hired yet, and שדה אליעזר is still pre-opening — both render blank in the רכז/ת
+    // column until a coordinator is seeded. צחי is a maintenance lead, not a
     // coordinator, so he is intentionally absent here (kept in sync with INVENTORY_HOUSE_COORDINATORS).
     const HOUSE_COORDINATORS = {
       'קיסריה עפרוני': 'שירה', 'קיסריה ריהאב': 'יעקב', 'רעננה אשר': 'אורן',
