@@ -3,6 +3,44 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Data/Docs] — רעננה הפרדס (pardes) opened: status flips to `open` across every enumeration
+
+**Why:** the house רעננה הפרדס (canonical id `pardes`, HOUSE-IDS.md) opened in August 2026 and is
+live across the E-Zone ecosystem. This repo already carried pardes everywhere it matters — the
+digest house map + order (`src/digest.js` / `apps-script/digest.gs`, increment 33+35), the Houses
+seed, HOUSE-IDS.md, and the intake contract — so the digest was already emitting `pardes` rows for
+OpenTickets/WeeklyCounts (id `pardes`, exactly the key ezone-coordinators expects per
+DIGEST-CONTRACT.md). What was still `pre-opening` was the house **status**, which gates the
+`'all'`-house expansion for preventive-maintenance plans, compliance items and the events panel
+(`openHouseIds_()`), and the /management opening-readiness panel.
+
+**Changed**
+- `src/schema.js` + `apps-script/setup.gs` — SEED_HOUSES: רעננה הפרדס `pre-opening` → `open`
+  (fresh-sheet seed; the LIVE sheet needs the matching one-cell edit — see the deploy note).
+  Coordinator-map comments updated: pardes is open but has **no coordinator hired yet**, so it stays
+  absent from `INVENTORY_HOUSE_COORDINATORS` (blank רכז/ת, רועי backstop) until one is seeded.
+- `HOUSE-IDS.md` — pardes status טרום-פתיחה → פתוח (canonical cross-repo file — propagate the same
+  edit to the other E-Zone repos in one batch, per that file's own rule).
+- `DIGEST-CONTRACT.md` / `src/digest.js` / `apps-script/digest.gs` — descriptive text updated
+  (pardes is an open house; שדה אליעזר is the only pre-opening house). **No digest logic changed** —
+  the digest includes all six mapped houses regardless of status; zero pardes data keeps producing
+  the clean empty states (`לא בוצעה` WeeklyCounts rows, no OpenTickets rows), never an error.
+
+**Tests (717, all green):** fixtures that modeled four open houses now model five
+(events / compliance / maintenance OPEN lists; /management summary — opening readiness now covers
+only שדה אליעזר, emergency readiness still covers every house). New guards in `house-ids.test.js`
+assert the canonical five-house open list (`ramot-hashavim` · `raanana-asher` · `pardes` ·
+`caesarea-ofroni` · `caesarea-rehab`) is covered by **every** enumeration — Node seeds, both digest
+maps, and the Apps Script seed — and that רעננה הפרדס maps to exactly `pardes` with status `open`.
+All other logic was already count-agnostic (no hardcoded four-house assumption survives in
+production code).
+
+**Deploy note (post-merge):** Apps Script auto-deploys via clasp CI on merge to `main` (a new
+VERSION of the existing deployment — the `/exec` URL does not change). The one **manual** step is a
+single data edit in the live Google Sheet: `Houses` tab → רעננה הפרדס row → `status` cell
+`pre-opening` → `open`. Verify by filing a pardes ticket and confirming it appears in the
+coordinators' logistics digest under house id `pardes`.
+
 ## [Feature] — In-app help guide (/help, מדריך)
 
 **What:** Added a static Hebrew RTL help page at `/help` ("מדריך"), linked from the header nav on every

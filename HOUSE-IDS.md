@@ -15,7 +15,7 @@ Two things live in this file and they are **not** the same thing:
 |---|---|---|---|---|
 | רמות השבים | `ramot-hashavim` | Ramot HaShavim | `sharon` | פתוח |
 | רעננה אשר | `raanana-asher` | Ra'anana Asher | `sharon` | פתוח |
-| רעננה הפרדס | `pardes` | Ra'anana HaPardes | `sharon` | טרום-פתיחה |
+| רעננה הפרדס | `pardes` | Ra'anana HaPardes | `sharon` | פתוח |
 | קיסריה עפרוני | `caesarea-ofroni` | Caesarea Efroni | `caesarea` | פתוח |
 | קיסריה ריהאב | `caesarea-rehab` | Caesarea Rehab | `caesarea` | פתוח |
 | שדה אליעזר | `sde-eliezer` | Sde Eliezer | `north` | טרום-פתיחה |
@@ -24,7 +24,8 @@ Two things live in this file and they are **not** the same thing:
 these strings — no local variants, no reordering (city first: it is "קיסריה עפרוני", not "עפרוני קיסריה").
 
 `sde-eliezer` is **reserved now** so no app invents an id for it
-later under pressure. Both `pardes` and `sde-eliezer` are pre-opening but already have activity.
+later under pressure. `pardes` (רעננה הפרדס) **opened in August 2026** and is a regular open
+house; `sde-eliezer` is still pre-opening but already has activity.
 
 ### Note on short ids `pardes` and `caesarea-ofroni`
 

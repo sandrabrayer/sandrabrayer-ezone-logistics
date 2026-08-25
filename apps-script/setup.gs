@@ -150,10 +150,13 @@ function buildEmergencyReadinessSeed_() {
 }
 
 // Canonical display names from HOUSE-IDS.md (increment 33) — must match that file exactly.
+// רעננה הפרדס OPENED (Aug 2026) — status 'open'; שדה אליעזר is the only pre-opening house left.
+// NOTE: this seed applies to a FRESH sheet only (seedIfEmpty_). On the LIVE sheet the same change is
+// one data edit: Houses tab → רעננה הפרדס row → status cell 'pre-opening' → 'open' (see PR notes).
 var SEED_HOUSES = [
   ['רעננה אשר',     'רמי', 'sharon',   'open'],
   ['רמות השבים',    'רמי', 'sharon',   'open'],
-  ['רעננה הפרדס',   'רמי', 'sharon',   'pre-opening'],
+  ['רעננה הפרדס',   'רמי', 'sharon',   'open'],
   ['קיסריה עפרוני', 'צחי', 'caesarea', 'open'],
   ['קיסריה ריהאב',  'צחי', 'caesarea', 'open'],
   ['שדה אליעזר',    'צחי', 'north',    'pre-opening'],

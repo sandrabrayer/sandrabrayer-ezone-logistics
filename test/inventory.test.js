@@ -58,8 +58,9 @@ test('counters are the coordinators + backstop', () => {
 });
 
 test('only the four houses with a seeded coordinator map to one (canonical names, HOUSE-IDS.md)', () => {
-  // The two pre-opening houses (שדה אליעזר, רעננה הפרדס) have NO coordinator yet, so they are absent
-  // from the map and render blank. צחי is a maintenance lead (role: maintenance) — never a coordinator.
+  // רעננה הפרדס is OPEN (Aug 2026) but has no coordinator hired yet, and שדה אליעזר is still
+  // pre-opening — both are absent from the map and render blank until a coordinator is seeded.
+  // צחי is a maintenance lead (role: maintenance) — never a coordinator.
   assert.deepEqual(INVENTORY_HOUSE_COORDINATORS, {
     'קיסריה עפרוני': 'שירה', 'קיסריה ריהאב': 'יעקב', 'רעננה אשר': 'אורן',
     'רמות השבים': 'אביב',
@@ -71,7 +72,7 @@ test('only the four houses with a seeded coordinator map to one (canonical names
 
 test('צחי is a maintenance lead, not a coordinator — absent from the roster map', () => {
   // Regression: the רכז/ת column wrongly showed צחי for שדה אליעזר. He is role:maintenance in SEED_USERS,
-  // and no coordinator is seeded for that pre-opening house, so it must render blank.
+  // and no coordinator is seeded for that house, so it must render blank.
   assert.ok(!Object.values(INVENTORY_HOUSE_COORDINATORS).includes('צחי'), 'צחי must not be a coordinator');
   assert.ok(!('שדה אליעזר' in INVENTORY_HOUSE_COORDINATORS), 'שדה אליעזר has no seeded coordinator yet');
   const tzachi = SEED_USERS.find((u) => u.name === 'צחי');

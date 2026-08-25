@@ -108,7 +108,7 @@ test('a DEACTIVATED roster user drops out of the picker (roster is the source of
 test('a newly added active manager appears; a new maintenance / coordinator does NOT', async () => {
   roster.push({ name: 'דנה', role: 'field_ops', house: '', active: 'TRUE' });
   roster.push({ name: 'עידו', role: 'maintenance', house: 'sharon', active: 'TRUE' });
-  roster.push({ name: 'נועה', role: 'coordinator', house: 'הפרדס', active: 'TRUE' });
+  roster.push({ name: 'נועה', role: 'coordinator', house: 'רעננה הפרדס', active: 'TRUE' });
   _resetNodeCache();
   const names = await pickerNames();
   assert.ok(names.includes('דנה'), 'a new active manager appears');

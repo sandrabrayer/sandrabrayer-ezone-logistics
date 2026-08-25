@@ -229,10 +229,13 @@ export const TRADES = [
 // coastal two. A test asserts exactly this.
 // Display names are the CANONICAL forms from HOUSE-IDS.md (increment 33) — the single source for how
 // a house is shown. They must match that file exactly (city first: "קיסריה עפרוני", not "עפרוני קיסריה").
+// רעננה הפרדס OPENED (Aug 2026) — status 'open'; שדה אליעזר is the only pre-opening house left.
+// This seed provisions a FRESH sheet; on the LIVE sheet the same change is a one-cell data edit
+// (Houses tab → רעננה הפרדס row → status 'open'). A guard test asserts the open five (house-ids.test.js).
 export const SEED_HOUSES = [
   { name: 'רעננה אשר',      technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
   { name: 'רמות השבים',     technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
-  { name: 'רעננה הפרדס',    technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.PRE_OPENING },
+  { name: 'רעננה הפרדס',    technician: 'רמי', cluster: CLUSTERS.SHARON,   status: HOUSE_STATUS.OPEN },
   { name: 'קיסריה עפרוני',  technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
   { name: 'קיסריה ריהאב',   technician: 'צחי', cluster: CLUSTERS.CAESAREA, status: HOUSE_STATUS.OPEN },
   { name: 'שדה אליעזר',     technician: 'צחי', cluster: CLUSTERS.NORTH,    status: HOUSE_STATUS.PRE_OPENING },
@@ -365,10 +368,11 @@ export const INVENTORY_COUNTERS = ['שירה', 'יעקב', 'אורן', 'אביב
 
 // House → its coordinator (the default "נספר ע״י" in the weekly count UI). Coordinators are the
 // people who actually walk each house: שירה (קיסריה עפרוני) · יעקב (קיסריה ריהאב) · אורן (רעננה אשר) ·
-// אביב (רמות השבים). Only these four houses have a seeded coordinator (see SEED_USERS). The two
-// pre-opening houses — שדה אליעזר and רעננה הפרדס — have NO coordinator yet, so they are intentionally
-// absent here and render blank in the רכז/ת column. צחי is a MAINTENANCE lead (role: maintenance), not
-// a coordinator, so he must never appear here. רועי covers anything unmapped as the backstop counter.
+// אביב (רמות השבים). Only these four houses have a seeded coordinator (see SEED_USERS). רעננה הפרדס
+// is OPEN (Aug 2026) but has no coordinator hired yet, and שדה אליעזר is still pre-opening — both are
+// intentionally absent here and render blank in the רכז/ת column until a coordinator is seeded. צחי is
+// a MAINTENANCE lead (role: maintenance), not a coordinator, so he must never appear here. רועי covers
+// anything unmapped as the backstop counter.
 // Keys are the CANONICAL house display names (HOUSE-IDS.md) — kept in sync with SEED_HOUSES.
 export const INVENTORY_HOUSE_COORDINATORS = {
   'קיסריה עפרוני': 'שירה',
