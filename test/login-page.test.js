@@ -5,7 +5,7 @@
 //
 // '/' is now a BARE managers-only landing (the standalone coordinator request form was removed): its only
 // job is to bring an unauthenticated visitor to the login overlay and then forward a signed-in user to
-// /dashboard. This proves, for coordinator/maintenance/field_ops/ops_manager/ceo, that the overlay
+// /dashboard. This proves, for coordinator/maintenance/field_ops/ops_manager, that the overlay
 // appears, the click posts /api/login, the session is saved, the overlay closes, and the page then
 // forwards to /dashboard. (The overlay itself is role-agnostic — one password field, no picker; the
 // single-login contract is enforced at the server and covered by login-single.test.js.)
@@ -81,7 +81,7 @@ function loadLoginPage(role, pathname) {
 
 async function flush(n) { for (let i = 0; i < (n || 8); i++) await Promise.resolve(); }
 
-for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo']) {
+for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager']) {
   test(`login page submit works end-to-end for ${role}`, async () => {
     const ctx = loadLoginPage(role, '/');
     await flush();

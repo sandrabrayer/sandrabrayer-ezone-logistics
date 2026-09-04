@@ -48,11 +48,11 @@ function eventSeverityRank(sev) {
 }
 
 // May this actor CREATE (report) an event for houseName? maintenance CANNOT; a coordinator only for
-// their OWN house (houseInScope); field_ops / ops_manager / ceo for any house. Unknown role → false.
+// their OWN house (houseInScope); field_ops / ops_manager for any house. Unknown role → false.
 function eventCreatePermitted(role, scope, houseName, cluster) {
   if (role === 'maintenance') return false;
   if (role === 'coordinator') return houseInScope(role, scope, houseName, cluster);
-  if (role === 'field_ops' || role === 'ops_manager' || role === 'ceo') return true;
+  if (role === 'field_ops' || role === 'ops_manager') return true;
   return false;
 }
 

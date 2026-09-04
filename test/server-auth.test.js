@@ -76,7 +76,7 @@ test('a valid token passes the gate (upstream 502, never 401)', async () => {
 });
 
 test('a token forged with the wrong key → 401', async () => {
-  const forged = signToken('w'.repeat(32), 7, { name: 'רועי', role: 'ceo' });
+  const forged = signToken('w'.repeat(32), 7, { name: 'רועי', role: 'ops_manager' });
   const r = await get('/api/data?action=requests', { Authorization: `Bearer ${forged}` });
   assert.equal(r.status, 401);
 });

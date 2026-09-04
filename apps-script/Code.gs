@@ -22,7 +22,7 @@
 var DEPLOY_COMMIT = 'DEV';
 
 // ---- Coercion (mirror of src/config.js) ----
-var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days', 'archive_after_days'];
+var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days', 'archive_after_days']; // approval_threshold = legacy (PR 2), still coerced
 var BOOLEAN_KEYS = ['emergency_bypasses_approval'];
 var TRUE_STRINGS = ['true', 'TRUE', 'True', '1', 'yes', 'YES'];
 
@@ -254,52 +254,50 @@ var ROLE = {
   MAINTENANCE: 'maintenance',
   FIELD_OPS: 'field_ops',
   OPS_MANAGER: 'ops_manager',
-  CEO: 'ceo',
 };
 
-var ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO];
+var ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER];
 
 function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject: the role that chain B resolves to FOR THAT REQUEST may approve it. The ops_manager
-// (אולגה) and the CEO may approve at ANY amount — single-login (PR 1): every session is ops_manager, and
-// the approve/reject write is additionally gated by the APPROVER_CODE (server.js + Code.gs), so the role
-// alone never approves. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
+// approve / reject: the ops_manager (אולגה) is THE approver. Chain B v3 routes every non-emergency
+// request to ops_manager, and the approve/reject write is additionally gated by the APPROVER_CODE
+// (server.js + Code.gs), so the role alone never approves. requiredRole is the whoApproves() result.
+// The ceo role was removed (PR 2): no other role approves anything.
 function canApprove(actorRole, requiredRole) {
-  if (actorRole === ROLE.CEO || actorRole === ROLE.OPS_MANAGER) return true;
-  return actorRole === requiredRole;
+  return actorRole === ROLE.OPS_MANAGER && requiredRole === ROLE.OPS_MANAGER;
 }
 
-// defer: field_ops, ops_manager, ceo (a "this can wait" call, not the money decision).
+// defer: field_ops, ops_manager (a "this can wait" call, not the money decision).
 function canDefer(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
 // assignment / dispatch (assign, batch-assign, mark-external, set-status, set-execution):
-// field_ops, ops_manager, ceo.
+// field_ops, ops_manager.
 function canDispatch(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
-// block / unblock a request (increment 36): field_ops, ops_manager, ceo. A coordinator/maintenance
+// block / unblock a request (increment 36): field_ops, ops_manager. A coordinator/maintenance
 // gets 403 — same tier boundary as defer/dispatch.
 function canBlock(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
-// Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
-// ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
+// Manager tier (tier A) — sees ALL houses and holds the dispatch powers. field_ops / ops_manager.
+// Everyone else (coordinator, maintenance) is the restricted tier B.
 function isManagerRole(role) {
-  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER;
 }
 
-// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) and the CEO.
+// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) only.
 // NARROWER than isManagerRole — field_ops (Roy) is a manager tier for dispatch but is NOT an exec, so
 // he gets 403 here. Enforced server-side AND in Code.gs, never UI-only.
 function canManage(role) {
-  return role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+  return role === ROLE.OPS_MANAGER;
 }
 
 // House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their
@@ -331,7 +329,7 @@ function houseInScope(role, scope, houseName, houseCluster) {
 // external ezone-coordinators app, which POSTs to the secret-gated intake endpoint server-to-server
 // (handleCreateRequestIntake_), never through a Logistics session. So a coordinator session is
 // refused every write here. Every other write, for every non-manager role, is refused.
-var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
+var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager'];
 
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
@@ -343,24 +341,22 @@ function canWriteAction(role, action) {
 // === MIRROR:approval START ===
 var URGENCY_EMERGENCY = 'חירום';
 
-var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager' };
+var APPROVER = { AUTO: 'auto', OPS_MANAGER: 'ops_manager' };
 
-function costIsBlank(cost) {
-  return cost === '' || cost === null || cost === undefined;
-}
-
-// Which ROLE must approve this request. Returns 'auto' for the emergency bypass. Routes by amount
-// only — house status is NOT consulted (chain B v2).
-function whoApproves(cost, urgency, approvalThreshold) {
+// Which ROLE must approve this request. Chain B v3 (PR 2): two rules, no amount, no house status.
+//   1. urgency = חירום → 'auto' (auto-approved, emergency bypass, no human approver)
+//   2. everything else → 'ops_manager' (אולגה approves everything)
+// approval_threshold is NOT consulted (legacy Config key). A deferral wake-up re-routes through the
+// same two rules. The cost argument is kept for call-site stability but is not read.
+function whoApproves(cost, urgency) {
   if (urgency === URGENCY_EMERGENCY) return APPROVER.AUTO;
-  if (!costIsBlank(cost) && Number(cost) > Number(approvalThreshold)) return APPROVER.OPS_MANAGER;
-  return APPROVER.FIELD_OPS;
+  return APPROVER.OPS_MANAGER;
 }
 
-// Derived approval_required flag — TRUE when the request escalates above the default field_ops
-// approver (i.e. routes to ops_manager). Emergency (auto) and field_ops are FALSE.
-function approvalRequired(cost, urgency, approvalThreshold) {
-  return whoApproves(cost, urgency, approvalThreshold) === APPROVER.OPS_MANAGER;
+// Derived approval_required flag — TRUE when a human (ops_manager) must approve; FALSE only for the
+// emergency auto path.
+function approvalRequired(cost, urgency) {
+  return whoApproves(cost, urgency) === APPROVER.OPS_MANAGER;
 }
 // === MIRROR:approval END ===
 
@@ -476,18 +472,17 @@ function ticketAging(req, now) {
 // Config accessor for the SLA spec (never hardcoded). Returns the raw "urgency:days" string, or ''.
 function slaSpec_() { var v = getConfig('sla_days'); return v == null ? '' : String(v); }
 
-// Config accessor for the routing rule (never hardcode the value). ceo_ceiling stays in Config but
-// is DORMANT (chain B v2 does not read it).
-function approvalThreshold_() { return Number(getConfig('approval_threshold')); }
+// Chain B v3 (PR 2): routing reads NO Config value — approval_threshold is a LEGACY key (still coerced by
+// getAllConfig for the config read, never consulted here).
 
-// The derived approval_required for a request (chain B v2 — amount only).
+// The derived approval_required for a request (TRUE for every non-emergency request).
 function approvalRequiredFor_(cost, urgency) {
-  return approvalRequired(cost, urgency, approvalThreshold_());
+  return approvalRequired(cost, urgency);
 }
 
-// The role that must approve a given request row.
+// The role that must approve a given request row ('auto' for חירום, else 'ops_manager').
 function requiredApproverFor_(req) {
-  return whoApproves(req.estimated_cost, req.urgency, approvalThreshold_());
+  return whoApproves(req.estimated_cost, req.urgency);
 }
 
 // ---- HTTP router ----
@@ -845,8 +840,8 @@ function updateRequest_(id, fields, fromStatus, toStatus, by, note) {
   return false;
 }
 
-// Is this actor authorized to APPROVE/REJECT this specific request? Chain B: the resolved role (or
-// ops_manager / ceo). Emergency (auto) requires no human approver — allow any dispatch-capable actor to record it.
+// Is this actor authorized to APPROVE/REJECT this specific request? Chain B v3: ops_manager only.
+// Emergency (auto) requires no human approver — allow any dispatch-capable actor to record it.
 function actorMayApprove_(actor, req) {
   var required = requiredApproverFor_(req);
   if (required === APPROVER.AUTO) return canDispatch(actor.role);
@@ -1059,7 +1054,7 @@ function handleSetExecution_(p, actor) {
   return jsonOut_({ ok: true, completed: false });
 }
 
-// Block / unblock a request (increment 36). A manual flag set by field_ops / ops_manager / ceo —
+// Block / unblock a request (increment 36). A manual flag set by field_ops / ops_manager —
 // enforced HERE (403 for coordinator/maintenance), never UI-only. Blocking REQUIRES a reason. A block
 // is NOT a status transition (the status is untouched) and does NOT pause aging — a blocked request
 // still ages and can still be overdue. Every block/unblock is logged to AuditLog with actor + time.
@@ -1929,11 +1924,11 @@ function eventSeverityRank(sev) {
 }
 
 // May this actor CREATE (report) an event for houseName? maintenance CANNOT; a coordinator only for
-// their OWN house (houseInScope); field_ops / ops_manager / ceo for any house. Unknown role → false.
+// their OWN house (houseInScope); field_ops / ops_manager for any house. Unknown role → false.
 function eventCreatePermitted(role, scope, houseName, cluster) {
   if (role === 'maintenance') return false;
   if (role === 'coordinator') return houseInScope(role, scope, houseName, cluster);
-  if (role === 'field_ops' || role === 'ops_manager' || role === 'ceo') return true;
+  if (role === 'field_ops' || role === 'ops_manager') return true;
   return false;
 }
 
@@ -2307,7 +2302,7 @@ function handleCreateEvent_(p, actor) {
   return jsonOut_({ ok: true, id: id });
 }
 
-// Edit / close an event (root_cause, lessons, corrective_request_id, status, notes). ops_manager + ceo
+// Edit / close an event (root_cause, lessons, corrective_request_id, status, notes). ops_manager
 // ONLY (canManage) — gated here and at the gateway. Closing REQUIRES root_cause AND lessons; a linked
 // corrective request must exist. Closing stamps closed_at (re-opening clears it). Every edit is audited.
 function handleUpdateEvent_(p, actor) {
@@ -2372,7 +2367,7 @@ function readBudgetAdherence_(period, requests) {
   };
 }
 
-// ===== /management (increment 37) — exec network-management view for ops_manager + ceo =====
+// ===== /management (increment 37) — exec network-management view for ops_manager =====
 // Role-gated HERE (not UI-only): a request from any other role — including field_ops — is refused
 // 403 before any data is read. Served as a POST so the token identity is verified (doGet is not
 // identity-checked). Reads Logistics-owned sheets, PLUS the ezone-kitchen digest and the
@@ -2588,7 +2583,7 @@ function handleManagementData_(p, actor) {
 
 // ===== Inspections module =====
 
-var INSPECTION_USERS_ = ['רועי', 'אולגה', 'אורן', 'sandra', 'סנדרה'];
+var INSPECTION_USERS_ = ['רועי', 'אולגה', 'אורן'];
 var DOMAINS_ = ['treatment', 'cleanliness', 'kitchen'];
 var FINDING_TYPES_ = ['process_note', 'physical_defect'];
 
@@ -2697,12 +2692,12 @@ function updateFinding_(id, fields) {
 }
 
 // ===== Delete + edit requests =====
-// Delete: management (ops_manager / ceo), audit-logged before removal. Edit: only BEFORE approval.
+// Delete: management (ops_manager), audit-logged before removal. Edit: only BEFORE approval.
 
 var EDITABLE_STATUSES_ = ['דרישה', 'ממתין לאישור'];
 var EDITABLE_FIELDS_ = ['description', 'location_in_house', 'category', 'urgency', 'estimated_cost', 'house'];
 
-function isManagement_(role) { return role === ROLE.OPS_MANAGER || role === ROLE.CEO; }
+function isManagement_(role) { return role === ROLE.OPS_MANAGER; }
 
 function handleDeleteRequest_(p, actor) {
   if (!p.id) return jsonOut_({ ok: false, error: 'Missing id' });

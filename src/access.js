@@ -6,8 +6,7 @@
 //                  createRequest intake (Code.gs) server-to-server. No coordinator surface lives here.
 //   maintenance  → dashboard / workorders / inventory / inspection / reports (the tier-B pages it had; no /events).
 //   field_ops    → those same pages (everything EXCEPT /management); no standalone request form or /events.
-//   ops_manager  → everything, including /management.
-//   ceo          → everything, including /management.
+//   ops_manager  → everything, including /management. (The ceo role was removed in PR 2.)
 // Requests are filed from the in-dashboard create modal (managers), not a standalone דרישה חדשה page.
 // אירועים חריגים (/events) is removed entirely (nav + page + routes). '/' (index.html) is a bare login
 // landing that forwards a signed-in manager to /dashboard — it holds no request-submission surface.
@@ -40,7 +39,7 @@ import { isManagerRole, ROLE } from './roles.js';
 // external ezone-coordinators app, which POSTs to the secret-gated intake endpoint server-to-server
 // (Code.gs handleCreateRequestIntake_), never through a Logistics session. So a coordinator session
 // is refused every write here. Every other write, for every non-manager role, is refused.
-var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager', 'ceo'];
+var ACCESS_WRITE_MANAGER_ROLES = ['field_ops', 'ops_manager'];
 
 function canWriteAction(role, action) {
   if (ACCESS_WRITE_MANAGER_ROLES.indexOf(role) !== -1) return true; // handlers enforce the precise gate
@@ -82,11 +81,10 @@ const NAV_HREFS_BY_ROLE = {
   // coordinator session lands on the root; retiring/re-homing the role is the separate architecture work.
   coordinator: [],
   maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
-  // /help (מדריך): the static in-app guide — a login-roster page (field_ops + ops_manager; ceo has
-  // everything via NAV_ALL). Server-gated in src/server.js (valid session token required).
+  // /help (מדריך): the static in-app guide — a manager page (field_ops + ops_manager). Server-gated in
+  // src/server.js (valid session token required).
   field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help'],
   ops_manager: NAV_ALL.map((l) => l.href),
-  ceo: NAV_ALL.map((l) => l.href),
 };
 
 // Ordered [{href,label}] a role may open. Unknown/blank role → no nav (fail closed); '/' is the root/login

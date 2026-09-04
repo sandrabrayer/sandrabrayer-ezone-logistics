@@ -10,12 +10,12 @@ count after the PR's changes. Because it is committed, the anchor moves forward 
 
 ## Top 3 CHANGELOG headings
 
-1. ## [Auth] — Single login + approver code (PR 1): one password for the app, אולגה approves with a second code
-2. ## [Data/Docs] — רעננה הפרדס (pardes) opened: status flips to `open` across every enumeration
-3. ## [Feature] — In-app help guide (/help, מדריך)
+1. ## [Approvals] — אולגה approves everything (chain B v3); סנדרה / ceo removed (PR 2)
+2. ## [Auth] — Single login + approver code (PR 1): one password for the app, אולגה approves with a second code
+3. ## [Data/Docs] — רעננה הפרדס (pardes) opened: status flips to `open` across every enumeration
 
 ## Test count
 
 `npm test` (the CI gate, `node --test test/*.test.js` — excludes the live `smoke-live.js`):
 
-tests-passing: 723
+tests-passing: 732

@@ -148,9 +148,9 @@ test('empty inputs never crash and never fabricate', () => {
   assert.deepEqual(m.emergencyReadiness, []);
 });
 
-test('canManage: ops_manager and ceo pass; field_ops, coordinator, maintenance are refused', () => {
+test('canManage: ONLY ops_manager passes; field_ops, coordinator, maintenance and a stale ceo are refused', () => {
   assert.equal(canManage(ROLE.OPS_MANAGER), true);
-  assert.equal(canManage(ROLE.CEO), true);
+  assert.equal(canManage('ceo'), false);
   assert.equal(canManage(ROLE.FIELD_OPS), false);
   assert.equal(canManage(ROLE.COORDINATOR), false);
   assert.equal(canManage(ROLE.MAINTENANCE), false);

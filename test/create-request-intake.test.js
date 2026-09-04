@@ -192,16 +192,20 @@ test('success: writes an AuditLog row tagged source=coordinators, by the coordin
   assert.match(String(a.note), /source=coordinators/);
 });
 
-test('routing (chain B) is applied unchanged: over-threshold → ops_manager, low → field_ops, emergency → auto', () => {
-  // approval_required is TRUE iff the request escalates to ops_manager (cost > 3000, non-emergency).
+test('routing (chain B v3) is applied: any non-emergency amount → ops_manager (approval_required TRUE), emergency → auto', () => {
+  // approval_required is TRUE for every request that needs a human approver — i.e. everything but חירום.
   const over = deploy({ CREATE_REQUEST_SECRET: SECRET });
   const r1 = parse(over.api.handleCreateRequestIntake_({ secret: SECRET, payload: { ...okPayload(), estimated_cost: 5000 } }));
   assert.equal(r1.ok, true);
-  assert.equal(over.requests.rows()[0].approval_required, true, 'cost 5000 > threshold → ops_manager → approval_required true');
+  assert.equal(over.requests.rows()[0].approval_required, true, 'cost 5000 → ops_manager → approval_required true');
 
   const low = deploy({ CREATE_REQUEST_SECRET: SECRET });
   low.api.handleCreateRequestIntake_({ secret: SECRET, payload: { ...okPayload(), estimated_cost: 500 } });
-  assert.equal(low.requests.rows()[0].approval_required, false, 'cost 500 ≤ threshold → field_ops → approval_required false');
+  assert.equal(low.requests.rows()[0].approval_required, true, 'cost 500 → ops_manager too (no field_ops tier) → approval_required true');
+
+  const blank = deploy({ CREATE_REQUEST_SECRET: SECRET });
+  blank.api.handleCreateRequestIntake_({ secret: SECRET, payload: { ...okPayload(), estimated_cost: '' } });
+  assert.equal(blank.requests.rows()[0].approval_required, true, 'blank cost → ops_manager → approval_required true');
 
   const emer = deploy({ CREATE_REQUEST_SECRET: SECRET });
   emer.api.handleCreateRequestIntake_({ secret: SECRET, payload: { ...okPayload(), estimated_cost: 9000, urgency: 'חירום' } });

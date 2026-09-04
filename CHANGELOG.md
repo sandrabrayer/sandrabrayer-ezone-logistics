@@ -3,6 +3,64 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Approvals] — אולגה approves everything (chain B v3); סנדרה / ceo removed (PR 2)
+
+**What:** The approval chain is now two rules: **emergency (חירום) → auto-approved (unchanged); everything
+else → `ops_manager` (אולגה)**. The `field_ops` approval tier (≤ `approval_threshold`) is gone, and the
+`ceo` role (סנדרה) is removed from every approval and permission path. `approval_threshold` stays in Config
+as a **legacy key nothing reads**. A deferral wake-up re-routes through the same two rules. No new secret,
+no new env var, no sheet header change.
+
+**Routing (`src/approval.js` ↔ Code.gs `MIRROR:approval`, drift-guarded)**
+- `APPROVER = { AUTO, OPS_MANAGER }`; `whoApproves(cost, urgency)` returns `auto` for חירום, else
+  `ops_manager` — no amount, no house status, no threshold argument. `approvalRequired` is TRUE for every
+  non-emergency request. `costIsBlank` removed with the tier.
+- Code.gs: `approvalThreshold_()` removed; `approvalRequiredFor_` / `requiredApproverFor_` read no Config.
+  `NUMERIC_KEYS` still coerces `approval_threshold` for the config read (legacy).
+
+**Roles (`src/roles.js` ↔ Code.gs `MIRROR:roles`; `src/access.js` ↔ `MIRROR:access`; `src/events.js` ↔
+`MIRROR:events`)**
+- `ROLE.CEO` / `'ceo'` removed from `ROLE`, `ROLES`, `canApprove`, `canDefer`, `canDispatch`, `canBlock`,
+  `isManagerRole`, `canManage`, Code.gs `isManagement_` (the delete gate), `ACCESS_WRITE_MANAGER_ROLES`,
+  `eventCreatePermitted`, the nav sets, and the inspector allow-list (`INSPECTION_USERS` / `INSPECTION_USERS_`
+  drop `sandra` / `סנדרה`). `canApprove` is now `actor === ops_manager && required === ops_manager` — no
+  other role approves anything; a stale `ceo` token fails closed everywhere (403 / no nav / no reads).
+- `src/edit.js` legacy `DELETERS` drops `sandra`.
+
+**Roster / seeds (`src/schema.js`, `apps-script/setup.gs`)**
+- `USER_ROLES` drops `ceo`; `SEED_USERS` no longer seeds סנדרה; `SEED_CONFIG` no longer seeds `ceo_ceiling`
+  (an existing row is harmless). New `RETIRED_USERS = ['סנדרה']` + `deactivateUsers_`: `setupSheet()` sets an
+  **existing** סנדרה row to `active=FALSE` — never deleted, idempotent, other rows untouched.
+- **`setUserPin()` retired**: it now throws; the PBKDF2 writer (`hashPin_`, `pbkdf2Sha256_`,
+  `verifyPinParity_` …) is removed from setup.gs. `Users.pin_hash` stays as an append-only legacy column
+  that nothing writes or reads.
+
+**UI (`src/dashboard.html`, `workorders.html`, `management.html`)** — the dashboard's chain-B mirror follows
+v3 (no threshold read from config, no `THRESHOLD_DEFAULT`); `canApproveUI` / `isExecUI` / `canBlockUI` drop
+`ceo`; field_ops sees the disabled `ממתין לאישור אולגה` on every non-emergency request. Manager-role lists on
+the other pages drop `ceo`.
+
+**Notifications / digest:** no "notify Sandra / ceo" path exists in the code (verified by grep); the digest
+viewer email in `digest.gs` is sheet access, not approval, and is untouched.
+
+**Docs:** README (roles, approvals table → chain B v3, setup steps), `src/help.html` (מי מאשר מה: אולגה is
+the sole approver, no threshold row, the Config-threshold script removed), `DEPLOY.md` (post-merge note).
+
+**Tests (732, all green):** `approval.test.js` rewritten for v3 with an exhaustive grid asserting **no
+request ever routes to `ceo` or `field_ops`** and that a **deferral wake-up lands on `ops_manager`**;
+`roles` / `enforcement` / `edit` / `schema` / `access` / `access-server` / `events` / `management` / nav /
+`help-page` / `login-page` / `dashboard-approve-gate` / `create-request-intake` / `staff-tiers` / `pagedata`
+/ `auth` updated (every `ceo` expectation is now "refused / not a role"). New `test/chain-b-v3.test.js`
+runs the **real Code.gs and setup.gs**: field_ops refused on a small request, ops_manager + code approves
+any amount, a stale ceo token approves nothing, routing works with `approval_threshold` **absent** from
+Config, deferral wake-up approved by ops_manager (SLA clock restarted), `approval_required` stamping,
+inspector list, `deactivateUsers_` (flip / idempotent / never delete / other rows untouched), and
+`setUserPin` throwing without writing.
+
+**Deploy (post-merge):** Code.gs auto-deploys via clasp CI. Run **`setupSheet()` once** so the live סנדרה
+row is set `active=FALSE`. No env var or Script Property changes.
+
+---
 ## [Auth] — Single login + approver code (PR 1): one password for the app, אולגה approves with a second code
 
 **What:** The two-name login (רועי / אולגה picker + one shared code) collapses to **ONE login with ONE

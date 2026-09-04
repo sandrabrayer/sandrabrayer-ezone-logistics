@@ -18,7 +18,7 @@ export const HEADERS = {
     'estimated_cost',      // NIS; may be blank/unknown
     'attachment_url',
     'status',              // see STATUSES
-    'approval_required',   // derived: cost > threshold AND urgency != emergency
+    'approval_required',   // derived: TRUE for every non-emergency request (chain B v3: ops_manager approves everything)
     'approved_by',
     'approved_at',
     'rejection_reason',
@@ -53,11 +53,11 @@ export const HEADERS = {
 
   // People + their role/scope (increment 30). Identity + role drive approval chain B and the
   // server-side role enforcement. `house` = own house (coordinator), cluster(s) (maintenance), or
-  // blank = all houses (field_ops / ops_manager / ceo). `active` gates login.
+  // blank = all houses (field_ops / ops_manager). `active` gates roster membership (login no longer reads it).
   //
-  // Increment 31: `pin_hash` APPENDED at the end (never reorder existing columns). NOTE: login no longer
-  // uses `pin_hash` — the app moved to ONE shared access code (SHARED_ACCESS_CODE) for the whole roster.
-  // The column + setUserPin() helper stay for backward compatibility but are dormant; identity/role still
+  // Increment 31: `pin_hash` APPENDED at the end (never reorder existing columns). LEGACY since PR 1/PR 2:
+  // login uses ONE password (SHARED_ACCESS_CODE), nothing writes pin_hash any more (setUserPin is retired),
+  // and the column stays only because headers are append-only; identity/role still
   // come from the selected Users row. `active` gates login; coordinators no longer log in here.
   Users: ['name', 'role', 'house', 'active', 'pin_hash'],
 
@@ -251,11 +251,11 @@ export const SEED_TECHNICIANS = [
 // Config defaults. Stored as strings in the Sheet (Apps Script reads cells as strings);
 // getConfig coerces known keys back to number/boolean — see src/config.js.
 export const SEED_CONFIG = [
+  // approval_threshold — LEGACY since PR 2 (chain B v3 routes every non-emergency request to ops_manager;
+  // nothing reads it). Kept in place so an existing sheet keeps its row; still coerced to a number.
   { key: 'approval_threshold', value: '3000' },
   { key: 'emergency_bypasses_approval', value: 'TRUE' },
-  // ceo_ceiling — kept but DORMANT since increment 31 (chain B v2 routes by amount only and does
-  // not read it). Seeded blank; retained so the key/plumbing survive if ceo routing returns.
-  { key: 'ceo_ceiling', value: '' },
+  // ceo_ceiling — REMOVED from the seed in PR 2 (the ceo role is gone). An existing row is harmless.
   // sla_days (increment 36) — a parseable "urgency:days" spec (like allowed_units), tunable in the
   // Sheet with NO deploy. due_at = created_at + days-for-urgency. A malformed spec → no due date
   // (logged), never a silently wrong default.
@@ -287,20 +287,20 @@ export const SEED_CONFIG = [
 
 // ---- Roles + user seed (increment 30) ----
 
-// The five roles the app knows. Mirror of src/roles.js ROLE values.
-export const USER_ROLES = ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo'];
+// The four roles the app knows (ceo removed in PR 2). Mirror of src/roles.js ROLE values.
+export const USER_ROLES = ['coordinator', 'maintenance', 'field_ops', 'ops_manager'];
 
 // Seed roster (active = TRUE). `house`: blank = all houses; a cluster name (or comma-separated
-// clusters) for maintenance leads; a specific house for coordinators. `pin_hash` seeds BLANK for
-// everyone — tier-A managers' hashes are set later via setUserPin() (never seeded as plaintext).
-// setupSheet() upserts by `name` — re-running never duplicates a row and never overwrites an
-// edited one (so a manager's set pin_hash survives a re-run).
-// Single login (PR 1): the LOGIN PATH no longer reads this sheet at all — one password issues the one app
+// clusters) for maintenance leads; a specific house for coordinators. `pin_hash` is a LEGACY, append-only
+// column: it seeds BLANK, nothing writes it any more (setUserPin is retired), and login never reads it.
+// setupSheet() upserts by `name` — re-running never duplicates a row and never overwrites an edited one.
+// Single login (PR 1): the LOGIN PATH does not read this sheet at all — one password issues the one app
 // identity (רועי / ops_manager). The roster stays as reference data (inspector/counter names, scopes).
+// PR 2: סנדרה (ceo) is no longer seeded; setupSheet() sets an EXISTING סנדרה row to active=FALSE
+// (RETIRED_USERS in setup.gs) — never deleted.
 export const SEED_USERS = [
-  { name: 'רועי',  role: 'field_ops',   house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)
-  { name: 'אולגה', role: 'ops_manager', house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)
-  { name: 'סנדרה', role: 'ceo',         house: '',                 active: 'TRUE', pin_hash: '' }, // no password → cannot log in
+  { name: 'רועי',  role: 'field_ops',   house: '',                 active: 'TRUE', pin_hash: '' }, // tier A
+  { name: 'אולגה', role: 'ops_manager', house: '',                 active: 'TRUE', pin_hash: '' }, // tier A — THE approver
   { name: 'רמי',   role: 'maintenance', house: 'sharon',           active: 'TRUE', pin_hash: '' }, // tier B, cluster: sharon
   { name: 'צחי',   role: 'maintenance', house: 'caesarea,north',   active: 'TRUE', pin_hash: '' }, // tier B, clusters: caesarea + north
   { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני',     active: 'TRUE', pin_hash: '' }, // tier B
@@ -327,7 +327,7 @@ export const SEVERITY = { LOW: 'low', MEDIUM: 'medium', HIGH: 'high' };
 export const INSPECTION_STATUS = { IN_PROGRESS: 'in-progress', SUBMITTED: 'submitted' };
 
 // Who may view/run inspections (§13). Controlled list, like the submitter picker.
-export const INSPECTION_USERS = ['רועי', 'אולגה', 'אורן', 'sandra'];
+export const INSPECTION_USERS = ['רועי', 'אולגה', 'אורן'];
 
 // Fixed core checklist, drafted from Olga's real report (recurring items per domain).
 // Olga confirms/adjusts; ad-hoc items are recorded as findings, not added here.

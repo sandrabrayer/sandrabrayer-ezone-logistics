@@ -1,5 +1,5 @@
 // test/nav-management.test.js — the /management nav link ("ניהול תפעולי רשת") is a DISPLAY-ONLY
-// convenience injected by the auth shim, shown ONLY to exec roles (ops_manager / ceo). The server +
+// convenience injected by the auth shim, shown ONLY to the exec role (ops_manager). The server +
 // Code.gs 403 gate remain the authority (covered elsewhere). Here we drive the real injected shim in a
 // DOM sandbox and assert the link appears for execs and is absent for everyone else.
 import { test } from 'node:test';
@@ -45,8 +45,8 @@ function runShim(role, pathname) {
   return { link: nav.querySelector('a[href="/management"]'), window };
 }
 
-test('exec roles (ops_manager, ceo) see the "ניהול תפעולי רשת" nav link', () => {
-  for (const role of ['ops_manager', 'ceo']) {
+test('the exec role (ops_manager) sees the "ניהול תפעולי רשת" nav link', () => {
+  for (const role of ['ops_manager']) {
     const { link } = runShim(role, '/dashboard');
     assert.ok(link, `${role} must see the /management nav link`);
     assert.equal(link.textContent, 'ניהול תפעולי רשת');
@@ -64,7 +64,7 @@ test('non-exec roles (coordinator, field_ops, maintenance) do NOT see the nav li
 });
 
 test('on the /management page the injected link is marked active (exec)', () => {
-  const { link } = runShim('ceo', '/management');
+  const { link } = runShim('ops_manager', '/management');
   assert.ok(link);
   assert.equal(link.className, 'active');
 });

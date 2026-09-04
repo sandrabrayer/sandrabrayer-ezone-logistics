@@ -45,8 +45,8 @@ const hrefs = (nav) => nav.children.filter((c) => c.tagName === 'a').map((a) => 
 
 // Each role is checked on a page IT MAY OPEN (else the shim redirects and renders no nav).
 test('NO role sees the removed "אירועים חריגים" (/events) or "דרישה חדשה" (/) nav links', () => {
-  const onPage = { coordinator: '/', maintenance: '/dashboard', field_ops: '/dashboard', ops_manager: '/dashboard', ceo: '/dashboard' };
-  for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo']) {
+  const onPage = { coordinator: '/', maintenance: '/dashboard', field_ops: '/dashboard', ops_manager: '/dashboard' };
+  for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager']) {
     const nav = runShim(role, onPage[role]);
     assert.equal(nav.querySelector('a[href="/events"]'), null, `${role} must NOT see the removed /events link`);
     assert.equal(nav.querySelector('a[href="/"]'), null, `${role} must NOT see a standalone / (request form) link`);

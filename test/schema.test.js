@@ -92,11 +92,11 @@ test('seeded technicians are the two internal leads', () => {
   assert.deepEqual(SEED_TECHNICIANS.map((t) => t.name).sort(), ['צחי', 'רמי']);
 });
 
-test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo_ceiling', () => {
+test('Config seeds the (legacy) threshold and the emergency-bypass flag; ceo_ceiling is no longer seeded', () => {
   const keys = SEED_CONFIG.map((c) => c.key);
-  assert.ok(keys.includes('approval_threshold'));
+  assert.ok(keys.includes('approval_threshold'), 'legacy key kept in place (unused by routing)');
   assert.ok(keys.includes('emergency_bypasses_approval'));
-  assert.ok(keys.includes('ceo_ceiling'));
+  assert.equal(keys.includes('ceo_ceiling'), false, 'ceo_ceiling removed with the ceo role (PR 2)');
   // sla_days (increment 36) — the tunable SLA spec.
   assert.ok(keys.includes('sla_days'));
   assert.equal(SEED_CONFIG.find((c) => c.key === 'sla_days').value, 'חירום:1|דחוף:3|רגיל:14');
@@ -111,8 +111,6 @@ test('Config seeds the threshold, the emergency-bypass flag, and the (blank) ceo
   assert.equal(SEED_CONFIG.find((c) => c.key === 'kitchen_digest_id').value, '1sJ62lUfgyaes_Ippv1CH3acLmExju3aZXAfk12g0zfE');
   assert.equal(SEED_CONFIG.find((c) => c.key === 'coordinators_digest_id').value, '');
   assert.equal(SEED_CONFIG.find((c) => c.key === 'training_digest_id').value, '1RgLLrvymIhRh0sN6jOuCcgr5VT8hQL8wofhjUUt1CCI');
-  // ceo_ceiling ships blank (disabled) — never hardcoded to a value.
-  assert.equal(SEED_CONFIG.find((c) => c.key === 'ceo_ceiling').value, '');
 });
 
 test('Users sheet: headers + the seeded roster (roles from the controlled set)', () => {
@@ -122,18 +120,19 @@ test('Users sheet: headers + the seeded roster (roles from the controlled set)',
   const byName = Object.fromEntries(SEED_USERS.map((u) => [u.name, u]));
   assert.equal(byName['רועי'].role, 'field_ops');
   assert.equal(byName['אולגה'].role, 'ops_manager');
-  assert.equal(byName['סנדרה'].role, 'ceo');
+  assert.equal('סנדרה' in byName, false, 'סנדרה (ceo) is no longer seeded (PR 2)');
+  assert.equal(SEED_USERS.some((u) => u.role === 'ceo'), false, 'no ceo row in the seed');
+  assert.equal(USER_ROLES.includes('ceo'), false, 'ceo is not a role');
   assert.equal(byName['רמי'].role, 'maintenance');
   assert.equal(byName['צחי'].role, 'maintenance');
   assert.equal(byName['שירה'].role, 'coordinator');
-  // field_ops / ops_manager / ceo carry no own house (all houses); every user active + a valid role.
+  // field_ops / ops_manager carry no own house (all houses); every user active + a valid role.
   assert.equal(byName['רועי'].house, '');
   assert.equal(byName['אולגה'].house, '');
-  assert.equal(byName['סנדרה'].house, '');
   for (const u of SEED_USERS) {
     assert.equal(u.active, 'TRUE');
     assert.ok(USER_ROLES.includes(u.role), `unknown role: ${u.role}`);
-    // No password is ever seeded — hashes are written later via setUserPin(), never in the repo.
+    // pin_hash is a legacy, append-only column: always blank, nothing writes it (setUserPin is retired).
     assert.equal(u.pin_hash, '');
   }
 });

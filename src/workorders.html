@@ -147,7 +147,7 @@
     // leads (רמי / צחי) enter today's preventive-daily checklist for their own houses. The server enforces
     // the real role/scope gates — these tabs are display-only convenience.
     const ROLE = String(window.__ROLE__ || '');
-    const isManagerRole = ['field_ops', 'ops_manager', 'ceo'].indexOf(ROLE) !== -1;
+    const isManagerRole = ['field_ops', 'ops_manager'].indexOf(ROLE) !== -1;
     const isMaintenance = ROLE === 'maintenance';
     const OPENING_TAB = 'מוכנות פתיחה', EMERGENCY_TAB = 'מוכנות חירום', DAILY_TAB = 'בדיקה יומית';
     // Fixed daily preventive template — MIRROR of Code.gs PREVENTIVE_DAILY_TEMPLATE (the server validates

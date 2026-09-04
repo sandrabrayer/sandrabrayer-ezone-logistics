@@ -84,7 +84,7 @@
 </head>
 <body>
   <div class="topbar">
-    <!-- The /management nav link is injected by the auth shim for exec roles only (ops_manager/ceo),
+    <!-- The /management nav link is injected by the auth shim for the exec role only (ops_manager),
          so it never shows for other roles. Kept out of the static markup on purpose. -->
     <nav class="nav"><a href="/dashboard">דשבורד</a><a href="/workorders">משימות</a><a href="/inventory">מלאי</a><a href="/inspection">בקרה</a><a href="/reports">דוחות</a><a href="/help">מדריך</a></nav>
     <div class="brand"><img class="brand-emblem" src="/icon-v1-192.png" alt="" /><span>לוגיסטיקה</span></div>
@@ -97,7 +97,7 @@
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
     const ROLE = String(window.__ROLE__ || '');
-    const canEmergencyEdit = ['field_ops', 'ops_manager', 'ceo'].indexOf(ROLE) !== -1;
+    const canEmergencyEdit = ['field_ops', 'ops_manager'].indexOf(ROLE) !== -1;
 
     // ---- pure mirrors of src/management.js (read-only view; the server is the gate) ----
     const TERMINAL = ['הושלם', 'סגור', 'לא מאושר'];

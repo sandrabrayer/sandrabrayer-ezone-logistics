@@ -4,58 +4,55 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROLE, ROLES, isRole, canApprove, canDefer, canDispatch, isManagerRole, houseInScope } from '../src/roles.js';
 
-test('the five roles', () => {
+test('the four roles — ceo is gone (PR 2)', () => {
   assert.deepEqual([...ROLES].sort(), [
-    'ceo', 'coordinator', 'field_ops', 'maintenance', 'ops_manager',
+    'coordinator', 'field_ops', 'maintenance', 'ops_manager',
   ].sort());
-  assert.ok(isRole('ceo'));
+  assert.ok(isRole('ops_manager'));
+  assert.equal(isRole('ceo'), false, 'ceo is not a role any more');
+  assert.equal('CEO' in ROLE, false, 'no ROLE.CEO constant');
   assert.ok(!isRole('nope'));
   assert.ok(!isRole(''));
 });
 
-test('canApprove: the resolved role may approve; ops_manager (single login) and ceo may approve at any amount', () => {
-  // required = field_ops
-  assert.equal(canApprove(ROLE.FIELD_OPS, ROLE.FIELD_OPS), true);
-  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.FIELD_OPS), true); // PR 1: every session is ops_manager; the approver CODE is the control
-  assert.equal(canApprove(ROLE.CEO, ROLE.FIELD_OPS), true); // ceo always
-  // required = ops_manager
+test('canApprove: ONLY ops_manager approves (chain B v3); field_ops / coordinator / maintenance / a removed ceo never do', () => {
   assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.OPS_MANAGER), true);
   assert.equal(canApprove(ROLE.FIELD_OPS, ROLE.OPS_MANAGER), false);
-  assert.equal(canApprove(ROLE.CEO, ROLE.OPS_MANAGER), true); // ceo always
-  // required = ceo
-  assert.equal(canApprove(ROLE.CEO, ROLE.CEO), true);
-  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.CEO), true);
-  // coordinator / maintenance never approve
-  assert.equal(canApprove(ROLE.COORDINATOR, ROLE.FIELD_OPS), false);
+  assert.equal(canApprove(ROLE.COORDINATOR, ROLE.OPS_MANAGER), false);
   assert.equal(canApprove(ROLE.MAINTENANCE, ROLE.OPS_MANAGER), false);
+  assert.equal(canApprove('ceo', ROLE.OPS_MANAGER), false, 'a stale ceo token approves nothing');
+  // a nonsensical required role approves nothing either (fail closed)
+  assert.equal(canApprove(ROLE.OPS_MANAGER, 'field_ops'), false);
+  assert.equal(canApprove(ROLE.OPS_MANAGER, 'ceo'), false);
+  assert.equal(canApprove(ROLE.FIELD_OPS, 'field_ops'), false, 'the field_ops approval tier is gone');
 });
 
-test('canDefer: field_ops / ops_manager / ceo only', () => {
+test('canDefer: field_ops / ops_manager only', () => {
   assert.equal(canDefer(ROLE.FIELD_OPS), true);
   assert.equal(canDefer(ROLE.OPS_MANAGER), true);
-  assert.equal(canDefer(ROLE.CEO), true);
+  assert.equal(canDefer('ceo'), false);
   assert.equal(canDefer(ROLE.COORDINATOR), false);
   assert.equal(canDefer(ROLE.MAINTENANCE), false);
 });
 
-test('canDispatch: field_ops / ops_manager / ceo only', () => {
+test('canDispatch: field_ops / ops_manager only', () => {
   assert.equal(canDispatch(ROLE.FIELD_OPS), true);
   assert.equal(canDispatch(ROLE.OPS_MANAGER), true);
-  assert.equal(canDispatch(ROLE.CEO), true);
+  assert.equal(canDispatch('ceo'), false);
   assert.equal(canDispatch(ROLE.COORDINATOR), false);
   assert.equal(canDispatch(ROLE.MAINTENANCE), false);
 });
 
-test('isManagerRole: tier A = field_ops / ops_manager / ceo', () => {
+test('isManagerRole: tier A = field_ops / ops_manager', () => {
   assert.equal(isManagerRole(ROLE.FIELD_OPS), true);
   assert.equal(isManagerRole(ROLE.OPS_MANAGER), true);
-  assert.equal(isManagerRole(ROLE.CEO), true);
+  assert.equal(isManagerRole('ceo'), false);
   assert.equal(isManagerRole(ROLE.COORDINATOR), false);
   assert.equal(isManagerRole(ROLE.MAINTENANCE), false);
 });
 
 test('houseInScope: managers see every house', () => {
-  for (const r of [ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO]) {
+  for (const r of [ROLE.FIELD_OPS, ROLE.OPS_MANAGER]) {
     assert.equal(houseInScope(r, '', 'רעננה', 'sharon'), true);
     assert.equal(houseInScope(r, '', 'קיסריה עפרוני', 'caesarea'), true);
   }

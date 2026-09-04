@@ -270,7 +270,6 @@
 
   <script>
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
-    const THRESHOLD_DEFAULT = 3000;
 
     const ST = {
       REQUEST: 'דרישה', PENDING: 'ממתין לאישור', APPROVED: 'מאושר',
@@ -291,7 +290,6 @@
     let allFindings = [];
     let allInspections = [];
     let allHouses = [];
-    let threshold = THRESHOLD_DEFAULT;
     // Archive (grace period): completed/closed requests older than this many days leave the active board
     // for the read-only ארכיון tab. Overridden from Config.archive_after_days when present. Default 7.
     const ARCHIVE_AFTER_DAYS_DEFAULT = 7;
@@ -314,25 +312,23 @@
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
-    // Mirror of chain B (src/approval.js / Code.gs whoApproves): emergency → 'auto' (no human approver);
-    // over the approval threshold → 'ops_manager' (Olga); otherwise → 'field_ops' (Roy). The SERVER is the
-    // authority — this drives the UI so Roy is never shown an approve button that would 403 above the threshold.
+    // Mirror of chain B v3 (src/approval.js / Code.gs whoApproves): emergency → 'auto' (no human approver);
+    // everything else → 'ops_manager' (אולגה). No amount tier: approval_threshold is a legacy Config key the UI
+    // no longer reads. The SERVER is the authority — this only decides which buttons to show.
     function whoApproves(cost, urgency) {
       if (urgency === 'חירום') return 'auto';
-      if (cost !== '' && cost != null && Number(cost) > Number(threshold)) return 'ops_manager';
-      return 'field_ops';
+      return 'ops_manager';
     }
     function sessionRole() { return String(window.__ROLE__ || ''); }
-    function isExecUI() { return sessionRole() === 'ops_manager' || sessionRole() === 'ceo'; }
+    function isExecUI() { return sessionRole() === 'ops_manager'; }
     // Mirror of Code.gs actorMayApprove_ for the SESSION role: emergency (auto) → any dispatch-capable role;
-    // otherwise the exact chain-B role, or ops_manager / ceo (any amount — single login, PR 1: the approver
-    // CODE is the control, asked on click). Governs whether אישור / לא אושר are shown or replaced.
+    // otherwise ops_manager ONLY (the approver CODE is the control, asked on click). Governs whether
+    // אישור / לא אושר are shown or replaced by the pending label.
     function canApproveUI(r) {
       const req = whoApproves(r.estimated_cost, r.urgency);
       const role = sessionRole();
-      if (req === 'auto') return ['field_ops', 'ops_manager', 'ceo'].includes(role);
-      if (role === 'ceo' || role === 'ops_manager') return true;
-      return role === req;
+      if (req === 'auto') return ['field_ops', 'ops_manager'].includes(role);
+      return role === 'ops_manager';
     }
 
     async function load() {
@@ -345,9 +341,6 @@
         allRequests = d.requests || [];
         allFindings = d.findings || [];
         allInspections = d.inspections || [];
-        if (d.config && d.config.approval_threshold != null) {
-          threshold = Number(d.config.approval_threshold);
-        }
         if (d.config && d.config.archive_after_days != null) {
           const a = Number(d.config.archive_after_days);
           if (Number.isFinite(a) && a > 0) archiveAfterDays = a;
@@ -456,7 +449,7 @@
       const items = [];
 
       // Requests awaiting THIS SESSION's approval (chain B). Emergency (auto) needs no human approver, and a
-      // request routed above this role's tier (e.g. an over-threshold request for field_ops) is NOT theirs.
+      // request that needs a human approver is ops_manager's only.
       const awaiting = reqs.filter(r => {
         if (![ST.REQUEST, ST.PENDING, ST.DEFERRED].includes(r.status)) return false;
         if (whoApproves(r.estimated_cost, r.urgency) === 'auto') return false;
@@ -517,9 +510,9 @@
       if (uw) return uw;
       return String(a.created_at).localeCompare(String(b.created_at));  // oldest first
     }
-    // Is the logged-in user a manager tier (field_ops / ops_manager / ceo) — may block/unblock.
+    // Is the logged-in user a manager tier (field_ops / ops_manager) — may block/unblock.
     function canBlockUI() {
-      return ['field_ops', 'ops_manager', 'ceo'].includes(String(window.__ROLE__ || ''));
+      return ['field_ops', 'ops_manager'].includes(String(window.__ROLE__ || ''));
     }
 
     // Per-house consolidation of open inspection defects (ליקויים פתוחים), de-duplicated by text,
@@ -645,9 +638,9 @@
           btns.push(`<button class="act go" onclick="doApprove('${id}', this)">אישור</button>`);
           btns.push(`<button class="act danger" onclick="doReject('${id}', this)">לא אושר</button>`);
         } else {
-          // Over the approval threshold and this session may not approve it (field_ops → routed to Olga).
-          // Show a clear, NON-clickable status instead of a button that would 403 on click.
-          btns.push('<button class="act" disabled title="דרישה מעל סף האישור — טעונה אישור מנהלת התפעול (אולגה)">ממתין לאישור אולגה</button>');
+          // This session may not approve it (only ops_manager approves — every non-emergency request routes to
+          // אולגה). Show a clear, NON-clickable status instead of a button that would 403 on click.
+          btns.push('<button class="act" disabled title="האישור מבוצע על ידי מנהלת התפעול (אולגה) עם קוד המאשר">ממתין לאישור אולגה</button>');
         }
         btns.push(`<button class="act" onclick="doDefer('${id}')">נדחה לתאריך</button>`);
       } else if (s === ST.APPROVED) {
@@ -670,7 +663,7 @@
           ? `<button class="act" onclick="doUnblock('${id}', this)">בטל חסימה</button>`
           : `<button class="act" title="בקשה שאינה יכולה להתקדם — ממתינה לחלק/ספק/גישה" onclick="doBlock('${id}', this)">תקוע</button>`);
       }
-      // Delete is destructive and EXEC-ONLY (ops_manager / ceo), mirroring Code.gs handleDeleteRequest_
+      // Delete is destructive and EXEC-ONLY (ops_manager), mirroring Code.gs handleDeleteRequest_
       // (isManagement_). field_ops/tier-B never see it — no delete button that would 403.
       if (isExecUI()) {
         btns.push(`<button class="act danger" onclick="doDelete('${id}', this)">מחיקה</button>`);
@@ -722,7 +715,7 @@
         } else {
           // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
           // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
-          // role may not take (approve above threshold, delete), so this is a defensive fallback.
+          // role may not take (approve, delete), so this is a defensive fallback.
           if (/approver_code_invalid/i.test(raw)) { approverCode = ''; showMsg('err', 'קוד מאשר שגוי.'); }
           else if (/approver_code_required/i.test(raw)) { approverCode = ''; showMsg('err', 'נדרש קוד מאשר לאישור/דחייה.'); }
           else showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);

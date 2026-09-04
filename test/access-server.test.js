@@ -35,7 +35,7 @@ const DENIED = 403;
 // ---- READS ----
 
 test('reads: houses/config/requests pass the gate for every role', async () => {
-  for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager', 'ceo']) {
+  for (const role of ['coordinator', 'maintenance', 'field_ops', 'ops_manager']) {
     for (const a of ['houses', 'config', 'requests']) {
       assert.equal((await getData(a, role)).status, PASSED, `${role} should read ${a}`);
     }
@@ -48,7 +48,8 @@ test('reads: tier B (coordinator/maintenance) get 403 on manager-only reads; man
     assert.equal((await getData(a, 'coordinator')).status, DENIED, `coordinator must not read ${a}`);
     assert.equal((await getData(a, 'maintenance')).status, DENIED, `maintenance must not read ${a}`);
     assert.equal((await getData(a, 'field_ops')).status, PASSED, `field_ops may read ${a}`);
-    assert.equal((await getData(a, 'ceo')).status, PASSED, `ceo may read ${a}`);
+    assert.equal((await getData(a, 'ops_manager')).status, PASSED, `ops_manager may read ${a}`);
+    assert.equal((await getData(a, 'ceo')).status, DENIED, `a stale ceo token must not read ${a}`);
   }
 });
 
@@ -80,17 +81,18 @@ test('writes: the previously-ungated handlers are now 403 for tier B (never-UI-o
 
 // ---- existing exec/manager gates NOT weakened ----
 
-test('managementData stays exec-only: field_ops + tier B → 403; ceo/ops_manager pass', async () => {
+test('managementData stays exec-only: field_ops + tier B + a stale ceo → 403; ops_manager passes', async () => {
   assert.equal((await postAction('managementData', 'coordinator')).status, DENIED);
   assert.equal((await postAction('managementData', 'maintenance')).status, DENIED);
   assert.equal((await postAction('managementData', 'field_ops')).status, DENIED, 'field_ops is NOT exec — must stay 403');
   assert.equal((await postAction('managementData', 'ops_manager')).status, PASSED);
-  assert.equal((await postAction('managementData', 'ceo')).status, PASSED);
+  assert.equal((await postAction('managementData', 'ceo')).status, DENIED, 'ceo is not a role any more');
 });
 
-test('updateEvent stays exec-only: field_ops → 403; ceo passes. createEvent blocked for maintenance', async () => {
+test('updateEvent stays exec-only: field_ops → 403; ops_manager passes. createEvent blocked for maintenance', async () => {
   assert.equal((await postAction('updateEvent', 'field_ops')).status, DENIED, 'updateEvent is exec-only');
-  assert.equal((await postAction('updateEvent', 'ceo')).status, PASSED);
+  assert.equal((await postAction('updateEvent', 'ops_manager')).status, PASSED);
+  assert.equal((await postAction('updateEvent', 'ceo')).status, DENIED, 'ceo is not a role any more');
   assert.equal((await postAction('createEvent', 'maintenance')).status, DENIED);
   assert.equal((await postAction('createEvent', 'field_ops')).status, PASSED);
 });

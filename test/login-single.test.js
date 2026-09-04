@@ -70,7 +70,7 @@ test('login with { pin } only → 200 + a token for the ONE app identity (רוע
 });
 
 test('a legacy `name` field is IGNORED: any name (or none) yields the same identity', async () => {
-  for (const name of ['אולגה', 'סנדרה', 'רמי', '__nobody__', '']) {
+  for (const name of ['אולגה', 'רמי', 'צחי', '__nobody__', '']) {
     const { status, body } = await login({ name, pin: CODE });
     assert.equal(status, 200, `name=${JSON.stringify(name)} must not matter`);
     const claims = verifyToken(SECRET, body.token);
@@ -117,7 +117,7 @@ test('the injected shim has NO name picker: no <select>, no NAMES list, one pass
   assert.ok(!/el\('select'/.test(shim), 'no <select> in the login overlay');
   assert.ok(/pin\.type='password'/.test(shim), 'one password field');
   assert.ok(/JSON\.stringify\(\{pin:pin\.value\}\)/.test(shim), 'the login POST carries only the password');
-  assert.ok(!/סנדרה|אולגה|רמי|צחי/.test(shim), 'no person names anywhere in the shim');
+  assert.ok(!/אולגה|רמי|צחי|רועי/.test(shim), 'no person names anywhere in the shim');
 });
 
 // ---- 5. rate limit unchanged ----

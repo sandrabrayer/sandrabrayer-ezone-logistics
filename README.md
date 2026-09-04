@@ -28,27 +28,26 @@ Five tabs: `Requests`, `Houses`, `Config`, `Technicians`, `AuditLog`.
 Header definitions live in `src/schema.js` (single source of truth shared by the Sheet
 setup script and the tests). See `apps-script/setup.gs` to provision a fresh Sheet.
 
-## Approval rules — chain B v2 (summary)
+## Approval rules — chain B v3 (summary)
 
-Routing returns a **role** (from `src/roles.js`) by **amount only**. Rules are evaluated in order:
+**אולגה approves everything.** Routing returns a **role** (from `src/roles.js`) with two rules, evaluated in
+order — no amount tier, no house-status branch, no ceo:
 
 | # | Case | Role |
 |---|---|---|
 | 1 | Emergency (חירום) | Auto-approved, bypasses approval |
-| 2 | Cost > `approval_threshold` | `ops_manager` |
-| 3 | Otherwise (incl. blank/unknown cost) | `field_ops` |
-| — | Defer to date (נדחה לתאריך) | `field_ops` / `ops_manager` / `ceo`, any amount |
+| 2 | Everything else (any cost, incl. blank) | `ops_manager` |
+| — | Defer to date (נדחה לתאריך) | `field_ops` / `ops_manager`, any amount; on wake-up rules 1–2 apply again |
 
-Increment 31 removed the pre-opening→`ceo` and `ceo_ceiling` branches: **pre-opening houses route
-by amount exactly like open houses.** The `ceo` role constant and the `ceo_ceiling` Config key are
-kept but **dormant** — routing does not read them. On a deferral wake-up the amount is re-checked
-through rules 1–3. `approval_threshold` (= ₪3,000) lives in `Config` — **configurable, never
-hardcoded**. The routing logic is `src/approval.js`, mirrored verbatim in `apps-script/Code.gs`.
+PR 2 removed the `field_ops` approval tier (≤ threshold) and the `ceo` role entirely (routing, role
+predicates, the inspector list, the Users seed — an existing סנדרה row is set `active=FALSE` on the next
+`setupSheet()` run, never deleted). `approval_threshold` stays in `Config` as a **legacy key that nothing
+reads**; `ceo_ceiling` is no longer seeded. The routing logic is `src/approval.js`, mirrored verbatim in
+`apps-script/Code.gs`.
 
-The role a request resolves to may approve/reject it, and **ops_manager / ceo may approve at any amount**.
-Since the single login (PR 1) every session *is* ops_manager, so the role alone never decides: approve /
-reject additionally require the **approver code** (next section). Enforcement is server-side **and** in
-Code.gs — the UI may hide buttons, but hiding is never the control.
+Only `ops_manager` may approve/reject. Since the single login (PR 1) every session *is* ops_manager, so the
+role alone never decides: approve / reject additionally require the **approver code** (next section).
+Enforcement is server-side **and** in Code.gs — the UI may hide buttons, but hiding is never the control.
 
 ## Authentication — single login + approver code (PR 1)
 
@@ -159,11 +158,11 @@ regressions (#59, #61-branch, #62) that all passed unit tests but broke in produ
 1. Create a new Google Sheet (this app's own — not the Dashboard one).
 2. Extensions → Apps Script → paste `apps-script/Code.gs` and `apps-script/setup.gs`.
 3. Run `setupSheet()` to create and seed the tabs. It is idempotent: re-running never duplicates a
-   row and never overwrites an edited one. **Re-run it after upgrading** — increment 30 adds the
-   `Users` sheet and the `ceo_ceiling` Config key; **increment 31 appends the `Users.pin_hash`
-   column** (existing rows keep their data).
-4. Per-user passwords are no longer used (single login, PR 1): `setUserPin()` and `Users.pin_hash` are
-   legacy and can be ignored — the one login password lives only in the Railway `SHARED_ACCESS_CODE`.
+   row and never overwrites an edited one. **Re-run it after upgrading** — PR 2 sets an existing
+   סנדרה row to `active=FALSE` (retired role; the row is kept).
+4. Per-user passwords are gone: `setUserPin()` is **retired** (it now throws) and `Users.pin_hash` is a
+   legacy, append-only column that nothing writes or reads — the one login password lives only in the
+   Railway `SHARED_ACCESS_CODE`, the approver code in `APPROVER_CODE`.
 5. Project Settings → Script Properties → add `SESSION_SECRET` with the **same** value as the Node
    `SESSION_SECRET` env var (so Code.gs can verify session tokens), and `APPROVER_CODE` with the **same**
    value as the Node `APPROVER_CODE` env var (so Code.gs can verify the approver code independently).

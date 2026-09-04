@@ -18,7 +18,7 @@
 //     - a verified approval writes status מאושר, approved_by = אולגה, AuditLog by = אולגה;
 //     - a verified rejection writes לא מאושר + rejected_at, AuditLog by = אולגה;
 //     - emergency: no code, approved_by = the session actor, note 'אושר אוטומטית (חירום)' (unchanged);
-//     - the ops_manager session approves a ≤threshold (field_ops-routed) request (canApprove, PR 1).
+//     - the ops_manager session approves a small request too (chain B v3: every amount routes to ops_manager).
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -153,7 +153,7 @@ test('a request Node cannot see is forwarded code-less — Code.gs (fail-closed)
 });
 
 test('the client `by` field is STRIPPED from every write — no user parameter is ever forwarded', async () => {
-  await write('approve', { id: 'R-NORMAL', by: 'סנדרה', approver_code: APPROVER });
+  await write('approve', { id: 'R-NORMAL', by: 'מישהו', approver_code: APPROVER });
   await write('defer', { id: 'R-NORMAL', by: 'רועי', deferred_until: '2026-12-01' });
   await write('setStatus', { id: 'R-NORMAL', by: 'אולגה', to: 'סגור' });
   await write('assign', { id: 'R-NORMAL', by: 'x', assigned_to: 'רמי', assignment_type: 'internal' });
@@ -321,7 +321,7 @@ test('Code.gs: the right code approves — status מאושר, approved_by = או
   assert.equal(dep.api.APPROVER_NAME_, 'אולגה');
 });
 
-test('Code.gs: the ops_manager session approves a ≤threshold (field_ops-routed) request with the code (canApprove, PR 1)', () => {
+test('Code.gs: the ops_manager session approves a SMALL request with the code (chain B v3 — no amount tier)', () => {
   const dep = deployment(APPROVER);
   assert.deepEqual(dep.call('handleApprove_', { id: 'R-LOW', approver_code: APPROVER }, SESSION), { ok: true });
   assert.equal(rowOf(dep, 'R-LOW').status, 'מאושר');

@@ -35,11 +35,12 @@ test('parseEventTypes: a valid pipe spec → the list; malformed/blank → ["א�
 
 // ---- create permission (role + house scope) ----
 
-test('eventCreatePermitted: maintenance CANNOT report; field_ops/ops_manager/ceo can report any house', () => {
+test('eventCreatePermitted: maintenance CANNOT report; field_ops/ops_manager can report any house; ceo is gone', () => {
   assert.equal(eventCreatePermitted('maintenance', 'sharon', 'רעננה אשר', 'sharon'), false);
-  for (const r of ['field_ops', 'ops_manager', 'ceo']) {
+  for (const r of ['field_ops', 'ops_manager']) {
     assert.equal(eventCreatePermitted(r, '', 'רעננה אשר', 'sharon'), true);
   }
+  assert.equal(eventCreatePermitted('ceo', '', 'רעננה אשר', 'sharon'), false, 'a stale ceo token fails closed');
   assert.equal(eventCreatePermitted('nonsense', '', 'רעננה אשר', 'sharon'), false); // unknown role fails closed
 });
 

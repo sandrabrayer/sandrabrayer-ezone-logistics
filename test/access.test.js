@@ -9,7 +9,7 @@ import {
 } from '../src/access.js';
 import { ROLE } from '../src/roles.js';
 
-const ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO];
+const ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER];
 // Nav-cleanup: the standalone '/' (דרישה חדשה) and '/events' (אירועים חריגים) are no longer nav pages.
 const ALL_PAGES = ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/management', '/help'];
 const READS = ['houses', 'config', 'requests', 'users', 'technicians', 'checklist', 'inspections', 'findings', 'inventoryItems', 'inventoryCounts', 'events'];
@@ -22,7 +22,6 @@ const PAGE_EXPECT = {
   maintenance: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports'],
   field_ops: ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports', '/help'],
   ops_manager: ALL_PAGES.slice(),
-  ceo: ALL_PAGES.slice(),
 };
 
 for (const role of ROLES) {
@@ -45,7 +44,7 @@ test('field_ops sees every nav page EXCEPT /management; execs see /management to
   for (const p of ALL_PAGES.filter((x) => x !== '/management')) assert.equal(canOpenPage('field_ops', p), true);
   assert.equal(canOpenPage('field_ops', '/management'), false);
   assert.equal(canOpenPage('ops_manager', '/management'), true);
-  assert.equal(canOpenPage('ceo', '/management'), true);
+  assert.equal(canOpenPage('ceo', '/management'), false, 'a stale ceo token opens nothing (fail closed)');
   // the removed pages are nav destinations for NO role
   for (const role of ROLES) { assert.equal(canOpenPage(role, '/events'), false); assert.equal(canOpenPage(role, '/'), false); }
 });
@@ -71,7 +70,7 @@ test('navByRole renders exactly the permitted links, in canonical order', () => 
   assert.ok(!nav.field_ops.some((l) => l.href === '/management'), 'field_ops nav has no management link');
   assert.ok(!Object.values(nav).some((links) => links.some((l) => l.href === '/events' || l.href === '/')), 'no role has a /events or / nav link');
   assert.deepEqual(nav.ops_manager.map((l) => l.href), ALL_PAGES);
-  assert.deepEqual(nav.ceo.map((l) => l.href), ALL_PAGES);
+  assert.equal('ceo' in nav, false, 'no ceo nav set');
   assert.deepEqual(nav.maintenance.map((l) => l.href), ['/dashboard', '/workorders', '/inventory', '/inspection', '/reports']);
 });
 
@@ -96,7 +95,8 @@ test('reads: houses/config/requests open to all; users + manager-only reads are 
     assert.equal(canRead('coordinator', a), false, `coordinator must not read ${a}`);
     assert.equal(canRead('maintenance', a), false, `maintenance must not read ${a}`);
     assert.equal(canRead('field_ops', a), true, `field_ops may read ${a}`);
-    assert.equal(canRead('ceo', a), true, `ceo may read ${a}`);
+    assert.equal(canRead('ops_manager', a), true, `ops_manager may read ${a}`);
+    assert.equal(canRead('ceo', a), false, `a stale ceo token must not read ${a}`);
   }
 });
 
@@ -115,7 +115,7 @@ test('writes: coordinator has NO in-app write; maintenance only createRequest; m
     assert.equal(canWriteAction('maintenance', a), false, `maintenance must not ${a}`);
   }
   // managers pass the early gate for every action (precise per-action gates run in the handlers)
-  for (const role of [ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO]) {
+  for (const role of [ROLE.FIELD_OPS, ROLE.OPS_MANAGER]) {
     for (const a of WRITES) assert.equal(canWriteAction(role, a), true, `${role} passes early gate for ${a}`);
   }
 });
@@ -146,12 +146,13 @@ test('canWriteAction: maintenance may updatePreventiveItem (its own daily checkl
   assert.equal(canWriteAction('maintenance', 'deleteTraining'), false);
   assert.equal(canWriteAction('coordinator', 'updatePreventiveItem'), false);
   // managers pass the early gate for any action (precise gate is in-handler)
-  for (const r of ['field_ops', 'ops_manager', 'ceo']) assert.equal(canWriteAction(r, 'updatePreventiveItem'), true);
+  for (const r of ['field_ops', 'ops_manager']) assert.equal(canWriteAction(r, 'updatePreventiveItem'), true);
+  assert.equal(canWriteAction('ceo', 'updatePreventiveItem'), false, 'a stale ceo token writes nothing');
 });
 
 test('canRead: preventiveDaily is readable by maintenance + managers; opening/emergency/trainings stay manager-tier', () => {
   assert.equal(canRead('maintenance', 'preventiveDaily'), true);
-  for (const r of ['field_ops', 'ops_manager', 'ceo']) assert.equal(canRead(r, 'preventiveDaily'), true);
+  for (const r of ['field_ops', 'ops_manager']) assert.equal(canRead(r, 'preventiveDaily'), true);
   assert.equal(canRead('coordinator', 'preventiveDaily'), false);
   for (const a of ['openingChecklist', 'emergencyReadiness', 'trainings']) {
     assert.equal(canRead('field_ops', a), true, `field_ops reads ${a}`);

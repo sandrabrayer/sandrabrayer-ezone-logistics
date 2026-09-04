@@ -15,7 +15,6 @@ const CODE = '2026';
 const USERS = [
   { name: 'רועי',  role: 'field_ops',   house: '',             active: 'TRUE', pin_hash: 'pbkdf2$sha256$1$aa$bb' },
   { name: 'אולגה', role: 'ops_manager', house: '',             active: 'TRUE', pin_hash: 'pbkdf2$sha256$1$aa$bb' },
-  { name: 'סנדרה', role: 'ceo',         house: '',             active: 'TRUE', pin_hash: '' },
   { name: 'רמי',   role: 'maintenance', house: 'sharon',       active: 'TRUE', pin_hash: '' },
   { name: 'שירה',  role: 'coordinator', house: 'קיסריה עפרוני', active: 'TRUE', pin_hash: '' },
 ];
