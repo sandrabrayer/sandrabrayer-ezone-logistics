@@ -140,6 +140,17 @@
         <li>הדייג׳סט לעולם אינו כולל נתונים כספיים — עלויות נשארות באפליקציה הזו בלבד.</li>
       </ul>
     </section>
+
+    <section class="card" id="budget">
+      <h2><span class="dot"></span>תקציב חודשי (עמידה בתקציב)</h2>
+      <p>המסך <strong>ניהול תפעולי רשת ← עמידה בתקציב</strong> קורא מהגיליון של האפליקציה שתי לשוניות: <strong>Budgets</strong> (היעד) ו-<strong>Requests</strong> (ההוצאה). אולגה ממלאת את Budgets ישירות בגיליון, שורה לכל בית לכל חודש:</p>
+      <ul>
+        <li><strong>house</strong> — המזהה הקנוני של הבית מתוך HOUSE-IDS (לא השם בעברית): <code>ramot-hashavim</code>, <code>raanana-asher</code>, <code>pardes</code>, <code>caesarea-ofroni</code>, <code>caesarea-rehab</code>, <code>sde-eliezer</code>.</li>
+        <li><strong>period</strong> — החודש בפורמט <code>YYYY-MM</code> (למשל <code>2026-09</code>).</li>
+        <li><strong>amount</strong> — התקציב בש״ח (מספר בלבד). <strong>notes</strong> — הערה חופשית, לא חובה.</li>
+      </ul>
+      <p class="note">ההוצאה לחודש מחושבת בשרת לפי כלל אחד: כל הדרישות שלא נדחו, לפי חודש ההשלמה (או חודש הפתיחה אם טרם הושלמו) בשעון ישראל, בעלות בפועל ואם אין — לפי האומדן (מסומן "כולל אומדנים"). בית עם הוצאה וללא שורת תקציב מוצג כ"לא הוגדר תקציב". מזהה בית שגוי או שורה לא תקינה מופיעים כאזהרה במסך — לא נעלמים בשקט. השורה "מקור הנתונים" במסך מציינת מאיזה גיליון ולשוניות נקרא ומתי עודכן; "רענן" קורא מהגיליון מחדש.</p>
+    </section>
   </main>
 
 </body>

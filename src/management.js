@@ -120,34 +120,19 @@ export function readinessByHouse(rows, houses) {
 }
 
 // ---- Budget adherence (עמידה בתקציב) ----
-// Actual spend per house = sum of actual_cost over COMPLETED/CLOSED requests (money actually spent). Budget
-// per house comes from the Budgets sheet (passed as {house: amount}, derived server-side). Only houses with
-// a positive budget appear. percentUsed rounded; over = spend past budget. Worst (highest %) first.
-const COMPLETED_STATUSES = [STATUSES.COMPLETED, STATUSES.CLOSED];
-export function budgetAdherenceByHouse(requests, budgetByHouse) {
-  const spend = {};
-  (requests || []).forEach((r) => {
-    if (!r || COMPLETED_STATUSES.indexOf(String(r.status)) === -1) return;
-    const a = Number(r.actual_cost);
-    if (!isFinite(a) || a <= 0) return;
-    const h = String(r.house || ''); if (!h) return;
-    spend[h] = (spend[h] || 0) + a;
-  });
-  const out = [];
-  Object.keys(budgetByHouse || {}).forEach((house) => {
-    const budget = Number(budgetByHouse[house]);
-    if (!isFinite(budget) || budget <= 0) return;
-    const actual = spend[house] || 0;
-    out.push({ house, budget, actual, remaining: budget - actual, percentUsed: Math.round((100 * actual) / budget), over: actual > budget });
-  });
-  out.sort((a, b) => b.percentUsed - a.percentUsed || String(a.house).localeCompare(String(b.house), 'he'));
-  return out;
-}
+// PR 4: there is NO client-side spend recomputation any more. The rows come from the SERVER rule
+// (src/budget.js computeAdherence, mirrored in Code.gs) and are rendered as-is — including houses with spend
+// but no budget row (budgetDefined=false → "לא הוגדר תקציב"). The only client aggregation is the hub KPI.
 
-// Aggregate budget utilization across houses (the hub KPI). null when no positive budget is defined.
+// Aggregate budget utilization across houses (the hub KPI): total actual / total budget over the houses that
+// HAVE a budget row (a "not defined" house has spend but no denominator — it is listed, not summed here).
+// null when no positive budget is defined.
 export function budgetTotalPercent(rows) {
   let b = 0, a = 0;
-  (rows || []).forEach((r) => { b += Number(r.budget) || 0; a += Number(r.actual) || 0; });
+  (rows || []).forEach((r) => {
+    if (!r || r.budgetDefined === false) return;
+    b += Number(r.budget) || 0; a += Number(r.actual) || 0;
+  });
   return b > 0 ? Math.round((100 * a) / b) : null;
 }
 

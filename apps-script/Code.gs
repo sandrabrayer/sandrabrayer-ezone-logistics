@@ -1336,6 +1336,10 @@ function readTrainingCompliance_() {
 }
 
 // === MIRROR:budget START ===
+// The one time zone every budget month is computed in — the 1st of the month is the 1st in ISRAEL, on the
+// server (Code.gs) and on the client alike, never UTC.
+var BUDGET_TZ = 'Asia/Jerusalem';
+
 // A cell → a number, or null when blank/non-numeric (so blanks never coerce to 0).
 function budgetNum(v) {
   if (v == null) return null;
@@ -1345,17 +1349,43 @@ function budgetNum(v) {
   return isFinite(n) ? n : null;
 }
 
-// The month (YYYY-MM) a request's spend is attributed to: the month of completed_at once completed,
-// else the month of created_at. '' when neither parses.
+// The calendar month (YYYY-MM) of a timestamp IN ISRAEL TIME (BUDGET_TZ). Accepts a Date, an ISO string or a
+// date-only string. A value that is not a parseable date falls back to its own YYYY-MM prefix; a runtime
+// without Intl falls back to the UTC month. '' when nothing usable.
+function periodInJerusalem(value) {
+  if (value == null) return '';
+  var d = (value instanceof Date) ? value : null;
+  var s = d ? '' : String(value).replace(/^\s+|\s+$/g, '');
+  if (!d) {
+    if (s === '') return '';
+    d = new Date(s);
+  }
+  if (isNaN(d.getTime())) {
+    var m = s.match(/^(\d{4})-(\d{2})/);
+    return m ? (m[1] + '-' + m[2]) : '';
+  }
+  try {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: BUDGET_TZ, year: 'numeric', month: '2-digit' }).formatToParts(d);
+    var y = '', mo = '';
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].type === 'year') y = parts[i].value;
+      if (parts[i].type === 'month') mo = parts[i].value;
+    }
+    if (/^\d{4}$/.test(y) && /^\d{2}$/.test(mo)) return y + '-' + mo;
+  } catch (e) {}
+  return d.toISOString().slice(0, 7);
+}
+
+// THE SPEND MONTH RULE: a request's spend is attributed to the Israel-time month of completed_at once
+// completed, else of created_at. '' when neither parses.
 function requestPeriod(request) {
   var basis = (request && request.completed_at != null && String(request.completed_at).replace(/^\s+|\s+$/g, '') !== '')
     ? request.completed_at : (request ? request.created_at : '');
-  var m = String(basis == null ? '' : basis).match(/^(\d{4})-(\d{2})/);
-  return m ? (m[1] + '-' + m[2]) : '';
+  return periodInJerusalem(basis);
 }
 
-// The spend amount for a request and WHICH field it came from: actual_cost if present, else a fallback
-// to estimated_cost. { amount:null, source:null } when neither is a number.
+// THE SPEND AMOUNT RULE: actual_cost if present, else a fallback to estimated_cost — and WHICH one was used.
+// { amount:null, source:null } when neither is a number.
 function requestActual(request) {
   var a = budgetNum(request ? request.actual_cost : null);
   if (a != null) return { amount: a, source: 'actual' };
@@ -1366,7 +1396,8 @@ function requestActual(request) {
 
 // THE attribution rule: one request → one spend line { houseId, period, amount, source }, or null when
 // it is not a spend line. Not spend: a rejected request (לא מאושר), a house that is not a canonical id
-// (omitted, never guessed), no attributable month, or no cost at all.
+// (omitted, never guessed — surfaced by computeAdherence as unmappedRequestHouses), no attributable month,
+// or no cost at all. Every OTHER status counts (open, approved, in progress, completed, closed).
 function attributeRequest(request, nameToId) {
   if (!request) return null;
   if (String(request.status) === 'לא מאושר') return null;
@@ -1400,31 +1431,47 @@ function parseBudgetRow(row, log) {
   return { houseId: house, period: period, amount: amount };
 }
 
-// Adherence for ONE period. maps: { nameToId, idToName }. Returns per-house rows (worst-first) plus a
-// skipped count. A house with an actual but no budget row is shown with budgetDefined=false ("not
-// defined") — never a fabricated 0 budget. A house with a budget but no spend shows actual 0.
+// Adherence for ONE period. maps: { nameToId, idToName }. Returns per-house rows (worst-first) plus what the
+// screen must SURFACE so nothing is silently dropped:
+//   skipped               — count of malformed Budgets rows (bad period / amount / missing house), any period
+//   unmappedHouses        — Budgets house ids (this period) that are not canonical ids (a typo in the tab)
+//   unmappedRequestHouses — Requests house names (this period) that map to no canonical id
+//   usedEstimated         — true when ANY row's spend includes an estimated_cost fallback
+// A house with an actual but no budget row is shown with budgetDefined=false ("not defined") — never a
+// fabricated 0 budget. A house with a budget but no spend shows actual 0.
 function computeAdherence(budgets, requests, maps, period, log) {
   var nameToId = (maps && maps.nameToId) || {};
   var idToName = (maps && maps.idToName) || {};
 
   var budgetByHouse = {};
   var skipped = 0;
+  var unmapped = {};
   for (var i = 0; i < (budgets || []).length; i++) {
     var b = parseBudgetRow(budgets[i], log);
     if (!b) { skipped++; continue; }
     if (b.period !== period) continue;
     if (!Object.prototype.hasOwnProperty.call(idToName, b.houseId)) {
-      if (log) log('budget: unknown house id "' + b.houseId + '" — row skipped');
-      skipped++; continue;
+      if (log) log('budget: unknown house id "' + b.houseId + '" — row not counted');
+      unmapped[b.houseId] = true; continue;
     }
     budgetByHouse[b.houseId] = (budgetByHouse[b.houseId] || 0) + b.amount;
   }
 
   var actualByHouse = {};
   var usedEstimated = {};
+  var unmappedReq = {};
   for (var j = 0; j < (requests || []).length; j++) {
-    var a = attributeRequest(requests[j], nameToId);
-    if (!a || a.period !== period) continue;
+    var req = requests[j];
+    var a = attributeRequest(req, nameToId);
+    if (!a) {
+      // Surface a request of THIS period whose house maps to no canonical id (never guessed, never silent).
+      if (req && String(req.status) !== 'לא מאושר' && requestPeriod(req) === period) {
+        var hn = String(req.house == null ? '' : req.house).replace(/^\s+|\s+$/g, '');
+        if (hn && !Object.prototype.hasOwnProperty.call(nameToId, hn)) unmappedReq[hn] = true;
+      }
+      continue;
+    }
+    if (a.period !== period) continue;
     actualByHouse[a.houseId] = (actualByHouse[a.houseId] || 0) + a.amount;
     if (a.source === 'estimated') usedEstimated[a.houseId] = true;
   }
@@ -1435,11 +1482,13 @@ function computeAdherence(budgets, requests, maps, period, log) {
   for (k in actualByHouse) if (Object.prototype.hasOwnProperty.call(actualByHouse, k)) ids[k] = true;
 
   var rows = [];
+  var anyEstimated = false;
   for (var id in ids) {
     if (!Object.prototype.hasOwnProperty.call(ids, id)) continue;
     var hasBudget = Object.prototype.hasOwnProperty.call(budgetByHouse, id);
     var actual = actualByHouse[id] || 0;
     var row = { id: id, house: idToName[id] || id, actual: actual, usedEstimated: !!usedEstimated[id], budgetDefined: hasBudget };
+    if (row.usedEstimated) anyEstimated = true;
     if (hasBudget) {
       var budget = budgetByHouse[id];
       row.budget = budget;
@@ -1460,18 +1509,25 @@ function computeAdherence(budgets, requests, maps, period, log) {
     return x.house < y.house ? -1 : x.house > y.house ? 1 : 0;
   });
 
-  return { period: period, houses: rows, skipped: skipped };
+  var unmappedList = [];
+  for (k in unmapped) if (Object.prototype.hasOwnProperty.call(unmapped, k)) unmappedList.push(k);
+  var unmappedReqList = [];
+  for (k in unmappedReq) if (Object.prototype.hasOwnProperty.call(unmappedReq, k)) unmappedReqList.push(k);
+  unmappedList.sort();
+  unmappedReqList.sort();
+
+  return { period: period, houses: rows, skipped: skipped, unmappedHouses: unmappedList, unmappedRequestHouses: unmappedReqList, usedEstimated: anyEstimated };
 }
 
-// Periods offered by the month selector: every period that has a budget row or an attributable
-// request, plus the current period, most-recent first.
-function budgetPeriods(budgets, requests, maps, currentPeriod) {
+// Periods offered by the month selector: ONLY months that have a (valid, mapped) Budgets row or an
+// attributable request under the same rule — most-recent first. The current month is NOT added by itself.
+function budgetPeriods(budgets, requests, maps) {
   var nameToId = (maps && maps.nameToId) || {};
+  var idToName = (maps && maps.idToName) || {};
   var set = {};
-  if (currentPeriod) set[currentPeriod] = true;
   for (var i = 0; i < (budgets || []).length; i++) {
     var b = parseBudgetRow(budgets[i], null);
-    if (b) set[b.period] = true;
+    if (b && Object.prototype.hasOwnProperty.call(idToName, b.houseId)) set[b.period] = true;
   }
   for (var j = 0; j < (requests || []).length; j++) {
     var a = attributeRequest(requests[j], nameToId);
@@ -2356,22 +2412,31 @@ function readEventsAnalysis_() {
 }
 
 // Current month as YYYY-MM (server clock).
+// The current budget month in ISRAEL time (BUDGET_TZ via the mirrored periodInJerusalem) — the 1st of the
+// month flips at Israel midnight, not UTC midnight (which used to show the previous month until ~03:00).
 function currentPeriod_() {
-  var d = new Date();
-  return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2);
+  return periodInJerusalem(new Date());
 }
 
+// The Budgets / Requests tabs this panel reads, by name — never the spreadsheet id.
+var BUDGET_SOURCE_TABS_ = ['Budgets', 'Requests'];
+
 // Budget adherence panel for the selected (or current) period. Financial — returned ONLY here, inside
-// the canManage gate, and NEVER written to any digest.
+// the canManage gate, and NEVER written to any digest. `source` makes the numbers auditable on screen:
+// the spreadsheet TITLE (never its id), the tab names, when this payload was computed, and the time zone
+// every month is bucketed in.
 function readBudgetAdherence_(period, requests) {
   var maps = { nameToId: DIGEST_HOUSE_IDS_, idToName: canonicalHouseIdToName_() };
   var wanted = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(period || '')) ? String(period) : currentPeriod_();
   var budgets = readObjects_('Budgets');
   var reqs = requests || getRequests();
+  var title = '';
+  try { title = String(SpreadsheetApp.getActiveSpreadsheet().getName() || ''); } catch (e) { title = ''; }
   return {
     period: wanted,
-    periods: budgetPeriods(budgets, reqs, maps, currentPeriod_()),
+    periods: budgetPeriods(budgets, reqs, maps),
     adherence: computeAdherence(budgets, reqs, maps, wanted, function (m) { Logger.log(m); }),
+    source: { spreadsheet: title, tabs: BUDGET_SOURCE_TABS_.slice(), generatedAt: new Date().toISOString(), timezone: BUDGET_TZ },
   };
 }
 
