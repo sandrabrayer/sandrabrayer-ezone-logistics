@@ -120,6 +120,15 @@ that have a budget row or spend. The "מקור הנתונים" line shows the sp
 the tab names and when the payload was computed; "רענן" re-reads with `?fresh=1`. Financial figures never
 enter any digest.
 
+## E-mail notifications (PR 5)
+
+Apps Script (`MailApp`) mails Hebrew RTL notifications with a deep link to the request: new request and
+emergency (auto-approved) → רועי + אולגה; approved / rejected / a deferred request whose date arrived (daily
+scan) → רועי. Recipients and the master switch live **only** in Config (`notify_email_approver`,
+`notify_email_field_ops`, `notify_enabled`); the pure recipient rule is `src/notify.js`, mirrored in Code.gs
+under the drift guard. Each (request, event) is mailed once (append-only `NotifyLog` ledger). **Fail-safe:** a
+mail error never blocks a write. See `DEPLOY.md` for first-run authorization and quota.
+
 ## Read cache (perf round-4)
 
 `src/server.js` caches every Apps Script read except `users` in process memory (houses / config /

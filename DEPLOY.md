@@ -134,6 +134,25 @@ Node caches every Apps Script read except `users`: houses / config / technicians
 data URL (or send `fresh: 1` in a managementData body) to force a live read — the fix for "I edited the
 Sheet and the screen hasn't caught up yet" without waiting out a TTL.
 
+## E-mail notifications (MailApp) — first run + quota
+
+Notifications (PR 5) are sent by the Apps Script project itself (`MailApp`), from the deploying account,
+to the addresses in the **Config** sheet (`notify_email_approver`, `notify_email_field_ops`,
+`notify_enabled`) — never hardcoded. After the merge that adds them:
+
+1. Run `setupSheet()` once — it adds the `NotifyLog` tab (the append-only dedupe ledger) and the four
+   `notify_*` Config keys (recipients seeded blank). Fill both e-mail cells.
+2. **First-run authorization:** the web app now uses a new scope (send mail). Open the Apps Script editor
+   and run **`notifyTestEmail()`** once from the deploying account; accept the consent screen. It sends a
+   short test mail to the approver address and logs the remaining daily quota. Until this grant exists,
+   `MailApp.sendEmail` throws inside `notifyEvent_`, which is swallowed: **writes keep working, no mail
+   goes out**, and the execution log shows `notify failed (…)`.
+3. **Quota:** MailApp is limited per deploying account per day (~100 recipients/day on a consumer Gmail
+   account, ~1,500 on Google Workspace). Each event is one mail with 1–2 recipients. A quota error is
+   logged and swallowed like any other mail error — the write is never blocked; the event is NOT retried
+   (its NotifyLog row was written before the send attempt, so it can never go out twice).
+4. `notify_enabled = FALSE` in Config switches everything off with no deploy.
+
 ## Security
 
 - Credentials live **only** in GitHub Secrets — never committed, never printed;

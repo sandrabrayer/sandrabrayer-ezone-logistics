@@ -67,6 +67,10 @@ export const HEADERS = {
   // Every status transition, for full traceability. §8, §9.
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
 
+  // NotifyLog (PR 5, e-mail notifications) — APPEND-ONLY dedupe ledger: one row per (request, event) that
+  // was handed to MailApp, so the same event is never mailed twice for the same request. Never edited.
+  NotifyLog: ['request_id', 'event', 'sent_at'],
+
   // ---- Inspections module (§13, increment 4) ----
   // One row per inspection visit (Olga's בקרה).
   Inspections: [
@@ -284,6 +288,14 @@ export const SEED_CONFIG = [
   // many days leave the main dashboard board for the read-only ארכיון tab (still searchable). Tunable in
   // the Sheet with NO deploy; coerced to a number. Blank/malformed → the UI default (7).
   { key: 'archive_after_days', value: '7' },
+  // E-mail notifications (PR 5). Recipients live ONLY here (never hardcoded): notify_email_approver = אולגה,
+  // notify_email_field_ops = רועי — seeded BLANK, so nothing is mailed until an address is filled in.
+  // notify_enabled is the master switch (coerced to a boolean). notify_app_url is the base of the deep link
+  // in every mail (the public Railway host; change it here if the host changes).
+  { key: 'notify_enabled', value: 'TRUE' },
+  { key: 'notify_email_approver', value: '' },
+  { key: 'notify_email_field_ops', value: '' },
+  { key: 'notify_app_url', value: 'https://ezone-logistics.up.railway.app' },
 ];
 
 // ---- Roles + user seed (increment 30) ----

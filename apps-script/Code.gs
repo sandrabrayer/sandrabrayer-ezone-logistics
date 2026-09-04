@@ -23,7 +23,7 @@ var DEPLOY_COMMIT = 'DEV';
 
 // ---- Coercion (mirror of src/config.js) ----
 var NUMERIC_KEYS = ['approval_threshold', 'batching_window_days', 'archive_after_days']; // approval_threshold = legacy (PR 2), still coerced
-var BOOLEAN_KEYS = ['emergency_bypasses_approval'];
+var BOOLEAN_KEYS = ['emergency_bypasses_approval', 'notify_enabled']; // notify_enabled = e-mail master switch (PR 5)
 var TRUE_STRINGS = ['true', 'TRUE', 'True', '1', 'yes', 'YES'];
 
 function coerceConfigValue_(key, rawValue) {
@@ -666,6 +666,7 @@ function handleCreateRequest_(input, actor) {
   row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
   appendRequest(row);
   scheduleDigestRebuild();
+  notifyEvent_(notifyEventForNewRequest(row.urgency), row); // fail-safe: after the row is committed
   return jsonOut_({ ok: true, id: row.id });
 }
 
@@ -747,6 +748,7 @@ function handleCreateRequestIntake_(body) {
   // provenance of a coordinator-filed request is visible in the AuditLog.
   writeAuditEntry(row.id, '', STATUS_REQUEST, row.created_by, 'source=coordinators');
   scheduleDigestRebuild();
+  notifyEvent_(notifyEventForNewRequest(row.urgency), row); // fail-safe: after the row is committed
   return jsonOut_({ ok: true, id: row.id });
 }
 
@@ -907,6 +909,7 @@ function handleApprove_(p, actor) {
   updateRequest_(p.id, fields,
     req.status, ST.APPROVED, approver, emergency ? 'אושר אוטומטית (חירום)' : (p.note || ''));
   scheduleDigestRebuild();
+  notifyEvent_(NOTIFY_EVENT.APPROVED, req, { status: ST.APPROVED, note: p.note || '' }); // fail-safe
   return jsonOut_({ ok: true });
 }
 
@@ -928,6 +931,7 @@ function handleReject_(p, actor) {
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '', rejected_at: new Date().toISOString() },
     req.status, ST.NOT_APPROVED, rejecter, p.reason || '');
   scheduleDigestRebuild();
+  notifyEvent_(NOTIFY_EVENT.REJECTED, req, { status: ST.NOT_APPROVED, note: p.reason || '' }); // fail-safe
   return jsonOut_({ ok: true });
 }
 
@@ -1539,6 +1543,228 @@ function budgetPeriods(budgets, requests, maps) {
   return out;
 }
 // === MIRROR:budget END ===
+
+// === MIRROR:notify START ===
+var NOTIFY_EVENT = {
+  NEW_REQUEST: 'new_request',
+  EMERGENCY_AUTO: 'emergency_auto',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  DEFERRAL_WAKEUP: 'deferral_wakeup',
+};
+var NOTIFY_EVENTS = [NOTIFY_EVENT.NEW_REQUEST, NOTIFY_EVENT.EMERGENCY_AUTO, NOTIFY_EVENT.APPROVED, NOTIFY_EVENT.REJECTED, NOTIFY_EVENT.DEFERRAL_WAKEUP];
+
+// Hebrew event labels (the subject's <event> part).
+var NOTIFY_LABEL = {
+  new_request: 'דרישה חדשה',
+  emergency_auto: 'דרישת חירום — אושרה אוטומטית',
+  approved: 'דרישה אושרה',
+  rejected: 'דרישה לא אושרה',
+  deferral_wakeup: 'דרישה דחויה חזרה ללוח',
+};
+
+// One address cell → a usable address, or ''. Trimmed; must look like one e-mail (an '@', no whitespace,
+// no line breaks — so a stray header injection or a "a, b" pair in one cell is never passed to MailApp).
+function notifyAddress(v) {
+  if (v == null) return '';
+  var s = String(v).replace(/^\s+|\s+$/g, '');
+  if (s === '' || /[\s,;<>"]/.test(s)) return '';
+  var at = s.indexOf('@');
+  if (at < 1 || at !== s.lastIndexOf('@') || at === s.length - 1) return '';
+  return s;
+}
+
+// The master switch. Accepts the coerced boolean AND the raw Sheet spellings (defensive: a caller that
+// bypassed coercion must not silently turn mail on/off).
+function notifyEnabled(config) {
+  var v = config ? config.notify_enabled : undefined;
+  if (v === true) return true;
+  if (v === false || v == null) return false;
+  return ['true', 'TRUE', 'True', '1', 'yes', 'YES'].indexOf(String(v).replace(/^\s+|\s+$/g, '')) !== -1;
+}
+
+// WHO gets this event. [] when disabled, unknown event, or every relevant address is blank.
+// Unique, in a stable order (רועי first, then אולגה).
+function notifyRecipients(event, config) {
+  if (!notifyEnabled(config)) return [];
+  var roy = notifyAddress(config.notify_email_field_ops);
+  var olga = notifyAddress(config.notify_email_approver);
+  var wanted;
+  if (event === NOTIFY_EVENT.NEW_REQUEST || event === NOTIFY_EVENT.EMERGENCY_AUTO) wanted = [roy, olga];
+  else if (event === NOTIFY_EVENT.APPROVED || event === NOTIFY_EVENT.REJECTED || event === NOTIFY_EVENT.DEFERRAL_WAKEUP) wanted = [roy];
+  else return [];
+  var out = [];
+  for (var i = 0; i < wanted.length; i++) {
+    if (wanted[i] && out.indexOf(wanted[i]) === -1) out.push(wanted[i]);
+  }
+  return out;
+}
+
+// "[לוגיסטיקה] <event> · <house> · #<id>"
+function notifySubject(event, house, id) {
+  var label = NOTIFY_LABEL[event] || String(event || '');
+  return '[לוגיסטיקה] ' + label + ' · ' + String(house == null ? '' : house) + ' · #' + String(id == null ? '' : id);
+}
+
+// The event a freshly CREATED request raises: an emergency is auto-approved by chain B (emergency_auto),
+// anything else is a plain new request.
+function notifyEventForNewRequest(urgency) {
+  return urgency === 'חירום' ? NOTIFY_EVENT.EMERGENCY_AUTO : NOTIFY_EVENT.NEW_REQUEST;
+}
+
+// Deferral wake-ups due: every request still in נדחה לתאריך whose deferred_until (YYYY-MM-DD, or an ISO
+// timestamp — only the date part is compared) is on or before `todayYmd`. The request is NOT changed —
+// a human re-decides it; the scan only notifies (deduped per request by NotifyLog).
+function deferralWakeupsDue(requests, todayYmd) {
+  var out = [];
+  var today = String(todayYmd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) return out;
+  for (var i = 0; i < (requests || []).length; i++) {
+    var r = requests[i];
+    if (!r || String(r.status) !== 'נדחה לתאריך') continue;
+    var raw = r.deferred_until;
+    var until = (raw instanceof Date) ? raw.toISOString().slice(0, 10) : String(raw == null ? '' : raw).replace(/^\s+|\s+$/g, '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) continue;
+    if (until <= today) out.push(r);
+  }
+  return out;
+}
+// === MIRROR:notify END ===
+
+// ===== E-mail notifications (PR 5) — MailApp wiring around the MIRROR:notify block =====
+// FAIL-SAFE BY DESIGN: notifyEvent_ never throws. A mail error (quota, authorization, a bad address) is
+// logged and swallowed — the write that triggered it has ALREADY been committed and still returns ok.
+// Recipients come only from Config; a blank recipient or notify_enabled = FALSE is a silent skip (no log
+// row, no mail). Dedupe: the append-only NotifyLog sheet (request_id | event | sent_at) — the same event is
+// NEVER mailed twice for the same request (the ledger row is written BEFORE the send, so even a send that
+// fails half-way cannot be repeated; a failed send is logged in the execution log).
+var NOTIFY_SHEET_ = 'NotifyLog';
+var NOTIFY_SENDER_NAME_ = 'EZone לוגיסטיקה';
+
+function notifyAppUrl_() {
+  var v = getConfig('notify_app_url');
+  var s = String(v == null ? '' : v).replace(/^\s+|\s+$/g, '').replace(/\/+$/, '');
+  return /^https:\/\/[^\s"'<>]+$/.test(s) ? s : '';
+}
+
+function notifyDeepLink_(id) {
+  var base = notifyAppUrl_();
+  return base ? (base + '/dashboard?req=' + encodeURIComponent(String(id))) : '';
+}
+
+function notifyEsc_(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function notifyNis_(v) {
+  var n = budgetNum(v);
+  return n == null ? '' : ('₪' + n.toLocaleString('he-IL'));
+}
+
+// Hebrew RTL HTML body: description, house, cost (this request's estimate / actual only), status, deep link.
+function notifyHtml_(event, req, extra) {
+  var label = NOTIFY_LABEL[event] || String(event || '');
+  var link = notifyDeepLink_(req.id);
+  var est = notifyNis_(req.estimated_cost);
+  var act = notifyNis_(req.actual_cost);
+  var cost = act ? (act + ' (בפועל)' + (est ? ' · אומדן ' + est : '')) : (est ? est + ' (אומדן)' : 'לא צוין');
+  var rows = [
+    ['תיאור', notifyEsc_(req.description || '')],
+    ['בית', notifyEsc_(req.house || '')],
+    ['קטגוריה / דחיפות', notifyEsc_(req.category || '') + ' / ' + notifyEsc_(req.urgency || '')],
+    ['עלות', notifyEsc_(cost)],
+    ['סטטוס', notifyEsc_((extra && extra.status) || req.status || '')],
+  ];
+  if (extra && extra.note) rows.push(['הערה', notifyEsc_(extra.note)]);
+  if (req.deferred_until) rows.push(['נדחה עד', notifyEsc_(String(req.deferred_until).slice(0, 10))]);
+  var tr = '';
+  for (var i = 0; i < rows.length; i++) {
+    tr += '<tr><td style="padding:6px 10px;color:#5f6b7a;white-space:nowrap">' + rows[i][0] + '</td><td style="padding:6px 10px;font-weight:600">' + rows[i][1] + '</td></tr>';
+  }
+  return '<div dir="rtl" lang="he" style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#15171c;text-align:right">'
+    + '<h2 style="margin:0 0 6px;font-size:18px">' + notifyEsc_(label) + '</h2>'
+    + '<div style="color:#5f6b7a;margin-bottom:12px">דרישה #' + notifyEsc_(req.id) + '</div>'
+    + '<table dir="rtl" style="border-collapse:collapse;border:1px solid #dde3ea;border-radius:8px">' + tr + '</table>'
+    + (link ? '<p style="margin:14px 0 0"><a href="' + notifyEsc_(link) + '" style="display:inline-block;padding:10px 16px;background:#14b8a6;color:#04150f;font-weight:700;text-decoration:none;border-radius:8px">פתיחת הדרישה בלוח</a></p>' : '')
+    + '<p style="margin:16px 0 0;color:#8b93a0;font-size:12px">הודעה אוטומטית ממערכת הלוגיסטיקה. אין להשיב למייל זה.</p>'
+    + '</div>';
+}
+
+// Has this (request, event) already been handed to MailApp? Reads the append-only ledger. A missing
+// NotifyLog sheet (setupSheet not yet re-run) counts as "never sent" — and the append below then fails
+// closed into the log, so the mail is still not sent twice by a later run of a fixed sheet.
+function notifyAlreadySent_(requestId, event) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(NOTIFY_SHEET_);
+  if (!sheet) return false;
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return false;
+  var headers = data[0];
+  var rc = headers.indexOf('request_id'), ec = headers.indexOf('event');
+  if (rc === -1 || ec === -1) return false;
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][rc]) === String(requestId) && String(data[r][ec]) === String(event)) return true;
+  }
+  return false;
+}
+
+// Claim the (request, event) in the ledger. Throws when the sheet is missing (caller catches → no send).
+function notifyLogAppend_(requestId, event) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(NOTIFY_SHEET_);
+  if (!sheet) throw new Error('NotifyLog sheet missing — run setupSheet()');
+  sheet.appendRow([String(requestId), String(event), new Date().toISOString()]);
+}
+
+/**
+ * Send the e-mail for `event` about request `req`. Returns true when a mail was handed to MailApp, false on
+ * every other outcome (disabled, blank recipients, already sent, or any error). NEVER throws.
+ */
+function notifyEvent_(event, req, extra) {
+  try {
+    if (!req || !req.id) return false;
+    var cfg = getAllConfig();
+    var to = notifyRecipients(event, cfg);
+    if (!to.length) return false;                       // disabled / blank recipients → silent skip
+    if (notifyAlreadySent_(req.id, event)) return false; // dedupe
+    notifyLogAppend_(req.id, event);                     // claim BEFORE sending → never twice
+    MailApp.sendEmail({
+      to: to.join(','),
+      subject: notifySubject(event, req.house, req.id),
+      htmlBody: notifyHtml_(event, req, extra),
+      name: NOTIFY_SENDER_NAME_,
+      noReply: true,
+    });
+    return true;
+  } catch (err) {
+    Logger.log('notify failed (' + event + ', ' + (req && req.id) + '): ' + (err && err.message ? err.message : err));
+    return false;
+  }
+}
+
+// Deferral wake-ups, run from the daily scan: every deferred request whose date arrived → one mail to רועי,
+// once per request (NotifyLog). Nothing about the request changes — a human re-decides it on the board.
+function notifyDeferralWakeups_(requests, todayYmd) {
+  var due = deferralWakeupsDue(requests, todayYmd);
+  var sent = 0;
+  for (var i = 0; i < due.length; i++) if (notifyEvent_(NOTIFY_EVENT.DEFERRAL_WAKEUP, due[i], { status: due[i].status })) sent++;
+  return sent;
+}
+
+/**
+ * notifyTestEmail() — run ONCE from the Apps Script editor after this code is deployed: it sends a short test
+ * mail to notify_email_approver (or field_ops when blank) and, more importantly, makes Apps Script ask for
+ * the Gmail-send authorization the web app needs. Until that grant exists, MailApp.sendEmail throws inside
+ * notifyEvent_ and is swallowed (writes keep working; no mail goes out). Writes nothing to NotifyLog.
+ */
+function notifyTestEmail() {
+  var cfg = getAllConfig();
+  var to = notifyAddress(cfg.notify_email_approver) || notifyAddress(cfg.notify_email_field_ops);
+  if (!to) throw new Error('Fill notify_email_approver / notify_email_field_ops in the Config sheet first.');
+  MailApp.sendEmail({ to: to, subject: '[לוגיסטיקה] בדיקת התראות', htmlBody: '<div dir="rtl">התראות המייל של מערכת הלוגיסטיקה פעילות. נותרה מכסה יומית: ' + MailApp.getRemainingDailyQuota() + '</div>', name: NOTIFY_SENDER_NAME_, noReply: true });
+  Logger.log('test mail sent to ' + to + '; remaining daily quota: ' + MailApp.getRemainingDailyQuota());
+}
+
 
 // === MIRROR:maintenance START ===
 // Two-digit zero-pad for a month/day number.
@@ -2228,12 +2454,16 @@ function runMaintenanceScan() {
       complianceDefaultReminder_(), today, log);
     for (var j = 0; j < comp.toCreate.length; j++) createComplianceRequest_(comp.toCreate[j]);
 
+    // Deferral wake-ups (PR 5): a deferred request whose date arrived → one e-mail to רועי (NotifyLog dedupe).
+    // The request itself is untouched — it is re-decided on the board. Fail-safe (never throws).
+    var woke = notifyDeferralWakeups_(requests, today);
+
     // A background scan (time trigger, no user waiting): rebuild inline, synchronously, as before.
     if (plan.toCreate.length || comp.toCreate.length) rebuildDigest();
     Logger.log('scan: maintenance created ' + plan.toCreate.length + ' (dup ' + plan.skippedDuplicate +
       ', malformed ' + plan.skippedMalformed + ', inactive ' + plan.skippedInactive + '); compliance created ' +
       comp.toCreate.length + ' (dup ' + comp.skippedDuplicate + ', malformed ' + comp.skippedMalformed +
-      ', inactive ' + comp.skippedInactive + ')');
+      ', inactive ' + comp.skippedInactive + '); deferral wake-up mails ' + woke);
   } finally {
     if (lock) { try { lock.releaseLock(); } catch (e2) {} }
   }

@@ -10,12 +10,12 @@ count after the PR's changes. Because it is committed, the anchor moves forward 
 
 ## Top 3 CHANGELOG headings
 
-1. ## [Budget] — עמידה בתקציב made auditable: one server spend rule, Israel-time months, visible data source (PR 4)
-2. ## [Perf] — Read cache with stale fallback, one-call pages, deferred digest rebuild (PR 3)
-3. ## [Approvals] — אולגה approves everything (chain B v3); סנדרה / ceo removed (PR 2)
+1. ## [Notifications] — Hebrew e-mail notifications from Apps Script (MailApp), fail-safe and deduped (PR 5)
+2. ## [Budget] — עמידה בתקציב made auditable: one server spend rule, Israel-time months, visible data source (PR 4)
+3. ## [Perf] — Read cache with stale fallback, one-call pages, deferred digest rebuild (PR 3)
 
 ## Test count
 
 `npm test` (the CI gate, `node --test test/*.test.js` — excludes the live `smoke-live.js`):
 
-tests-passing: 802
+tests-passing: 824

@@ -79,6 +79,13 @@ test('training-digest.js MIRROR:trainingdigest matches apps-script/Code.gs (coor
   assert.equal(a, b);
 });
 
+test('notify.js MIRROR:notify matches apps-script/Code.gs (e-mail recipient resolution + deferral wake-up rule)', () => {
+  const a = normalize(readBlock('src/notify.js', 'notify'));
+  const b = normalize(readBlock('apps-script/Code.gs', 'notify'));
+  assert.ok(a.length > 0);
+  assert.equal(a, b);
+});
+
 test('budget.js MIRROR:budget matches apps-script/Code.gs (budget adherence)', () => {
   const a = normalize(readBlock('src/budget.js', 'budget'));
   const b = normalize(readBlock('apps-script/Code.gs', 'budget'));
