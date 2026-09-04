@@ -13,10 +13,10 @@ test('the five roles', () => {
   assert.ok(!isRole(''));
 });
 
-test('canApprove: only the resolved role may approve; ceo may always approve', () => {
+test('canApprove: the resolved role may approve; ops_manager (single login) and ceo may approve at any amount', () => {
   // required = field_ops
   assert.equal(canApprove(ROLE.FIELD_OPS, ROLE.FIELD_OPS), true);
-  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.FIELD_OPS), false);
+  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.FIELD_OPS), true); // PR 1: every session is ops_manager; the approver CODE is the control
   assert.equal(canApprove(ROLE.CEO, ROLE.FIELD_OPS), true); // ceo always
   // required = ops_manager
   assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.OPS_MANAGER), true);
@@ -24,7 +24,7 @@ test('canApprove: only the resolved role may approve; ceo may always approve', (
   assert.equal(canApprove(ROLE.CEO, ROLE.OPS_MANAGER), true); // ceo always
   // required = ceo
   assert.equal(canApprove(ROLE.CEO, ROLE.CEO), true);
-  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.CEO), false);
+  assert.equal(canApprove(ROLE.OPS_MANAGER, ROLE.CEO), true);
   // coordinator / maintenance never approve
   assert.equal(canApprove(ROLE.COORDINATOR, ROLE.FIELD_OPS), false);
   assert.equal(canApprove(ROLE.MAINTENANCE, ROLE.OPS_MANAGER), false);

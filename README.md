@@ -4,8 +4,8 @@ Standalone logistics, procurement, and maintenance app for the EZone balance hou
 Owns the full lifecycle of a request — purchase / repair / replacement — from submission through
 approval, execution, and closure.
 
-- **Primary user:** Roy (רועי) — manages the domain, approves up to the threshold, assigns execution.
-- **Secondary approver:** Sandra — approves requests above the cost threshold.
+- **Primary user:** Roy (רועי) — manages the domain day to day: routes, defers, assigns execution, closes.
+- **Approver:** Olga (אולגה) — approves / rejects requests at any amount with her **approver code**.
 - **UI:** Hebrew, right-to-left (RTL).
 
 ## Architecture
@@ -45,26 +45,33 @@ kept but **dormant** — routing does not read them. On a deferral wake-up the a
 through rules 1–3. `approval_threshold` (= ₪3,000) lives in `Config` — **configurable, never
 hardcoded**. The routing logic is `src/approval.js`, mirrored verbatim in `apps-script/Code.gs`.
 
-Only the role a request resolves to may approve/reject it (the CEO may always approve); enforcement
-is server-side **and** in Code.gs — the UI may hide buttons, but hiding is never the control.
+The role a request resolves to may approve/reject it, and **ops_manager / ceo may approve at any amount**.
+Since the single login (PR 1) every session *is* ops_manager, so the role alone never decides: approve /
+reject additionally require the **approver code** (next section). Enforcement is server-side **and** in
+Code.gs — the UI may hide buttons, but hiding is never the control.
 
-## Authentication — two tiers (increment 31)
+## Authentication — single login + approver code (PR 1)
 
-Login is identity-based (matching the ezone-managers / ezone-staffing standard). `POST /api/login`
-with `{ name, pin }` returns an HMAC-signed session token carrying the user's **name + role +
-house/cluster scope + issued-at**. The tier is data-driven off the `Users` sheet:
+**One password for the whole app.** `POST /api/login` with `{ pin }` (no name — there is no user picker)
+checks the code against `SHARED_ACCESS_CODE` (constant-time) and returns an HMAC-signed session token for
+the **one app identity**: name `רועי`, role `ops_manager`, no house scope. That identity is what gets
+stamped as `created_by` on requests filed from the dashboard and as the AuditLog `by` on non-approval
+actions (defer / assign / close / block). The login path **never reads the Users sheet** and never calls
+Apps Script, so an upstream outage, a roster edit or a deploy window cannot break login or delay a page.
 
-- **One shared access code** (`SHARED_ACCESS_CODE`): pick a user from the dropdown + enter the code.
-  Identity and role come from the **selected roster user** (Users sheet) — the signed session token is
-  issued for that user exactly as before; only the secret check is now one shared code for everyone.
-- **Roster = active, non-coordinator users** (managers + the maintenance leads רמי/צחי). **Coordinators
-  no longer log into this app.** **סנדרה (ceo)** can now log in with the shared code like any manager.
+**Approvals need a second secret.** Every approve / reject that needs a human approver must carry the
+**approver code** (`APPROVER_CODE`, held by אולגה). The dashboard asks for it on אישור / לא אושר (kept in
+memory for that page only, never stored), Node verifies it constant-time and refuses a wrong or missing
+code with **403** and no upstream call, then forwards it; `apps-script/Code.gs` verifies it **again**
+against its own `APPROVER_CODE` Script Property (Node is never trusted) and records the approval as
+`approved_by = אולגה` / AuditLog `by = אולגה`. Emergency (חירום) requests keep their auto approval: no code,
+recorded by the session actor. Defer, dispatch, block and close never need the code. A client `by` field is
+stripped from every write — the actor is always the token.
 
-A wrong/empty code or a name that is not an active roster user returns the **same generic 401**. Login is
-rate-limited to 8 attempts / 15 min per IP (fail-closed), the code is never logged, and the server
-**refuses to start** if `SHARED_ACCESS_CODE` is unset. The roster is read from the **public** `users`
-endpoint (no `pin_hash` needed) and matched by **trimmed** name, so a `SESSION_SECRET`/proof drift or a
-trailing-whitespace sheet cell can no longer break login. **Code.gs still trusts only the signed token.**
+A wrong/empty login code returns the **same generic 401**; login is rate-limited to 8 attempts / 15 min
+per IP (fail-closed); neither code is ever logged; the server **refuses to start** if `SHARED_ACCESS_CODE`
+or `APPROVER_CODE` is unset, and Code.gs refuses every non-emergency approval while its `APPROVER_CODE`
+property is unset. **Code.gs still trusts only the signed token + the code it verifies itself.**
 
 - Every data request is Bearer-authenticated; the token is never in a query string, the page source,
   or persisted browser storage (memory only). Tokens expire after `SESSION_DAYS` days.
@@ -91,7 +98,8 @@ The server **refuses to start** if any is missing or empty — set them **before
 | Var | Where | Notes |
 |---|---|---|
 | `APPS_SCRIPT_EXEC_URL` | Railway env | This app's `/exec` URL |
-| `SHARED_ACCESS_CODE` | Railway env | The one shared login code for every roster user (managers + maintenance). Trimmed on load |
+| `SHARED_ACCESS_CODE` | Railway env | THE one login password for the whole app. Trimmed on load |
+| `APPROVER_CODE` | Railway env **and** Apps Script Script Property | אולגה's approver code for approve / reject; identical in both places. Trimmed on load |
 | `SESSION_SECRET` | Railway env **and** Apps Script Script Property | ≥ 32 chars; identical in both places |
 | `SESSION_DAYS` | Railway env | Token lifetime in days |
 
@@ -154,12 +162,12 @@ regressions (#59, #61-branch, #62) that all passed unit tests but broke in produ
    row and never overwrites an edited one. **Re-run it after upgrading** — increment 30 adds the
    `Users` sheet and the `ceo_ceiling` Config key; **increment 31 appends the `Users.pin_hash`
    column** (existing rows keep their data).
-4. **Set the tier-A managers' passwords** (increment 31): in the Apps Script editor run
-   `setUserPin('רועי', '…')` and `setUserPin('אולגה', '…')` once each. It hashes (salted PBKDF2) and
-   writes `pin_hash`; it never logs the plaintext. Without this, neither manager can log in.
+4. Per-user passwords are no longer used (single login, PR 1): `setUserPin()` and `Users.pin_hash` are
+   legacy and can be ignored — the one login password lives only in the Railway `SHARED_ACCESS_CODE`.
 5. Project Settings → Script Properties → add `SESSION_SECRET` with the **same** value as the Node
-   `SESSION_SECRET` env var (so Code.gs can verify session tokens). The old `STAFF_WRITE_TOKEN`
-   property is no longer used and can be removed.
+   `SESSION_SECRET` env var (so Code.gs can verify session tokens), and `APPROVER_CODE` with the **same**
+   value as the Node `APPROVER_CODE` env var (so Code.gs can verify the approver code independently).
+   The old `STAFF_WRITE_TOKEN` property is no longer used and can be removed.
 6. Deploy → New deployment → Web app. Record the deployment ID and `/exec` URL.
 7. Put the `/exec` URL and the other required env vars in the frontend `.env` (see `.env.example`)
    — **never commit real secrets.**

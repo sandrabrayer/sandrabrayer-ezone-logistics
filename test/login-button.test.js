@@ -90,7 +90,7 @@ test('on failure the button is re-enabled, label restored, and the error is show
   assert.equal(ctx.btn.textContent, 'כניסה', 'the button label is restored');
   assert.equal(ctx.btn.getAttribute('aria-busy'), null, 'aria-busy cleared');
   assert.ok(!ctx.btn.children.some((c) => c.tagName === 'span'), 'the spinner is removed');
-  const err = ctx.body._find((c) => c.textContent === 'שם או קוד שגויים');
+  const err = ctx.body._find((c) => c.textContent === 'קוד גישה שגוי');
   assert.ok(err, 'the existing error message is shown on failure');
 });
 

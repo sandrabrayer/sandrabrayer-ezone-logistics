@@ -133,7 +133,7 @@ test('the inline action buttons thread their own element (this) into the handler
   assert.ok(/doReject\('\$\{id\}', this\)/.test(html), 'לא אושר passes this');
   assert.ok(/doBlock\('\$\{id\}', this\)/.test(html), 'the block button passes this');
   // handlers forward the button as the 4th positional arg to post
-  assert.ok(/window\.doApprove = \(id, btn\) => post\('approve',[^;]*, btn\)/.test(html), 'doApprove forwards btn');
+  assert.ok(/window\.doApprove = \(id, btn\) => \{.*post\('approve', p, btn\)/.test(html), 'doApprove forwards btn');
   assert.ok(/window\.doReject = \(id, btn\) =>[\s\S]*post\('reject',[^;]*, btn\)/.test(html), 'doReject forwards btn');
   assert.ok(/window\.doBlock = \(id, btn\) =>[\s\S]*post\('setBlocked',[^;]*, btn\)/.test(html), 'doBlock forwards btn');
 });

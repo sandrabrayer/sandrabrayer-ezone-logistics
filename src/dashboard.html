@@ -156,11 +156,6 @@
     <p class="sub">ניהול דרישות — אישור, העברה ומעקב</p>
 
     <div class="controls">
-      <span><label>משתמש:</label>
-        <select id="who">
-          <option value="רועי">רועי</option>
-        </select>
-      </span>
       <span><label>בית:</label>
         <select id="filterHouse"><option value="">כל הבתים</option></select>
       </span>
@@ -316,7 +311,6 @@
       msg.textContent = text;
       if (text) msgTimer = setTimeout(() => { msg.className = 'msg'; msg.textContent = ''; msgTimer = null; }, 6000);
     }
-    function who() { return document.getElementById('who').value; }
     function blank(c) { return c === '' || c === null || c === undefined; }
     function num(c) { return blank(c) ? null : Number(c); }
 
@@ -331,12 +325,13 @@
     function sessionRole() { return String(window.__ROLE__ || ''); }
     function isExecUI() { return sessionRole() === 'ops_manager' || sessionRole() === 'ceo'; }
     // Mirror of Code.gs actorMayApprove_ for the SESSION role: emergency (auto) → any dispatch-capable role;
-    // otherwise only the exact chain-B role, or the ceo. Governs whether אישור / לא אושר are shown or replaced.
+    // otherwise the exact chain-B role, or ops_manager / ceo (any amount — single login, PR 1: the approver
+    // CODE is the control, asked on click). Governs whether אישור / לא אושר are shown or replaced.
     function canApproveUI(r) {
       const req = whoApproves(r.estimated_cost, r.urgency);
       const role = sessionRole();
       if (req === 'auto') return ['field_ops', 'ops_manager', 'ceo'].includes(role);
-      if (role === 'ceo') return true;
+      if (role === 'ceo' || role === 'ops_manager') return true;
       return role === req;
     }
 
@@ -454,9 +449,9 @@
       }).join('') || '<p class="empty">אין דרישות להצגה.</p>');
     }
 
-    // Per-user attention panel: what the logged-in user needs to act on.
+    // Attention panel for the ONE app account (single login): everything that needs acting on, with no
+    // per-user filtering — there is no user selection any more.
     function renderAttention(reqs) {
-      const u = who();
       const today = new Date().toISOString().slice(0, 10);
       const items = [];
 
@@ -469,24 +464,20 @@
       });
       if (awaiting.length) items.push(['act', awaiting.length, 'דרישות ממתינות לאישורך']);
 
-      // New requests (status דרישה) — Roy should act / route them.
-      if (u === 'רועי') {
-        const fresh = reqs.filter(r => r.status === ST.REQUEST);
-        if (fresh.length) items.push(['act', fresh.length, 'דרישות חדשות שהתקבלו']);
-      }
+      // New requests (status דרישה) — to be routed.
+      const fresh = reqs.filter(r => r.status === ST.REQUEST);
+      if (fresh.length) items.push(['act', fresh.length, 'דרישות חדשות שהתקבלו']);
 
       // Deferral reminders due today (or overdue).
       const dueDefers = reqs.filter(r => r.status === ST.DEFERRED && r.deferred_until && r.deferred_until <= today);
       if (dueDefers.length) items.push(['due', dueDefers.length, 'תזכורות דחייה שהגיע מועדן']);
 
-      // Pending inspection defects awaiting confirmation into a request (Roy acts).
-      if (u === 'רועי') {
-        const pendingDefects = allFindings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
-        if (pendingDefects.length) items.push(['warn', pendingDefects.length, 'ליקויים מבקרות לאישור לדרישה']);
-      }
+      // Pending inspection defects awaiting confirmation into a request.
+      const pendingDefects = allFindings.filter(f => f.finding_type === 'physical_defect' && !f.linked_request_id);
+      if (pendingDefects.length) items.push(['warn', pendingDefects.length, 'ליקויים מבקרות לאישור לדרישה']);
 
       document.getElementById('attention').innerHTML = `<div class="attention">
-        <h2>🔔 דורש את תשומת לבך <span class="who">— ${escapeHtml(u)}</span></h2>
+        <h2>🔔 דורש את תשומת לבך</h2>
         ${items.length
           ? items.map(([k, n, t]) => `<div class="attn-item"><span class="attn-badge ${k}">${n}</span>${t}</div>`).join('')
           : '<div class="attn-none">אין פעולות הממתינות לך כרגע ✓</div>'}
@@ -568,7 +559,7 @@
     }
     window.doAssignBatch = (ids, trade, btn) => {
       if (!confirm(`להקצות ${ids.length} עבודות כביקור מרוכז אחד (${trade})?`)) return;
-      post('assignBatch', { ids, by: who(), trade }, btn);
+      post('assignBatch', { ids, trade }, btn);
     };
 
     function renderHouseConsolidation() {
@@ -668,7 +659,7 @@
       } else {
         btns.push('<span class="empty">—</span>');
       }
-      // Edit only before approval; delete always available to Roy/Sandra.
+      // Edit only before approval; delete is exec-only (see below).
       if ([ST.REQUEST, ST.PENDING].includes(s)) {
         btns.push(`<button class="act" onclick="doEdit('${id}', this)">עריכה</button>`);
       }
@@ -732,15 +723,33 @@
           // A permission rejection from the server (a gate mismatch) is shown as a clean Hebrew message,
           // never the raw upstream "Forbidden: role not authorized…" text. The UI already hides actions a
           // role may not take (approve above threshold, delete), so this is a defensive fallback.
-          showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
+          if (/approver_code_invalid/i.test(raw)) { approverCode = ''; showMsg('err', 'קוד מאשר שגוי.'); }
+          else if (/approver_code_required/i.test(raw)) { approverCode = ''; showMsg('err', 'נדרש קוד מאשר לאישור/דחייה.'); }
+          else showMsg('err', /forbidden|not authorized|unauthorized/i.test(raw) ? 'אין לך הרשאה לפעולה זו.' : 'הפעולה נכשלה: ' + raw);
         }
       } finally {
         if (btn) setActLoading(btn, false);
       }
     }
 
-    window.doApprove = (id, btn) => post('approve', { id, by: who() }, btn);
-    window.doReject = (id, btn) => { const reason = prompt('סיבת אי-האישור:') || ''; post('reject', { id, by: who(), reason }, btn); };
+    // Approver code (single login, PR 1): every approve / reject that needs a human approver is confirmed with
+    // אולגה's approver code. It is asked once per page and kept IN MEMORY only (never stored), reused until the
+    // server rejects it; an emergency (חירום) request is auto-approved by chain B and skips it. The server AND
+    // Code.gs verify the code — this prompt is UX, never the control. No user field is sent: the actor is the
+    // session token.
+    let approverCode = '';
+    function needsApproverCode(id) {
+      const r = allRequests.find(x => String(x.id) === String(id));
+      return !r || whoApproves(r.estimated_cost, r.urgency) !== 'auto';
+    }
+    function withApproverCode(id, payload) {
+      if (!needsApproverCode(id)) return payload;
+      if (!approverCode) approverCode = (prompt('קוד מאשר (אולגה):') || '').trim();
+      if (!approverCode) return null;
+      return Object.assign({ approver_code: approverCode }, payload);
+    }
+    window.doApprove = (id, btn) => { const p = withApproverCode(id, { id }); if (p) post('approve', p, btn); };
+    window.doReject = (id, btn) => { const reason = prompt('סיבת אי-האישור:') || ''; const p = withApproverCode(id, { id, reason }); if (p) post('reject', p, btn); };
     // Block ("תקוע") requires a reason (server also enforces); unblock clears it.
     window.doBlock = (id, btn) => { const reason = (prompt('סיבת החסימה (חובה):') || '').trim(); if (!reason) return; post('setBlocked', { id, blocked: true, reason }, btn); };
     window.doUnblock = (id, btn) => { if (!confirm('לבטל את החסימה?')) return; post('setBlocked', { id, blocked: false }, btn); };
@@ -782,7 +791,7 @@
       const remind_days = Number(deferRemind.value) || 0;
       // Keep the modal open with the confirm button spinning while the defer POST is on the wire; close once
       // it resolves so the "דחה לתאריך" action shows the same in-flight state as the inline buttons.
-      await post('defer', { id: _deferId, by: who(), deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) }, deferConfirmBtn);
+      await post('defer', { id: _deferId, deferred_until: deferDate.value, remind_days, remind_on: reminderDate(deferDate.value, remind_days) }, deferConfirmBtn);
       deferModal.classList.remove('open'); _deferId = null;
     });
     const TRADES = ['חשמלאי', 'אינסטלטור', 'איש מזגנים', 'צבעי', 'איש בריכות', 'איש רשתות', 'עבודות אלומיניום', 'עבודות נגרות', 'אחר'];
@@ -838,25 +847,25 @@
       if (referType() === 'internal') {
         const lead = referLeadSel.value;
         if (!lead) { showMsg('err', 'בחר/י אחראי.'); return; }
-        await post('assign', { id, by: who(), assigned_to: lead, assignment_type: 'internal' }, referConfirmBtn);
+        await post('assign', { id, assigned_to: lead, assignment_type: 'internal' }, referConfirmBtn);
       } else {
         const trade = referTradeSel.value;
-        if (document.getElementById('referMarkOnly').checked) await post('markExternal', { id, by: who(), trade }, referConfirmBtn);
-        else await post('assign', { id, by: who(), assigned_to: trade, assignment_type: 'external', trade }, referConfirmBtn);
+        if (document.getElementById('referMarkOnly').checked) await post('markExternal', { id, trade }, referConfirmBtn);
+        else await post('assign', { id, assigned_to: trade, assignment_type: 'external', trade }, referConfirmBtn);
       }
       referModal.classList.remove('open'); _referId = null;
     });
-    window.doComplete = (id, btn) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, by: who(), to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }, btn); };
-    window.doSetStatus = (id, to, btn) => post('setStatus', { id, by: who(), to }, btn);
-    window.doConfirmFinding = (fid, btn) => post('confirmFinding', { finding_id: fid, by: who() }, btn);
-    window.doDelete = (id, btn) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id, by: who() }, btn); };
+    window.doComplete = (id, btn) => { const cost = prompt('עלות בפועל (אפשר ריק):') || ''; const notes = prompt('הערות סיום (אפשר ריק):') || ''; post('setStatus', { id, to: ST.COMPLETED, actual_cost: cost, completion_notes: notes }, btn); };
+    window.doSetStatus = (id, to, btn) => post('setStatus', { id, to }, btn);
+    window.doConfirmFinding = (fid, btn) => post('confirmFinding', { finding_id: fid }, btn);
+    window.doDelete = (id, btn) => { if (confirm('למחוק את הדרישה? הפעולה תתועד אך השורה תוסר.')) post('deleteRequest', { id }, btn); };
     window.doEdit = (id, btn) => {
       const r = allRequests.find(x => String(x.id) === String(id));
       if (!r) return;
       const description = prompt('תיאור:', r.description || ''); if (description === null) return;
       const location_in_house = prompt('מיקום בבית:', r.location_in_house || ''); if (location_in_house === null) return;
       const estimated_cost = prompt('עלות משוערת (₪, ריק = לא ידוע):', r.estimated_cost || ''); if (estimated_cost === null) return;
-      const payload = { id, by: who(), description, location_in_house, estimated_cost };
+      const payload = { id, description, location_in_house, estimated_cost };
       // Category correction (רכישה→תיקון) is manager-only — mirror of Code.gs canEditCategory / isManagement_.
       // Only the exec UI is offered the prompt; the server re-checks the role and rejects a category change
       // from anyone else. A blank / unchanged answer sends no category (no-op, not a change).
@@ -869,7 +878,6 @@
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
-    document.getElementById('who').addEventListener('change', render);
     document.getElementById('filterHouse').addEventListener('change', render);
     document.getElementById('filterLead').addEventListener('change', render);
 
