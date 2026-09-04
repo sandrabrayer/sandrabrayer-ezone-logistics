@@ -16,6 +16,7 @@ export const NUMERIC_KEYS = new Set([
 
 export const BOOLEAN_KEYS = new Set([
   'emergency_bypasses_approval',
+  'notify_enabled',            // e-mail notifications master switch (PR 5)
 ]);
 
 // Truthy spellings accepted from the Sheet for boolean keys.

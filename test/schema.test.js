@@ -10,7 +10,7 @@ test('all sheets are defined (core + inspection + inventory modules)', () => {
   assert.deepEqual(SHEET_NAMES.sort(), [
     'AuditLog', 'Budgets', 'ChecklistItems', 'Compliance', 'Config', 'Events', 'Houses',
     'InspectionFindings', 'Inspections', 'InventoryCounts', 'InventoryItems', 'MaintenancePlan',
-    'Requests', 'Technicians', 'Users',
+    'NotifyLog', 'Requests', 'Technicians', 'Users',
   ].sort());
 });
 

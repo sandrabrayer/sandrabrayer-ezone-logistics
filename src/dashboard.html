@@ -356,6 +356,7 @@
           filterHousePopulated = true;
         }
         render();
+        focusDeepLink();
       } catch (e) {
         board.innerHTML = '<p class="empty">שגיאה בטעינת הדרישות. רענן/י ונסה/י שוב.</p>';
         showMsg('err', 'לא ניתן לטעון את הדרישות.');
@@ -416,6 +417,19 @@
       board.innerHTML = `<div class="group"><h2><span class="dot" style="background:#8b93a0"></span><span style="border-inline-start:4px solid #8b93a0;padding-inline-start:8px">ארכיון — הושלמו/נסגרו (לקריאה בלבד)</span> <span style="color:var(--muted);font-weight:500">(${items.length})</span></h2>${items.map(r => archiveCard(r)).join('')}</div>`;
     }
 
+    // Deep link from an e-mail notification (PR 5): /dashboard?req=<id> scrolls to that card and highlights it
+    // once after the first render. Display only — no data is read from the URL.
+    let deepLinkId = '';
+    try { deepLinkId = new URLSearchParams(location.search).get('req') || ''; } catch (e) { deepLinkId = ''; }
+    function focusDeepLink() {
+      if (!deepLinkId) return;
+      const el = board.querySelector(`.req[data-id="${deepLinkId.replace(/["\\]/g, '')}"]`);
+      deepLinkId = '';
+      if (!el) return;
+      el.style.boxShadow = '0 0 0 3px var(--accent)';
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+      setTimeout(() => { el.style.boxShadow = ''; }, 6000);
+    }
     function render() {
       const nowMs0 = Date.now();
       const all = filtered();
@@ -618,7 +632,7 @@
       const meta = [r.house, r.category, r.created_by].filter(Boolean).join(' · ');
       const badges = agingBadges(r);
       const edge = isOverdueUI(r) ? '#e0584a' : (color || 'var(--card-line)');
-      return `<div class="req" style="border-inline-start:4px solid ${edge}">
+      return `<div class="req" data-id="${escapeHtml(r.id)}" style="border-inline-start:4px solid ${edge}">
         <div class="head">
           <div>
             <div class="title">${escapeHtml(r.description || r.id)} ${urgencyPill(r.urgency)}${badges ? ' ' + badges : ''}</div>

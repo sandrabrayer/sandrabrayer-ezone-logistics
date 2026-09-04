@@ -3,6 +3,59 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Notifications] — Hebrew e-mail notifications from Apps Script (MailApp), fail-safe and deduped (PR 5)
+
+**What:** Apps Script now e-mails רועי / אולגה when a request lands, is auto-approved as an emergency, is
+approved or rejected, or a deferred request's date arrives. Recipients live **only** in Config (never
+hardcoded), every (request, event) is mailed **once**, and a mail error **never blocks a write**.
+
+**Config keys (via `setupSheet()`, `src/schema.js` ↔ `setup.gs` seeds):** `notify_email_approver` (אולגה),
+`notify_email_field_ops` (רועי) — seeded **blank**, so nothing is mailed until filled; `notify_enabled = TRUE`
+(coerced to a boolean: `src/config.js` + Code.gs `BOOLEAN_KEYS`); `notify_app_url` (the deep-link base, the
+public Railway host). New append-only **`NotifyLog`** sheet (`request_id | event | sent_at`) — the dedupe
+ledger.
+
+**Events → recipients (`src/notify.js` ↔ Code.gs `MIRROR:notify`, drift-guarded):** `new_request` → רועי +
+אולגה (manager modal **and** the coordinators intake); `emergency_auto` (a חירום request landed, auto-approved
+by chain B) → רועי + אולגה; `approved` → רועי; `rejected` → רועי; `deferral_wakeup` → רועי (found by the
+existing daily `runMaintenanceScan`: status נדחה לתאריך with `deferred_until` ≤ today; the request itself is
+untouched). `notifyAddress` accepts exactly one plain address per cell (no commas / angle brackets / line
+breaks — no header injection); a blank cell or `notify_enabled = FALSE` → `[]` → silent skip (no ledger row,
+no log line).
+
+**Mail (Code.gs `notifyEvent_`, Apps-Script-only):** subject `[לוגיסטיקה] <event> · <house> · #<id>`; body
+`<div dir="rtl" lang="he">` with description, house, category / urgency, cost (**this request's** estimate
+and/or actual only), status, an optional note / reason / deferred-until, and a button to
+`<notify_app_url>/dashboard?req=<id>` (https only). All user text HTML-escaped; `noReply`. **Dedupe:** the
+`NotifyLog` row is written **before** the send, so an event can never go out twice even if the send fails
+half-way. **Fail-safe:** `notifyEvent_` never throws — quota / authorization / a missing `NotifyLog` sheet
+are logged (`notify failed (…)`) and the write returns `ok` with the row already committed. Wired after the
+commit in `handleCreateRequest_`, `handleCreateRequestIntake_`, `handleApprove_`, `handleReject_`, and
+`runMaintenanceScan` (deferral wake-ups, logged in the scan summary). `notifyTestEmail()` — editor helper
+for the first-run Gmail-send authorization (sends a test mail to the approver, writes no ledger row).
+
+**Dashboard:** cards carry `data-id`; `/dashboard?req=<id>` scrolls to and highlights that card once (the
+mail's deep link). Display only.
+
+**Docs:** `DEPLOY.md` (setupSheet, first-run authorization via `notifyTestEmail()`, MailApp quota, the
+master switch), README section, help page section **"התראות במייל"**.
+
+**Tests (824, all green):** `test/notify.test.js` (pure: recipients per event, master switch incl. raw
+spellings, blank / duplicate addresses, address sanitising incl. header injection, subject format,
+new-request → event mapping, the deferral wake-up rule incl. ISO / Date cells and a bad "today");
+`test/notify-handlers.test.js` (real Code.gs with a MailApp stub: create → one RTL mail to both with subject /
+escaped description / cost / status / deep link; intake; emergency → `emergency_auto`; approve / reject → רועי
+with note / reason; **dedupe** incl. a pre-seeded ledger; disabled and blank → nothing; **MailApp throws →
+write still ok, row committed, error logged**; missing `NotifyLog` → write ok, nothing sent; the daily scan
+mails a wake-up once and leaves the request untouched; no link without an https base; only this request's
+money; `notifyTestEmail`; static wiring guard). `mirror-drift` covers `MIRROR:notify`; `schema` lists
+`NotifyLog`; `config` coerces `notify_enabled`.
+
+**Deploy (post-merge):** Code.gs auto-deploys via clasp CI. Then run **`setupSheet()`** (NotifyLog tab +
+Config keys), fill the two e-mail cells, and run **`notifyTestEmail()`** once from the editor to grant the
+mail scope. No env var or Script Property change.
+
+---
 ## [Budget] — עמידה בתקציב made auditable: one server spend rule, Israel-time months, visible data source (PR 4)
 
 **What:** Olga's budget screen showed numbers computed by a **second, client-side rule** (completed/closed

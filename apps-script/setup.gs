@@ -38,6 +38,8 @@ var HEADERS = {
   Users: ['name', 'role', 'house', 'active', 'pin_hash'],
   Technicians: ['name', 'type', 'cluster', 'trade', 'phone', 'rate', 'notes'],
   AuditLog: ['request_id', 'from_status', 'to_status', 'by', 'timestamp', 'note'],
+  // NotifyLog (PR 5) — append-only e-mail dedupe ledger (request_id | event | sent_at). Mirror of schema.js.
+  NotifyLog: ['request_id', 'event', 'sent_at'],
   Inspections: [
     'id', 'house', 'inspection_date', 'inspector', 'started_at',
     'patient_count', 'staff_present', 'start_time', 'cleaner_present',
@@ -194,6 +196,12 @@ var SEED_CONFIG = [
   // many days leave the main dashboard board for the read-only ארכיון tab (still searchable). Tunable in
   // the Sheet with no deploy; coerced to a number. Upserted by key. Blank/malformed → the UI default (7).
   ['archive_after_days', '7'],
+  // E-mail notifications (PR 5) — mirror of src/schema.js SEED_CONFIG. Recipients seeded BLANK (fill in the
+  // Sheet); notify_enabled = TRUE is the master switch; notify_app_url is the deep-link base. Upserted by key.
+  ['notify_enabled', 'TRUE'],
+  ['notify_email_approver', ''],
+  ['notify_email_field_ops', ''],
+  ['notify_app_url', 'https://ezone-logistics.up.railway.app'],
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites

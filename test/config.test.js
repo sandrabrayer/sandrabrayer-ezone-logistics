@@ -21,6 +21,13 @@ test('emergency_bypasses_approval comes back as a BOOLEAN', () => {
   assert.equal(coerceConfigValue('emergency_bypasses_approval', ''), false);
 });
 
+test('notify_enabled (e-mail master switch) comes back as a BOOLEAN; blank = off', () => {
+  assert.equal(coerceConfigValue('notify_enabled', 'TRUE'), true);
+  assert.equal(coerceConfigValue('notify_enabled', 'yes'), true);
+  assert.equal(coerceConfigValue('notify_enabled', 'FALSE'), false);
+  assert.equal(coerceConfigValue('notify_enabled', ''), false);
+});
+
 test('archive_after_days comes back as a NUMBER (the archive grace period)', () => {
   const v = coerceConfigValue('archive_after_days', '7');
   assert.equal(typeof v, 'number');
