@@ -168,11 +168,11 @@ var SEED_TECHNICIANS = [
 ];
 
 var SEED_CONFIG = [
+  // approval_threshold — LEGACY since PR 2 (chain B v3 routes every non-emergency request to ops_manager;
+  // nothing reads it). Kept so an existing sheet keeps its row; still coerced to a number.
   ['approval_threshold', '3000'],
   ['emergency_bypasses_approval', 'TRUE'],
-  // ceo_ceiling — kept but DORMANT since increment 31 (chain B v2 does not read it). Upserted by
-  // key so a re-run of setupSheet() ADDS it to existing sheets without overwriting approval_threshold.
-  ['ceo_ceiling', ''],
+  // ceo_ceiling — REMOVED from the seed in PR 2 (the ceo role is gone). An existing row is harmless.
   // sla_days (increment 36) — "urgency:days" spec, tunable in the Sheet with no deploy. Upserted by
   // key, so a re-run ADDS it to existing sheets without touching other Config rows.
   ['sla_days', 'חירום:1|דחוף:3|רגיל:14'],
@@ -197,13 +197,11 @@ var SEED_CONFIG = [
 ];
 
 // Roster (active = TRUE). Upserted by `name` — a re-run never duplicates a row and never overwrites
-// an edited one (so a manager's set pin_hash survives). Mirror of src/schema.js SEED_USERS. The 5th
-// column (pin_hash) seeds BLANK for everyone — managers' hashes are set later via setUserPin(),
-// never seeded as plaintext.
+// an edited one. Mirror of src/schema.js SEED_USERS. The 5th column (pin_hash) is LEGACY, append-only:
+// seeds BLANK, nothing writes it any more (setUserPin is retired), login never reads it.
 var SEED_USERS = [
   ['רועי',  'field_ops',   '',               'TRUE', ''],
   ['אולגה', 'ops_manager', '',               'TRUE', ''],
-  ['סנדרה', 'ceo',         '',               'TRUE', ''],
   ['רמי',   'maintenance', 'sharon',         'TRUE', ''],
   ['צחי',   'maintenance', 'caesarea,north', 'TRUE', ''],
   ['שירה',  'coordinator', 'קיסריה עפרוני',   'TRUE', ''],
@@ -315,6 +313,9 @@ function setupSheet() {
   // without duplicating or overwriting anything an operator has edited.
   upsertByKeyColumn_(ss.getSheetByName('Config'), SEED_CONFIG, 0);   // match on column 0 = key
   upsertByKeyColumn_(ss.getSheetByName('Users'), SEED_USERS, 0);     // match on column 0 = name
+  // PR 2: retired roster members (סנדרה / ceo) are set active=FALSE if their row exists — NEVER deleted,
+  // so AuditLog / historic rows keep resolving the name. A re-run is idempotent (already FALSE → no write).
+  deactivateUsers_(ss.getSheetByName('Users'), RETIRED_USERS);
 
   // Remove the default "Sheet1" if it was auto-created and is unused.
   var def = ss.getSheetByName('Sheet1');
@@ -327,6 +328,29 @@ function setupSheet() {
   // read live, never cached — see getUsers — so there is nothing to invalidate for it.)
   invalidateReference_('Config');
   invalidateReference_('Houses');
+}
+
+// Roster members retired from the app (PR 2: the ceo role is gone). setupSheet() flips an existing row to
+// active=FALSE and never seeds it again; the row itself stays (append-only data, historic references).
+var RETIRED_USERS = ['סנדרה'];
+
+/** Set active=FALSE on every Users row whose name is in `names`. Never deletes; idempotent. */
+function deactivateUsers_(sheet, names) {
+  if (!sheet || !names || names.length === 0) return;
+  if (sheet.getLastRow() < 2) return;
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = headers.indexOf('name');
+  var activeCol = headers.indexOf('active');
+  if (nameCol === -1 || activeCol === -1) return;
+  for (var r = 1; r < data.length; r++) {
+    var name = String(data[r][nameCol] == null ? '' : data[r][nameCol]).replace(/^\s+|\s+$/g, '');
+    if (names.indexOf(name) === -1) continue;
+    var cur = String(data[r][activeCol]).toUpperCase();
+    if (cur === 'FALSE') continue; // already retired — no write
+    sheet.getRange(r + 1, activeCol + 1).setValue('FALSE');
+    Logger.log('Users: "' + name + '" set active=FALSE (retired role)');
+  }
 }
 
 /** Append seed rows only when the sheet has just its header row (last row === 1). */
@@ -354,111 +378,12 @@ function upsertByKeyColumn_(sheet, rows, keyCol) {
   sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length, toAppend[0].length).setValues(toAppend);
 }
 
-// ===== Per-user password helper (increment 31, tier A: רועי / אולגה) =====
+// ===== Per-user password helper — RETIRED (PR 2) =====
 //
-// setUserPin(name, plaintext) hashes a password with salted PBKDF2-HMAC-SHA256 and writes it to the
-// user's pin_hash cell. Run it ONCE from the Apps Script editor for each manager, e.g.
-//   setUserPin('רועי', 'their-password');   setUserPin('אולגה', 'her-password');
-// It NEVER logs or stores the plaintext. The stored format is identical to src/auth.js hashPin, so
-// the Node login layer (which owns password verification — Code.gs trusts only the signed token)
-// verifies it directly. Parity between THIS Apps Script PBKDF2 and Node's crypto.pbkdf2Sync (used by
-// src/auth.js verifyPin) is confirmed by running verifyPinParity_() in the Apps Script editor and
-// checking its logged hash equals the committed vector in test/auth.test.js — the node:test suite
-// cannot run the Apps Script runtime, so it only pins the Node side to that same vector.
-var PBKDF2_ITERS_ = 100000;   // stored in the hash string, so verification always uses this count
-
+// Login is ONE password (Railway SHARED_ACCESS_CODE, PR 1) and approvals use the APPROVER_CODE; nothing reads
+// Users.pin_hash any more. The column stays (headers are append-only) but is never written. setUserPin()
+// is kept only so an old editor bookmark fails loudly instead of silently writing a hash nobody uses.
 function setUserPin(name, plaintext) {
-  if (!name || !plaintext) throw new Error('setUserPin(name, plaintext) — both are required');
-  var sheet = getSheet_('Users');
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-  var nameCol = headers.indexOf('name');
-  var hashCol = headers.indexOf('pin_hash');
-  if (hashCol === -1) throw new Error('Users sheet has no pin_hash column — run setupSheet() first.');
-  for (var r = 1; r < data.length; r++) {
-    if (String(data[r][nameCol]) === String(name)) {
-      var stored = hashPin_(String(plaintext));   // salt generated inside; plaintext never kept
-      sheet.getRange(r + 1, hashCol + 1).setValue(stored);
-      // Users is read live (never cached) — the new pin_hash is visible to the very next login. No cache to drop.
-      Logger.log('pin_hash set for user "' + name + '" (' + PBKDF2_ITERS_ + ' iterations)');  // NO plaintext
-      return true;
-    }
-  }
-  throw new Error('User not found: ' + name);
-}
-
-// Produce a "pbkdf2$sha256$<iters>$<saltHex>$<hashHex>" string. 16-byte random salt, 32-byte output.
-function hashPin_(plaintext) {
-  var salt = [];
-  for (var i = 0; i < 16; i++) salt.push(Math.floor(Math.random() * 256));
-  var dk = pbkdf2Sha256_(plaintext, salt, PBKDF2_ITERS_);
-  return 'pbkdf2$sha256$' + PBKDF2_ITERS_ + '$' + bytesToHex_(salt) + '$' + bytesToHex_(dk);
-}
-
-// PBKDF2-HMAC-SHA256 for a single 32-byte block (dkLen = hLen), so DK = U1 xor U2 xor ... xor Uc.
-// U1 = HMAC(password, salt || 0x00000001); Ui = HMAC(password, U_{i-1}). Matches crypto.pbkdf2Sync.
-//
-// Apps Script's Utilities.computeHmacSha256Signature accepts ONLY (String, String) or (Byte[],
-// Byte[]) — NOT (Byte[], String). Increment 31 passed a byte-array message with a String key, so it
-// threw on every call (increment 32 hotfix). We use the (Byte[], Byte[]) overload throughout:
-//   - the password is converted to its UTF-8 bytes, so Hebrew / non-ASCII passwords hash correctly
-//     (never char codes);
-//   - every message byte we build from a salt, hex, or XOR is converted to Apps Script's SIGNED
-//     byte range (-128..127) before being passed in (values > 127 → b - 256). HMAC output is already
-//     signed, so it is fed straight back as the next message; we mask to unsigned (& 0xff) only when
-//     accumulating and when hex-encoding the result.
-function pbkdf2Sha256_(password, saltBytes, iterations) {
-  var pwBytes = Utilities.newBlob(String(password)).getBytes();      // UTF-8, signed Byte[]
-  var block = toSignedBytes_(saltBytes.concat([0, 0, 0, 1]));        // salt || INT_32_BE(1), signed
-  var u = Utilities.computeHmacSha256Signature(block, pwBytes);      // U1 (signed Byte[])
-  var t = [];
-  for (var k = 0; k < u.length; k++) t[k] = u[k] & 0xff;            // accumulator, unsigned 0..255
-  for (var i = 1; i < iterations; i++) {
-    u = Utilities.computeHmacSha256Signature(u, pwBytes);           // Ui = HMAC(pw, U_{i-1}); u signed
-    for (var j = 0; j < t.length; j++) t[j] = (t[j] ^ u[j]) & 0xff;
-  }
-  return t;                                            // 32 unsigned bytes (0..255)
-}
-
-// Convert byte values (possibly unsigned 0..255) to Apps Script's signed byte range (-128..127),
-// so a Byte[] built from a salt or hex is accepted by computeHmacSha256Signature.
-function toSignedBytes_(bytes) {
-  var out = [];
-  for (var i = 0; i < bytes.length; i++) {
-    var b = bytes[i] & 0xff;
-    out.push(b > 127 ? b - 256 : b);
-  }
-  return out;
-}
-
-function hexToBytes_(hex) {
-  var out = [];
-  for (var i = 0; i + 1 < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16)); // 0..255
-  return out;
-}
-
-function bytesToHex_(bytes) {
-  var hex = '';
-  for (var i = 0; i < bytes.length; i++) {
-    var b = bytes[i] & 0xff;
-    var h = b.toString(16);
-    if (h.length < 2) h = '0' + h;
-    hex += h;
-  }
-  return hex;
-}
-
-// Diagnostic (increment 32): hash a FIXED test password with a FIXED salt — a TEST VECTOR, not a
-// real credential — and log the resulting hash string. Writes NOTHING to any sheet and is safe to
-// run repeatedly. Run it from the Apps Script editor and confirm the logged value is EXACTLY the
-// EXPECTED_PARITY_HASH committed in test/auth.test.js. THAT is what proves the LIVE Apps Script
-// PBKDF2 matches Node's crypto.pbkdf2Sync — the node:test suite cannot exercise the Apps Script
-// runtime, so it can only pin the Node side to the same committed vector.
-function verifyPinParity_() {
-  var password = 'סיסמה-Test-1!';                     // fixed test vector (Hebrew + ASCII) — NOT a real password
-  var saltHex = '0102030405060708090a0b0c0d0e0f10';   // fixed 16-byte salt
-  var dk = pbkdf2Sha256_(password, hexToBytes_(saltHex), PBKDF2_ITERS_);
-  var hash = 'pbkdf2$sha256$' + PBKDF2_ITERS_ + '$' + saltHex + '$' + bytesToHex_(dk);
-  Logger.log(hash);   // only the fixed test vector is involved; safe to share
-  return hash;
+  throw new Error('setUserPin is retired: login uses the single SHARED_ACCESS_CODE and approvals the ' +
+    'APPROVER_CODE (Railway env + Script Property). Users.pin_hash is a legacy column and is no longer written.');
 }

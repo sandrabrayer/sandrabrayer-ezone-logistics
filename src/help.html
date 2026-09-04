@@ -84,8 +84,8 @@
       <h2><span class="dot"></span>מי עושה מה</h2>
       <ul>
         <li><strong>רכזים/ות</strong> — פותחים דרישות (רכישה / תיקון / החלפה) מאפליקציית הרכזים. הדרישה נכנסת ללוח כאן.</li>
-        <li><strong>רועי</strong> (מנהל שטח) — מנהל את הלוח: דוחה לתאריך בכל סכום, ומעביר משימות לביצוע (שיבוץ פנימי/חיצוני).</li>
-        <li><strong>אולגה</strong> (מנהלת תפעול) — מאשרת או דוחה דרישות בכל סכום באמצעות <strong>קוד המאשר</strong>, ואחראית על מסך ניהול תפעולי רשת.</li>
+        <li><strong>רועי</strong> (מנהל שטח) — מנהל את הלוח: דוחה לתאריך בכל סכום, ומעביר משימות לביצוע (שיבוץ פנימי/חיצוני). אינו מאשר דרישות.</li>
+        <li><strong>אולגה</strong> (מנהלת תפעול) — <strong>המאשרת היחידה</strong>: מאשרת או דוחה כל דרישה שאינה חירום, בכל סכום, באמצעות <strong>קוד המאשר</strong>; אחראית על מסך ניהול תפעולי רשת.</li>
         <li><strong>רמי / צחי</strong> (מובילי אחזקה) — מבצעים בשטח משימות ששובצו פנימית, כל אחד לפי האשכול שלו.</li>
       </ul>
       <p class="note">בקצרה: רכזים ← רועי ← אולגה ← רמי/צחי.</p>
@@ -114,13 +114,12 @@
       <table>
         <thead><tr><th>מקרה</th><th>מי מאשר</th></tr></thead>
         <tbody>
-          <tr><td>אישור / אי-אישור, בכל סכום</td><td><span class="who">אולגה</span> — עם <strong>קוד המאשר</strong> (נדרש בלחיצה על אישור / לא אושר)</td></tr>
-          <tr><td>מעל <span class="js-threshold">…</span></td><td>הדרישה מסומנת כטעונת אישור מיוחד (דגל בלבד; המאשרת זהה)</td></tr>
+          <tr><td>כל דרישה שאינה חירום, בכל סכום</td><td><span class="who">אולגה</span> — עם <strong>קוד המאשר</strong> (נדרש בלחיצה על אישור / לא אושר)</td></tr>
           <tr><td>חירום</td><td><span class="who">אישור אוטומטי</span> — ללא קוד, מתועד ברישום הביקורת, בכל סכום</td></tr>
-          <tr><td>דחייה לתאריך</td><td><span class="who">רועי</span> — בכל סכום, ללא קוד</td></tr>
+          <tr><td>דחייה לתאריך</td><td><span class="who">רועי</span> או אולגה — בכל סכום, ללא קוד; כשהדרישה חוזרת ללוח היא ממתינה שוב לאישור אולגה</td></tr>
         </tbody>
       </table>
-      <p class="note">הכניסה למערכת היא בסיסמה אחת לכולם; קוד המאשר הוא סוד נפרד שמחזיקה אולגה, ונבדק בשרת וב-Apps Script לפני כל אישור. סף האישור נקרא מהגדרות המערכת (Config) ומוצג כאן אוטומטית.</p>
+      <p class="note">אין סף סכום: כל דרישה שאינה חירום ממתינה לאישור אולגה. הכניסה למערכת היא בסיסמה אחת לכולם; קוד המאשר הוא סוד נפרד שמחזיקה אולגה, ונבדק בשרת וב-Apps Script לפני כל אישור.</p>
     </section>
 
     <section class="card" id="dispatch">
@@ -143,23 +142,5 @@
     </section>
   </main>
 
-  <script>
-    // Fill in the approval threshold from Config (approval_threshold) — the number is NEVER hardcoded
-    // here; the guide always shows the live value the approval chain actually uses. The fetch goes
-    // through the injected auth shim (Bearer-gated /api/data), and `config` is readable by every role.
-    (function () {
-      var EXEC_URL = window.__EXEC_URL__ || '/api/exec';
-      fetch(EXEC_URL + '?action=config').then(function (r) { return r.json(); }).then(function (j) {
-        var raw = (j && j.ok && j.data) ? j.data.approval_threshold : null;
-        var n = Number(raw);
-        var txt = (raw != null && raw !== '' && !Number.isNaN(n)) ? '₪' + n.toLocaleString('he-IL') : '—';
-        var els = document.querySelectorAll('.js-threshold');
-        for (var i = 0; i < els.length; i++) els[i].textContent = txt;
-      }).catch(function () {
-        var els = document.querySelectorAll('.js-threshold');
-        for (var i = 0; i < els.length; i++) els[i].textContent = '—';
-      });
-    })();
-  </script>
 </body>
 </html>

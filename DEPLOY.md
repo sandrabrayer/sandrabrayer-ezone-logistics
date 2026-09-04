@@ -108,6 +108,10 @@ Set once in the Apps Script project (Project Settings → Script Properties); cl
 | `APPROVER_CODE` | Railway `APPROVER_CODE` | verifying the approver code on every non-emergency approve / reject (PR 1). **Set it BEFORE merging PR 1** — until it exists, Code.gs refuses every human approval (fail-closed) |
 | `CREATE_REQUEST_SECRET` | ezone-coordinators intake secret | the server-to-server request intake |
 
+PR 2 (אולגה approves everything) needs **no new property and no new env var**. After it merges, run
+`setupSheet()` once so the retired סנדרה roster row is set `active=FALSE` (never deleted). `setUserPin()` is
+retired and throws; `Users.pin_hash` stays as an unused, append-only column.
+
 ## Security
 
 - Credentials live **only** in GitHub Secrets — never committed, never printed;

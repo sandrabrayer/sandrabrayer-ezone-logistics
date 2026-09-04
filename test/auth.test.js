@@ -19,17 +19,17 @@ test('signToken produces payload.signature and carries name + role', () => {
 });
 
 test('signToken throws without a secret (never mint an unverifiable token)', () => {
-  assert.throws(() => signToken('', 7, { name: 'x', role: 'ceo' }));
+  assert.throws(() => signToken('', 7, { name: 'x', role: 'ops_manager' }));
 });
 
 test('verifyToken accepts a freshly signed token', () => {
-  const claims = verifyToken(SECRET, signToken(SECRET, 1, { name: 'סנדרה', role: 'ceo' }));
+  const claims = verifyToken(SECRET, signToken(SECRET, 1, { name: 'אולגה', role: 'ops_manager' }));
   assert.ok(claims);
-  assert.equal(claims.role, 'ceo');
+  assert.equal(claims.role, 'ops_manager');
 });
 
 test('verifyToken rejects a token signed with the wrong secret', () => {
-  const forged = signToken('w'.repeat(32), 1, { name: 'x', role: 'ceo' });
+  const forged = signToken('w'.repeat(32), 1, { name: 'x', role: 'ops_manager' });
   assert.equal(verifyToken(SECRET, forged), null);
 });
 
@@ -52,8 +52,8 @@ test('verifyToken rejects a tampered signature', () => {
 test('verifyToken rejects a tampered payload (role elevation attempt)', () => {
   const t = signToken(SECRET, 1, { name: 'שירה', role: 'coordinator' });
   const sig = t.split('.')[1];
-  // Swap in a ceo payload but keep the old signature → must fail.
-  const forgedPayload = Buffer.from(JSON.stringify({ n: 'שירה', r: 'ceo', iat: Date.now(), exp: Date.now() + 1e6 }))
+  // Swap in an ops_manager payload but keep the old signature → must fail.
+  const forgedPayload = Buffer.from(JSON.stringify({ n: 'שירה', r: 'ops_manager', iat: Date.now(), exp: Date.now() + 1e6 }))
     .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assert.equal(verifyToken(SECRET, `${forgedPayload}.${sig}`), null);
 });
@@ -65,7 +65,7 @@ test('verifyToken rejects malformed input safely', () => {
 });
 
 test('verifyToken fails closed on an unset secret', () => {
-  const t = signToken(SECRET, 1, { name: 'x', role: 'ceo' });
+  const t = signToken(SECRET, 1, { name: 'x', role: 'ops_manager' });
   assert.equal(verifyToken('', t), null);
 });
 
@@ -133,14 +133,14 @@ test('verifyPin fails closed on empty / malformed stored value (no password set 
 //     Utilities.computeHmacSha256Signature call was throwing on every invocation. That was false
 //     assurance; it has been removed.)
 //
-// Parity with the LIVE Apps Script PBKDF2 is confirmed OUT OF BAND: run verifyPinParity_() in the
-// Apps Script editor (same fixed password, salt and iterations) and check its logged hash equals
-// EXPECTED_PARITY_HASH below, exactly.
+// PR 2: the Apps Script writer (setUserPin / verifyPinParity_) is RETIRED — nothing writes pin_hash any
+// more and login never reads it. src/auth.js hashPin/verifyPin stay as Node primitives; this vector now
+// only pins the Node implementation to a committed value.
 test('PBKDF2 fixed vector: crypto.pbkdf2Sync reproduces the committed hash, and verifyPin accepts it', () => {
   const password = 'סיסמה-Test-1!';                       // fixed vector, Hebrew + ASCII (UTF-8)
   const saltHex = '0102030405060708090a0b0c0d0e0f10';     // fixed 16-byte salt
-  const iters = 100000;                                   // must equal setup.gs PBKDF2_ITERS_
-  // The vector verifyPinParity_() in apps-script/setup.gs must reproduce when run in the editor:
+  const iters = 100000;                                   // the iteration count the legacy hashes used
+  // The committed vector (produced by Node's crypto.pbkdf2Sync):
   const EXPECTED_PARITY_HASH =
     'pbkdf2$sha256$100000$0102030405060708090a0b0c0d0e0f10$0464760692cf4028e8246e00b6cfaca8034e9d292766c4a29cc0dc02efb39dc9';
 

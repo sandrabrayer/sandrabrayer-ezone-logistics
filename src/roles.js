@@ -4,7 +4,7 @@
 // so the SAME permission rules are enforced on the public /exec endpoint — the Node layer is
 // never trusted. A guard test (test/mirror-drift.test.js) asserts the two copies stay in sync.
 //
-// The five roles the app knows. Identity + role ride inside the signed session token; every
+// The four roles the app knows (ceo removed in PR 2). Identity + role ride inside the signed session token; every
 // enforced action resolves the actor from that token, never from a client-supplied field.
 
 // === MIRROR:roles START ===
@@ -13,52 +13,50 @@ var ROLE = {
   MAINTENANCE: 'maintenance',
   FIELD_OPS: 'field_ops',
   OPS_MANAGER: 'ops_manager',
-  CEO: 'ceo',
 };
 
-var ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER, ROLE.CEO];
+var ROLES = [ROLE.COORDINATOR, ROLE.MAINTENANCE, ROLE.FIELD_OPS, ROLE.OPS_MANAGER];
 
 function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject: the role that chain B resolves to FOR THAT REQUEST may approve it. The ops_manager
-// (אולגה) and the CEO may approve at ANY amount — single-login (PR 1): every session is ops_manager, and
-// the approve/reject write is additionally gated by the APPROVER_CODE (server.js + Code.gs), so the role
-// alone never approves. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
+// approve / reject: the ops_manager (אולגה) is THE approver. Chain B v3 routes every non-emergency
+// request to ops_manager, and the approve/reject write is additionally gated by the APPROVER_CODE
+// (server.js + Code.gs), so the role alone never approves. requiredRole is the whoApproves() result.
+// The ceo role was removed (PR 2): no other role approves anything.
 function canApprove(actorRole, requiredRole) {
-  if (actorRole === ROLE.CEO || actorRole === ROLE.OPS_MANAGER) return true;
-  return actorRole === requiredRole;
+  return actorRole === ROLE.OPS_MANAGER && requiredRole === ROLE.OPS_MANAGER;
 }
 
-// defer: field_ops, ops_manager, ceo (a "this can wait" call, not the money decision).
+// defer: field_ops, ops_manager (a "this can wait" call, not the money decision).
 function canDefer(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
 // assignment / dispatch (assign, batch-assign, mark-external, set-status, set-execution):
-// field_ops, ops_manager, ceo.
+// field_ops, ops_manager.
 function canDispatch(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
-// block / unblock a request (increment 36): field_ops, ops_manager, ceo. A coordinator/maintenance
+// block / unblock a request (increment 36): field_ops, ops_manager. A coordinator/maintenance
 // gets 403 — same tier boundary as defer/dispatch.
 function canBlock(actorRole) {
-  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER || actorRole === ROLE.CEO;
+  return actorRole === ROLE.FIELD_OPS || actorRole === ROLE.OPS_MANAGER;
 }
 
-// Manager tier (tier A) — sees ALL houses and holds the approve/dispatch powers. field_ops /
-// ops_manager / ceo. Everyone else (coordinator, maintenance) is the restricted tier B.
+// Manager tier (tier A) — sees ALL houses and holds the dispatch powers. field_ops / ops_manager.
+// Everyone else (coordinator, maintenance) is the restricted tier B.
 function isManagerRole(role) {
-  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+  return role === ROLE.FIELD_OPS || role === ROLE.OPS_MANAGER;
 }
 
-// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) and the CEO.
+// /management screen (increment 37): the NETWORK-MANAGEMENT view for Olga (ops_manager) only.
 // NARROWER than isManagerRole — field_ops (Roy) is a manager tier for dispatch but is NOT an exec, so
 // he gets 403 here. Enforced server-side AND in Code.gs, never UI-only.
 function canManage(role) {
-  return role === ROLE.OPS_MANAGER || role === ROLE.CEO;
+  return role === ROLE.OPS_MANAGER;
 }
 
 // House-scope visibility (increment 31). Managers see every house. A coordinator sees ONLY their

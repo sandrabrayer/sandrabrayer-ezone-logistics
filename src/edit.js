@@ -1,11 +1,12 @@
 // edit.js — pure rules for editing and deleting requests (increment 5).
 // Mirrored in Code.gs. Edit is allowed only BEFORE approval so the §6 routing can't be bypassed
-// by changing the cost after approval; delete is Roy/Sandra only, one quick (audited) action.
+// by changing the cost after approval. DELETERS is a LEGACY name list (the server gates delete by role,
+// isManagement_ / canManage → ops_manager); Sandra was removed from it in PR 2.
 
 import { STATUSES, CATEGORY } from './schema.js';
 import { canManage } from './roles.js';
 
-export const DELETERS = ['רועי', 'sandra'];
+export const DELETERS = ['רועי'];
 export const EDITABLE_STATUSES = [STATUSES.REQUEST, STATUSES.PENDING_APPROVAL];
 export const EDITABLE_FIELDS = ['description', 'location_in_house', 'category', 'urgency', 'estimated_cost', 'house'];
 export const CATEGORIES = [CATEGORY.PURCHASE, CATEGORY.REPAIR, CATEGORY.REPLACEMENT];
@@ -19,7 +20,7 @@ export function canEdit(status) {
 }
 
 // A category correction (e.g. רכישה→תיקון when a coordinator asked to BUY but the item can be
-// REPAIRED) is a manager-side decision, NOT a field-level tweak: only management (ops_manager / ceo)
+// REPAIRED) is a manager-side decision, NOT a field-level tweak: only management (ops_manager)
 // may change a request's category. Mirror of Code.gs isManagement_ (via canManage). The other
 // EDITABLE_FIELDS keep the shared pre-approval edit rule (canEdit).
 export function canEditCategory(role) {

@@ -635,7 +635,7 @@ async function handleData(req, res, url) {
       if (!manager) return sendJson(res, 403, { ok: false, error: 'forbidden' });
       payload.data = payload.data.map((u) => { const c = Object.assign({}, u); delete c.pin_hash; return c; });
     } else if (action === 'requests' && !manager) {
-      // Managers (field_ops / ops_manager / ceo) never reach here — they get the unfiltered list above.
+      // Managers (field_ops / ops_manager) never reach here — they get the unfiltered list above.
       // Tier B sees ONLY their in-scope houses. Any OTHER role is an invalid session for a scoped read:
       // fail CLOSED with a loud 403 rather than silently returning an empty filtered list (which is how
       // a role/roster mismatch used to hide as "manager sees nothing").
@@ -660,9 +660,9 @@ async function handleData(req, res, url) {
   return sendJson(res, 200, payload);
 }
 
-// Exec-only writes (ops_manager + ceo), beyond managementData/updateEvent: the /management readiness
+// Exec-only writes (ops_manager), beyond managementData/updateEvent: the /management readiness
 // checklists (opening / emergency) and the compliance-entry delete. Mirrored by canManage in Code.gs.
-// Exec-only writes (ops_manager + ceo): the training-log delete + the (legacy) compliance delete. The
+// Exec-only writes (ops_manager): the training-log delete + the (legacy) compliance delete. The
 // readiness writes (add/update/deleteReadinessItem) are NO LONGER here — they moved to manager-tier
 // (field_ops edits the opening/emergency checklists from /workorders), gated by canWriteAction + Code.gs.
 const MANAGE_ONLY_ACTIONS = new Set(['deleteCompliance', 'deleteTraining']);
@@ -684,7 +684,7 @@ async function handleAction(req, res) {
   if (!canWriteAction(actor.role, body.action)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
-  // /management is exec-only (ops_manager + ceo). Enforced here (server-side) AND independently in
+  // /management is exec-only (ops_manager). Enforced here (server-side) AND independently in
   // Code.gs — field_ops and every tier-B role get 403 with no data read.
   if (body.action === 'managementData' && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
@@ -698,7 +698,7 @@ async function handleAction(req, res) {
   if (body.action === 'updateEvent' && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
-  // /management readiness checklists + compliance delete are exec-only (ops_manager + ceo), same as
+  // /management readiness checklists + compliance delete are exec-only (ops_manager), same as
   // managementData. Enforced here (server-side) AND independently in Code.gs. field_ops passes the tier
   // gate above but is NOT an exec, so it gets 403 here with no upstream call.
   if (MANAGE_ONLY_ACTIONS.has(body.action) && !canManage(actor.role)) {

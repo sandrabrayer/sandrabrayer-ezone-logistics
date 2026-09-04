@@ -3,7 +3,7 @@
 //     guide content (the 401 body is only the loader shell, which carries the auth shim so real browser
 //     navigation re-fetches with the Bearer token);
 //   - a valid session token gets 200 with the guide (both login-roster roles);
-//   - the served guide never hardcodes the approval threshold — it is read from Config client-side;
+//   - the served guide describes chain B v3 (אולגה approves everything) and mentions no amount threshold;
 //   - the מדריך nav link is present on the dashboard page (static markup) and in the shim's role nav for
 //     both login-roster roles (field_ops, ops_manager).
 process.env.APPS_SCRIPT_EXEC_URL = 'https://example.invalid/exec';
@@ -79,12 +79,15 @@ test('/help with a valid token → 200 with the guide content (both login-roster
   }
 });
 
-test('the served guide never hardcodes the approval threshold — it reads Config', async () => {
+test('the served guide has NO amount threshold and no field_ops / ceo approver — אולגה approves everything (chain B v3)', async () => {
   const r = await get('/help', { Authorization: `Bearer ${tokenFor('field_ops')}` });
   const body = await r.text();
-  assert.ok(!body.includes('3000'), 'threshold amount must not be hardcoded in the guide');
-  assert.ok(!body.includes('3,000'), 'threshold amount must not be hardcoded in the guide');
-  assert.ok(body.includes('approval_threshold'), 'the guide must read the threshold from Config');
+  assert.ok(!body.includes('3000'), 'no threshold amount in the guide');
+  assert.ok(!body.includes('3,000'), 'no threshold amount in the guide');
+  assert.ok(!body.includes('approval_threshold'), 'the guide no longer reads the (legacy) threshold');
+  assert.ok(!/סף האישור|js-threshold/.test(body), 'no threshold row / placeholder remains');
+  assert.ok(!/סנדרה|מנכ"ל|מנכ״ל/.test(body), 'no ceo / Sandra approver in the guide');
+  assert.ok(/המאשרת היחידה/.test(body), 'אולגה is documented as THE approver');
 });
 
 test('the dashboard page carries the מדריך nav link', async () => {
@@ -96,7 +99,7 @@ test('the dashboard page carries the מדריך nav link', async () => {
 
 test('the shim role-nav lists /help for the login roster (field_ops + ops_manager), not for others', () => {
   const nav = navByRole();
-  for (const role of ['field_ops', 'ops_manager', 'ceo']) {
+  for (const role of ['field_ops', 'ops_manager']) {
     const link = (nav[role] || []).find((l) => l.href === '/help');
     assert.ok(link, `${role} must have the /help nav link`);
     assert.equal(link.label, 'מדריך');

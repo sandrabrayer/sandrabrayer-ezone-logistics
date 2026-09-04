@@ -4,36 +4,32 @@
 // directly. The chain-B routing block is mirrored VERBATIM (logic-for-logic) inside
 // apps-script/Code.gs; a guard test (test/mirror-drift.test.js) asserts the two copies stay in sync.
 //
-// Chain B v2 (increment 31) — routing by AMOUNT only. Evaluate in order and return the ROLE:
-//   1. urgency = חירום            → 'auto' (auto-approved, emergency bypass, no human approver)
-//   2. cost > approval_threshold  → 'ops_manager'
-//   3. otherwise (incl. blank/unknown cost) → 'field_ops'
-// The increment-30 pre-opening→ceo and ceo_ceiling branches are REMOVED: pre-opening houses route
-// by amount exactly like open houses. The ceo role constant and the ceo_ceiling Config key are kept
-// but are DORMANT — nothing in routing reads them. Deferral stays field_ops at any amount; on
-// wake-up the amount is re-checked through rules 1–3.
+// Chain B v3 (PR 2) — אולגה approves everything. Evaluate in order and return the ROLE:
+//   1. urgency = חירום → 'auto' (auto-approved, emergency bypass, no human approver)
+//   2. everything else → 'ops_manager'
+// No amount tier, no house-status branch, no ceo: the field_ops approval tier (≤ approval_threshold)
+// and the ceo role are REMOVED. `approval_threshold` stays in Config as a LEGACY key that nothing in
+// routing reads. A deferral wake-up re-routes through the same two rules.
 
 // === MIRROR:approval START ===
 var URGENCY_EMERGENCY = 'חירום';
 
-var APPROVER = { AUTO: 'auto', FIELD_OPS: 'field_ops', OPS_MANAGER: 'ops_manager' };
+var APPROVER = { AUTO: 'auto', OPS_MANAGER: 'ops_manager' };
 
-function costIsBlank(cost) {
-  return cost === '' || cost === null || cost === undefined;
-}
-
-// Which ROLE must approve this request. Returns 'auto' for the emergency bypass. Routes by amount
-// only — house status is NOT consulted (chain B v2).
-function whoApproves(cost, urgency, approvalThreshold) {
+// Which ROLE must approve this request. Chain B v3 (PR 2): two rules, no amount, no house status.
+//   1. urgency = חירום → 'auto' (auto-approved, emergency bypass, no human approver)
+//   2. everything else → 'ops_manager' (אולגה approves everything)
+// approval_threshold is NOT consulted (legacy Config key). A deferral wake-up re-routes through the
+// same two rules. The cost argument is kept for call-site stability but is not read.
+function whoApproves(cost, urgency) {
   if (urgency === URGENCY_EMERGENCY) return APPROVER.AUTO;
-  if (!costIsBlank(cost) && Number(cost) > Number(approvalThreshold)) return APPROVER.OPS_MANAGER;
-  return APPROVER.FIELD_OPS;
+  return APPROVER.OPS_MANAGER;
 }
 
-// Derived approval_required flag — TRUE when the request escalates above the default field_ops
-// approver (i.e. routes to ops_manager). Emergency (auto) and field_ops are FALSE.
-function approvalRequired(cost, urgency, approvalThreshold) {
-  return whoApproves(cost, urgency, approvalThreshold) === APPROVER.OPS_MANAGER;
+// Derived approval_required flag — TRUE when a human (ops_manager) must approve; FALSE only for the
+// emergency auto path.
+function approvalRequired(cost, urgency) {
+  return whoApproves(cost, urgency) === APPROVER.OPS_MANAGER;
 }
 // === MIRROR:approval END ===
 
@@ -66,5 +62,5 @@ function canTransition(fromStatus, toStatus) {
 }
 
 export {
-  APPROVER, URGENCY_EMERGENCY, costIsBlank, whoApproves, approvalRequired, canTransition,
+  APPROVER, URGENCY_EMERGENCY, whoApproves, approvalRequired, canTransition,
 };

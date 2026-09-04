@@ -1,4 +1,4 @@
-// management.js — pure aggregation for the /management screen (ops_manager + ceo), built STRICTLY from
+// management.js — pure aggregation for the /management screen (ops_manager), built STRICTLY from
 // data this repo owns. It reads nothing from another app.
 //
 // PR B simplification (Olga's screen): the screen was trimmed to what has a real, owned data source —

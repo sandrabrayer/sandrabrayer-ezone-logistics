@@ -7,9 +7,10 @@ import {
 } from '../src/edit.js';
 import { STATUSES, CATEGORY } from '../src/schema.js';
 
-test('only Roy or Sandra can delete', () => {
+test('legacy DELETERS: Sandra removed (PR 2) — the server gates delete by role, this list is reference only', () => {
   assert.equal(canDelete('רועי'), true);
-  assert.equal(canDelete('sandra'), true);
+  assert.equal(canDelete('sandra'), false);
+  assert.equal(canDelete('סנדרה'), false);
   assert.equal(canDelete('רמי'), false);
   assert.equal(canDelete('צחי'), false);
 });
@@ -42,9 +43,9 @@ test('category is an editable field, so a correction is possible via the edit mo
   assert.deepEqual(CATEGORIES, [CATEGORY.PURCHASE, CATEGORY.REPAIR, CATEGORY.REPLACEMENT]);
 });
 
-test('only management (ops_manager / ceo) may change a category', () => {
+test('only management (ops_manager) may change a category — ceo is gone', () => {
   assert.equal(canEditCategory('ops_manager'), true);
-  assert.equal(canEditCategory('ceo'), true);
+  assert.equal(canEditCategory('ceo'), false);
   // field_ops can edit other fields pre-approval but NOT correct the category
   assert.equal(canEditCategory('field_ops'), false);
   assert.equal(canEditCategory('coordinator'), false);
@@ -71,5 +72,5 @@ test('a category change is logged as a category change, from → to + actor', ()
   assert.match(note, /תיקון/);
   assert.match(note, /אולגה/);
   // a missing side renders as an em-dash, never a blank or "undefined"
-  assert.match(categoryChangeNote('', CATEGORY.REPAIR, 'סנדרה'), /— → תיקון/);
+  assert.match(categoryChangeNote('', CATEGORY.REPAIR, 'אולגה'), /— → תיקון/);
 });

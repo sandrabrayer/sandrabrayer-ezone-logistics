@@ -1,13 +1,13 @@
 // test/dashboard-approve-gate.test.js — renders the REAL dashboard.html inline scripts in a DOM sandbox
 // (adapted from login-page.test.js) with a mocked pageData response, and asserts the UI half of the
-// approval-threshold fix:
+// approval gate (chain B v3 — אולגה approves everything):
 //   1. NO error banner on load — the dashboard's only load-time call is the pageData GET; nothing 403-able
 //      fires, so #msg stays empty (the production "הפעולה נכשלה — Forbidden…" banner came from CLICKING
-//      approve on an over-threshold request, which is now prevented, not from load).
-//   2. field_ops sees a DISABLED "ממתין לאישור אולגה" on an over-threshold request (routed to ops_manager)
-//      and a real אישור button on a ≤threshold one — no clickable-then-403.
-//   3. an exec (ceo) sees a real אישור on BOTH (the gate is role-specific), and the delete button only shows
-//      for execs (field_ops never sees מחיקה).
+//      approve on a request the role could not approve, which is now prevented, not from load).
+//   2. field_ops sees a DISABLED "ממתין לאישור אולגה" on EVERY non-emergency request (no field_ops tier)
+//      — no clickable-then-403.
+//   3. ops_manager sees a real אישור on any amount, and the delete button only shows for the exec role
+//      (field_ops never sees מחיקה); a stale ceo token gets nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -86,24 +86,28 @@ test('no error banner on dashboard load (the only load-time call is the pageData
   assert.ok(!/\berr\b/.test(ctx.msg.className), 'no error styling on the banner');
 });
 
-test('field_ops: over-threshold request shows a DISABLED "ממתין לאישור אולגה"; ≤threshold shows real אישור', async () => {
-  const ctx = renderDashboard('field_ops', [req('R-LOW', 500), req('R-HIGH', 9000)]);
+test('field_ops: EVERY non-emergency request shows a DISABLED "ממתין לאישור אולגה" — small and large alike (no field_ops tier)', async () => {
+  const ctx = renderDashboard('field_ops', [req('R-LOW', 500), req('R-HIGH', 9000), { ...req('R-E', 9000), urgency: 'חירום' }]);
   await flush();
   const html = ctx.board.innerHTML;
-  assert.ok(/ממתין לאישור אולגה/.test(html), 'over-threshold shows the pending-Olga label');
-  assert.ok(/disabled[^>]*ממתין לאישור אולגה|ממתין לאישור אולגה/.test(html) && /disabled/.test(html), 'the label button is disabled');
-  assert.ok(/doApprove\('R-LOW'/.test(html), 'the ≤threshold request keeps a real אישור button');
-  assert.ok(!/doApprove\('R-HIGH'/.test(html), 'the over-threshold request has NO clickable approve');
-  assert.ok(!/doApprove\('R-HIGH'|doReject\('R-HIGH'/.test(html), 'no approve/reject 403-bait for the over-threshold request');
+  assert.ok(/ממתין לאישור אולגה/.test(html), 'the pending-Olga label is shown');
+  assert.ok(/disabled/.test(html), 'the label button is disabled');
+  assert.ok(!/doApprove\('R-LOW'/.test(html) && !/doReject\('R-LOW'/.test(html), 'a SMALL request has NO clickable approve/reject for field_ops (tier removed)');
+  assert.ok(!/doApprove\('R-HIGH'/.test(html) && !/doReject\('R-HIGH'/.test(html), 'a large request has NO clickable approve/reject for field_ops');
+  assert.ok(/doApprove\('R-E'/.test(html), 'an emergency (auto) request keeps a real button for a dispatch-capable role');
 });
 
-test('exec (ceo) may approve BOTH tiers, and only execs see the delete button', async () => {
-  const ceo = renderDashboard('ceo', [req('R-LOW', 500), req('R-HIGH', 9000)]);
+test('ops_manager approves ANY amount; only the exec role sees the delete button; a stale ceo token gets nothing', async () => {
+  const olga = renderDashboard('ops_manager', [req('R-LOW', 500), req('R-HIGH', 9000)]);
   await flush();
-  const h = ceo.board.innerHTML;
-  assert.ok(/doApprove\('R-LOW'/.test(h) && /doApprove\('R-HIGH'/.test(h), 'ceo approves any amount');
-  assert.ok(!/ממתין לאישור אולגה/.test(h), 'no pending-Olga label for an exec');
+  const h = olga.board.innerHTML;
+  assert.ok(/doApprove\('R-LOW'/.test(h) && /doApprove\('R-HIGH'/.test(h), 'ops_manager approves any amount');
+  assert.ok(!/ממתין לאישור אולגה/.test(h), 'no pending-Olga label for the approver');
   assert.ok(/doDelete\('R-HIGH', this\)/.test(h), 'exec sees the delete button');
+
+  const ceo = renderDashboard('ceo', [req('R-LOW', 500)]);
+  await flush();
+  assert.ok(!/doApprove\(/.test(ceo.board.innerHTML) && !/doDelete\(/.test(ceo.board.innerHTML), 'ceo is not a role any more: no approve, no delete');
 
   const roy = renderDashboard('field_ops', [req('R-LOW', 500)]);
   await flush();

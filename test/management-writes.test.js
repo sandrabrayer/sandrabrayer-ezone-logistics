@@ -1,7 +1,7 @@
 // test/management-writes.test.js — the write-action role gates at the Node gateway after the hub redesign.
 // Real gateway + a fake Apps Script upstream that records forwards (mirrors staff-tiers.test.js). Tiers:
-//   • EXEC-ONLY (ops_manager + ceo): deleteCompliance, deleteTraining.
-//   • MANAGER-TIER (field_ops + ops_manager + ceo): addReadinessItem / updateReadinessItem / deleteReadinessItem.
+//   • EXEC-ONLY (ops_manager): deleteCompliance, deleteTraining.
+//   • MANAGER-TIER (field_ops + ops_manager): addReadinessItem / updateReadinessItem / deleteReadinessItem.
 //   • LEADS + managers: updatePreventiveItem (maintenance may write; coordinator may not).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
