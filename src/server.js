@@ -229,6 +229,9 @@ function buildClientShim() {
     if(document.body)mount();else document.addEventListener('DOMContentLoaded',mount);
   });}
   function ensureAuth(){if(TOKEN)return Promise.resolve();if(!authPromise)authPromise=doLogin();return authPromise;}
+  // The '/' landing forwards to /dashboard once a session exists. It used to fire a throw-away houses read
+  // just to open the overlay; exposing ensureAuth lets it do that with ZERO upstream calls (perf round-4).
+  window.__ezoneEnsureAuth=ensureAuth;
   // /help is the one HTML route the server gates on the session token (401 + loader shell without it).
   // The shell's loader fetches '/help' through this wrapper, so the Bearer token is attached (after the
   // login overlay when no session is stored) and the full guide replaces the shell. Same 401-retry as
@@ -248,8 +251,9 @@ function buildClientShim() {
       var headers=Object.assign({},(init&&init.headers)||{});headers['Authorization']='Bearer '+TOKEN;
       var ni=Object.assign({},init,{headers:headers});
       var target;
-      if(method==='POST'){target='/api/action';}
-      else{var qs=url.indexOf('?')>=0?url.slice(url.indexOf('?')):'';target='/api/data'+qs;}
+      var qs=url.indexOf('?')>=0?url.slice(url.indexOf('?')):'';
+      if(method==='POST'){target='/api/action'+qs;}
+      else{target='/api/data'+qs;}
       return origFetch(target,ni).then(function(r){
         if(r.status===401){TOKEN=null;authPromise=null;clearSession();return ensureAuth().then(function(){headers['Authorization']='Bearer '+TOKEN;return origFetch(target,Object.assign({},init,{headers:headers}));});}
         return r;
@@ -313,9 +317,9 @@ function notFound(res) {
   res.end('Not found');
 }
 
-function sendJson(res, status, obj) {
+function sendJson(res, status, obj, headers) {
   const body = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.writeHead(status, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, headers || {}));
   res.end(body);
 }
 
@@ -403,65 +407,141 @@ async function appsScriptCommit() {
 }
 function _resetVersionCache() { _asVersion = { at: 0, commit: null }; } // test hook
 
-// ---- Node micro-cache for STABLE reference reads (perf round-2) ----
-// houses/config/technicians change rarely and are fetched on nearly every page load. Cache them in
-// process memory (~120 s TTL) so tab switches skip the Node→Apps Script hop (one 302 + Apps Script
-// cold-start each). NEVER cache users (auth roster, must stay live per the #60 fix) or requests (change
-// constantly — write→read freshness). A hand edit to Houses/Config propagates within the TTL. (Node's
-// built-in fetch/undici already keeps Node→Apps Script connections alive by default, so no Agent change.)
-const NODE_CACHEABLE = new Set(['houses', 'config', 'technicians']);
-const NODE_CACHE_TTL_MS = 120000;
-// Dynamic reads (perf round-3): the dashboard/workorders HOT sheets that change on writes. Measured, the
-// old design fetched these on EVERY tab switch — one blocking Apps Script round-trip (302 + cold start,
-// ~1–3s live) per page. They get a SHORT TTL so a burst of tab switches reuses one read, and — unlike the
-// stable sheets — the cache is INVALIDATED on every write (handleAction), so the reload a write triggers is
-// always fresh. Cross-instance/other-user staleness is bounded to the short TTL. NEVER cache `users` (auth
-// roster / holds pin_hash) — it is not in either set. The per-role scope filter still runs on a cache HIT
-// (see handleData/handlePageData), so a cached raw `requests` list is never returned unscoped to tier B.
-const DYNAMIC_CACHEABLE = new Set(['requests', 'findings', 'inspections']);
-const DYNAMIC_CACHE_TTL_MS = 8000;
-const nodeCache = new Map(); // action -> { value, exp }
+// ---- Node read cache (perf round-4 — the ezone-outpatient server.js pattern) ----
+// EVERY Apps Script read action except `users` is cached in process memory:
+//   - STABLE reference sheets (houses / config / technicians): 120 s TTL — hand-edited, never written by a
+//     request handler, so a write never invalidates them (a hand edit propagates within the TTL).
+//   - every other read (requests, findings, inspections, inventory*, checklist, readiness, preventiveDaily,
+//     trainings, events, …): 60 s TTL, and INVALIDATED on ANY write (handleAction) so the reload a write
+//     triggers is always fresh.
+//   - STALE FALLBACK: an entry is kept for up to 10 min past its TTL; when the upstream fails (network error,
+//     non-2xx, non-JSON) the stale copy is served with `X-Cache: STALE` instead of a 502.
+//   - `?fresh=1` bypasses the cache read (the fresh result still repopulates it).
+//   - every cached response carries `X-Cache: HIT | MISS | STALE`.
+//   - IN-FLIGHT DEDUPE: concurrent misses for the same action+params share ONE upstream call.
+// NEVER cached: `users` (auth roster, may carry pin_hash), `version` (own 60 s cache), and writes.
+// The per-role scope filter still runs on every HIT (see handleData/handlePageData), so a cached raw
+// `requests` / `preventiveDaily` list is never returned unscoped to tier B.
+const STABLE_ACTIONS = new Set(['houses', 'config', 'technicians']);
+const STABLE_TTL_MS = 120000;
+const READ_TTL_MS = 60000;
+const STALE_FALLBACK_MS = 10 * 60 * 1000;
+const NEVER_CACHE = new Set(['users', 'version', 'bundle', 'pageData']);
+const nodeCache = new Map(); // key -> { value, at, ttl }
+const inflight = new Map();  // key -> Promise (in-flight upstream fetch)
 
 function cacheTtl(action) {
-  if (NODE_CACHEABLE.has(action)) return NODE_CACHE_TTL_MS;
-  if (DYNAMIC_CACHEABLE.has(action)) return DYNAMIC_CACHE_TTL_MS;
-  return 0; // not cacheable (users/etc.)
+  if (NEVER_CACHE.has(action) || !action) return 0;
+  return STABLE_ACTIONS.has(action) ? STABLE_TTL_MS : READ_TTL_MS;
 }
 function isCacheable(action) { return cacheTtl(action) > 0; }
 
-function nodeCacheGet(action) {
-  const e = nodeCache.get(action);
-  if (e && e.exp > Date.now()) return e.value;
-  if (e) nodeCache.delete(action);
+// A cache key = action + the forwarded query params (sorted), so `requests` and `requests?house=x` never
+// collide. Plain reads (pageData / bundle members) use the bare action.
+function cacheKey(action, params) {
+  if (!params) return action;
+  const parts = Object.keys(params).sort().map((k) => `${k}=${params[k]}`);
+  return parts.length ? `${action}?${parts.join('&')}` : action;
+}
+
+// Returns { value, fresh } for a usable entry (fresh within TTL, or stale-but-usable within the fallback
+// window), or null. Expired-beyond-fallback entries are evicted.
+function cacheLookup(key) {
+  const e = nodeCache.get(key);
+  if (!e) return null;
+  const age = Date.now() - e.at;
+  if (age < e.ttl) return { value: e.value, fresh: true };
+  if (age < STALE_FALLBACK_MS) return { value: e.value, fresh: false };
+  nodeCache.delete(key);
   return null;
 }
-function nodeCachePut(action, value) {
+function nodeCacheGet(key) { const h = cacheLookup(key); return h && h.fresh ? h.value : null; }  // fresh only
+function nodeCacheStale(key) { const h = cacheLookup(key); return h ? h.value : null; }             // fresh OR stale
+function nodeCachePut(action, value, params) {
   const ttl = cacheTtl(action);
-  if (!ttl) return; // hard guard: never users/etc.
-  nodeCache.set(action, { value, exp: Date.now() + ttl });
+  if (!ttl) return; // hard guard: never users / version
+  nodeCache.set(cacheKey(action, params), { value, at: Date.now(), ttl });
 }
-// Drop the short-TTL dynamic reads so the next read reflects a just-committed write immediately. The
-// stable reference sheets (houses/config/technicians) are untouched — a write never changes them.
+// Drop EVERY non-stable entry (all reads that a write can change + the /management cache). The stable
+// reference sheets (houses/config/technicians) are untouched — a write never changes them.
 function invalidateDynamicCache() {
-  for (const a of DYNAMIC_CACHEABLE) nodeCache.delete(a);
+  for (const key of [...nodeCache.keys()]) {
+    const action = key.split('?')[0];
+    if (!STABLE_ACTIONS.has(action)) nodeCache.delete(key);
+  }
+  mgmtCache.clear();
 }
-function _resetNodeCache() { nodeCache.clear(); }
+function _resetNodeCache() { nodeCache.clear(); mgmtCache.clear(); inflight.clear(); }
+// Test hook: age every cache entry by `ms` (so TTL / stale-window behavior is testable without sleeping).
+function _cacheBackdate(ms) {
+  for (const e of nodeCache.values()) e.at -= ms;
+  for (const e of mgmtCache.values()) e.at -= ms;
+}
+
+// Share ONE in-flight upstream call between concurrent callers of the same key.
+function dedupe(key, fn) {
+  const running = inflight.get(key);
+  if (running) return running;
+  const p = Promise.resolve().then(fn).finally(() => { inflight.delete(key); });
+  inflight.set(key, p);
+  return p;
+}
+
+// Read ONE action from upstream (deduped), populating the cache on success. Returns the parsed upstream
+// JSON payload, or null on failure (network / non-2xx / non-JSON) — the caller decides about stale.
+async function fetchReadUpstream(action, params) {
+  const key = cacheKey(action, params);
+  return dedupe(key, async () => {
+    const qs = new URLSearchParams({ action });
+    if (params) for (const [k, v] of Object.entries(params)) qs.set(k, v);
+    try {
+      const upstream = await fetch(`${EXEC_URL}?${qs.toString()}`, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
+      if (upstream.status >= 300) return null;
+      const payload = await upstream.json();
+      if (payload && payload.ok && 'data' in payload) nodeCachePut(action, payload.data, params);
+      return payload;
+    } catch (e) {
+      return null;
+    }
+  });
+}
+
+// ---- /management POST cache (per period) ----
+// managementData is a POST (the token must be verified for its role gate), so it never went through the
+// read cache: every hub open, every month change and every checkbox tick re-ran ~8 sheet reads in Apps
+// Script. It is cached here per period (60 s, 10-min stale fallback, `?fresh=1` / body.fresh bypass) and
+// cleared by every write, exactly like the read cache. Only a canManage session reaches it (gated before).
+const mgmtCache = new Map(); // period -> { status, type, text, at, ttl }
+const MGMT_TTL_MS = READ_TTL_MS;
+function mgmtLookup(period) {
+  const e = mgmtCache.get(period);
+  if (!e) return null;
+  const age = Date.now() - e.at;
+  if (age < e.ttl) return { entry: e, fresh: true };
+  if (age < STALE_FALLBACK_MS) return { entry: e, fresh: false };
+  mgmtCache.delete(period);
+  return null;
+}
 
 // Fetch several read-sheets from Apps Script in ONE round-trip via the `bundle` action. Returns a map
 // { action: rows[] } or null when bundle is unavailable (unknown action / upstream error). null triggers
 // the individual-read FALLBACK in handlePageData — see fetchActionsIndividually.
 async function fetchBundle(actions) {
   if (!EXEC_URL || !actions.length) return {};
-  const qs = new URLSearchParams({ action: 'bundle', sheets: actions.join(',') });
-  try {
-    const r = await fetch(`${EXEC_URL}?${qs.toString()}`, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
-    const j = await r.json();
-    // A bundle-aware Apps Script returns { ok:true, data:{…} }. An OLD deploy (deploy-order window) that
-    // doesn't know `bundle` returns { ok:false, error:'Unknown or missing action' } → null → fall back.
-    return (j && j.ok && j.data && typeof j.data === 'object') ? j.data : null;
-  } catch (e) {
-    return null;
-  }
+  const sheets = actions.slice().sort().join(',');
+  return dedupe(`bundle|${sheets}`, async () => {
+    const qs = new URLSearchParams({ action: 'bundle', sheets });
+    try {
+      const r = await fetch(`${EXEC_URL}?${qs.toString()}`, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
+      if (r.status >= 300) return null;
+      const j = await r.json();
+      // A bundle-aware Apps Script returns { ok:true, data:{…} }. An OLD deploy (deploy-order window) that
+      // doesn't know `bundle` returns { ok:false, error:'Unknown or missing action' } → null → fall back.
+      return (j && j.ok && j.data && typeof j.data === 'object') ? j.data : null;
+    } catch (e) {
+      return null;
+    }
+  });
 }
 
 // FALLBACK for a mixed-version deploy window: when the `bundle` action is unavailable (new Node reached an
@@ -470,8 +550,8 @@ async function fetchBundle(actions) {
 // is why a deploy-order skew can no longer take the app down — pageData degrades to the pre-aggregation
 // behavior instead of 502ing. (The login path never comes here; it reads the roster directly.)
 async function fetchActionsIndividually(actions) {
-  const results = await Promise.all(actions.map((a) => fetchAppsScriptData(a)));
-  if (results.every((r) => r === null)) return null; // upstream truly down → let caller 502
+  const results = await Promise.all(actions.map((a) => fetchReadUpstream(a).then((p) => (p && p.ok && 'data' in p) ? p.data : null)));
+  if (results.every((r) => r === null)) return null; // upstream truly down → let caller decide (stale / 502)
   const out = {};
   actions.forEach((a, i) => { out[a] = results[i] == null ? (a === 'config' ? {} : []) : results[i]; });
   return out;
@@ -488,12 +568,26 @@ const PAGE_ACTIONS = {
   inspection: ['houses', 'checklist'],
   events: ['config', 'houses'],
 };
+// Role-conditional extras folded into the SAME bundle call (perf round-4): the workorders field-entry tabs
+// used to be 1–2 extra sequential /exec reads after pageData. Managers get the two readiness checklists;
+// a maintenance lead gets the daily preventive checklist (scope-filtered below, exactly like requests).
+// Each extra is still gated by canRead for the role, so the aggregate is never broader than the role.
+const PAGE_EXTRAS = {
+  workorders: (role) => (isManagerRole(role) ? ['openingChecklist', 'emergencyReadiness']
+    : (role === ROLE.MAINTENANCE ? ['preventiveDaily'] : [])),
+};
+function pageActionsFor(page, role) {
+  const base = PAGE_ACTIONS[page];
+  if (!base) return null;
+  const extra = PAGE_EXTRAS[page] ? PAGE_EXTRAS[page](role) : [];
+  return base.concat(extra.filter((a) => base.indexOf(a) === -1));
+}
 
 // One aggregated read for a page: Bearer-gated, role-gated per action (identical to handleData), stable
 // sheets served from the Node micro-cache, the rest fetched in ONE bundle call, requests scope-filtered
 // for tier B exactly as the individual `requests` read. Never returns users.
-async function handlePageData(res, actor, page) {
-  const actions = PAGE_ACTIONS[page];
+async function handlePageData(res, actor, page, fresh) {
+  const actions = pageActionsFor(page, actor.role);
   if (!actions) return sendJson(res, 400, { ok: false, error: 'unknown page' });
   // Same read gate as the individual endpoints — a role that may not read one of the page's actions is
   // refused the whole aggregate (matches: it could not load that page's data individually either).
@@ -503,9 +597,10 @@ async function handlePageData(res, actor, page) {
   const data = {};
   const toFetch = [];
   for (const a of actions) {
-    const cached = isCacheable(a) ? nodeCacheGet(a) : null;
+    const cached = fresh ? null : nodeCacheGet(a);
     if (cached !== null) data[a] = cached; else toFetch.push(a);
   }
+  let xcache = toFetch.length ? 'MISS' : 'HIT';
   // `degraded` is set when this request had to take the individual-read FALLBACK because the live Apps
   // Script did not answer `bundle`. It is surfaced on the 200 response (and warn-logged) so a stale
   // deployment is OBSERVABLE instead of silently making every tab switch N slow round-trips: the
@@ -520,27 +615,51 @@ async function handlePageData(res, actor, page) {
       degraded = true;
       console.warn('[pageData] bundle unavailable — individual-read fallback taken (live Apps Script lacks `bundle`? check clasp CI deploy)');
       bundle = await fetchActionsIndividually(toFetch);
+    } else {
+      // A bundle-aware but OLDER Apps Script silently skips sheet names it does not know (e.g. the readiness
+      // sheets added in round-4). Fetch any missing member individually rather than rendering it empty.
+      const missing = toFetch.filter((a) => !(a in bundle));
+      if (missing.length) {
+        const rest = await fetchActionsIndividually(missing);
+        if (rest) Object.assign(bundle, rest);
+      }
     }
-    if (!bundle) return sendJson(res, 502, { ok: false, error: 'upstream_error' });
-    for (const a of toFetch) {
-      data[a] = Array.isArray(bundle[a]) ? bundle[a] : (bundle[a] || (a === 'config' ? {} : []));
-      nodeCachePut(a, data[a]); // no-op unless a is cacheable
+    if (!bundle) {
+      // Upstream is down. Serve the stale copies if EVERY missing sheet has one (10-min window); else 502.
+      const stale = {};
+      for (const a of toFetch) { const v = nodeCacheStale(a); if (v === null) return sendJson(res, 502, { ok: false, error: 'upstream_error' }); stale[a] = v; }
+      Object.assign(data, stale);
+      xcache = 'STALE';
+    } else {
+      for (const a of toFetch) {
+        data[a] = Array.isArray(bundle[a]) ? bundle[a] : (bundle[a] || (a === 'config' ? {} : []));
+        nodeCachePut(a, data[a]); // no-op unless a is cacheable
+      }
     }
   }
-  // Scope requests for tier B exactly as handleData does (managers get the unfiltered list).
-  if (Array.isArray(data.requests) && !isManagerRole(actor.role)) {
+  // Scope requests / preventiveDaily for tier B exactly as handleData does (managers get the unfiltered list).
+  if (!isManagerRole(actor.role) && (Array.isArray(data.requests) || Array.isArray(data.preventiveDaily))) {
     if (actor.role !== ROLE.COORDINATOR && actor.role !== ROLE.MAINTENANCE) {
       return sendJson(res, 403, { ok: false, error: 'forbidden' });
     }
-    const houses = data.houses || nodeCacheGet('houses') || (await fetchAppsScriptData('houses')) || [];
+    const houses = data.houses || (await housesForScoping());
     const clusterOf = {};
     for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
-    data.requests = data.requests.filter((r) =>
-      houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
+    const inScope = (r) => houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || '');
+    if (Array.isArray(data.requests)) data.requests = data.requests.filter(inScope);
+    if (Array.isArray(data.preventiveDaily)) data.preventiveDaily = data.preventiveDaily.filter(inScope);
   }
   const out = { ok: true, data };
   if (degraded) out.degraded = true; // only present when the fallback was taken — clients may ignore it
-  return sendJson(res, 200, out);
+  return sendJson(res, 200, out, { 'X-Cache': xcache });
+}
+
+// The houses list for tier-B scope filtering: cached (fresh or stale) first, else one live read.
+async function housesForScoping() {
+  const cached = nodeCacheStale('houses');
+  if (cached !== null) return cached;
+  const p = await fetchReadUpstream('houses');
+  return (p && p.ok && Array.isArray(p.data)) ? p.data : [];
 }
 
 // Verify the Bearer token; returns the decoded actor { name, role, scope, ... } and the raw token,
@@ -589,10 +708,12 @@ async function handleData(req, res, url) {
   const action = url.searchParams.get('action') || '';
   const manager = isManagerRole(actor.role);
 
+  const fresh = url.searchParams.get('fresh') === '1' || url.searchParams.get('fresh') === 'true';
+
   // Aggregated per-page read (perf round-2): ONE call for a page's whole dataset. Role-gated + scoped
   // identically to the individual reads (inside handlePageData).
   if (action === 'pageData') {
-    return handlePageData(res, actor, url.searchParams.get('page') || '');
+    return handlePageData(res, actor, url.searchParams.get('page') || '', fresh);
   }
 
   // Role-based read gate (src/access.js). A role that may not read this action gets 403 — no upstream call.
@@ -600,31 +721,31 @@ async function handleData(req, res, url) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
 
-  // Node micro-cache: stable reference sheets (120s) + hot dynamic sheets (short TTL, write-invalidated) are
-  // served from process memory so tab switches skip the Apps Script hop. A cache HIT falls THROUGH to the
-  // per-action post-processing below (scope filter / secret hygiene) — so a cached raw `requests` list is
-  // never returned unscoped to tier B. `users` is in neither set and always reads live.
+  // Forwarded query params (allow-listed) — part of the cache key so parameterised reads never collide.
+  const params = {};
+  for (const [k, v] of url.searchParams.entries()) {
+    if (ALLOWED_QUERY_KEYS.has(k) && k !== 'action') params[k] = v;
+  }
+  const key = cacheKey(action, params);
+
+  // Node read cache (perf round-4): HIT within the TTL (unless ?fresh=1); MISS → one deduped upstream
+  // call; upstream failure → STALE copy (10-min window) instead of a 502. A HIT falls THROUGH to the
+  // per-action post-processing below (scope filter / secret hygiene) — so a cached raw list is never
+  // returned unscoped to tier B. `users` is never cached and always reads live.
   let payload = null;
-  if (isCacheable(action)) {
-    const hit = nodeCacheGet(action);
-    if (hit !== null) payload = { ok: true, data: hit };
+  let xcache = 'MISS';
+  if (isCacheable(action) && !fresh) {
+    const hit = nodeCacheGet(key);
+    if (hit !== null) { payload = { ok: true, data: hit }; xcache = 'HIT'; }
   }
 
   if (!payload) {
-    const qs = new URLSearchParams();
-    for (const [k, v] of url.searchParams.entries()) {
-      if (ALLOWED_QUERY_KEYS.has(k)) qs.set(k, v);
-    }
-    const target = `${EXEC_URL}${qs.toString() ? `?${qs.toString()}` : ''}`;
-    try {
-      const upstream = await fetch(target, { method: 'GET', redirect: 'follow', headers: { Accept: 'application/json' } });
-      payload = await upstream.json();
-    } catch (err) {
-      return sendJson(res, 502, { ok: false, error: 'upstream_error' });
-    }
-    // Populate the cache (stable or dynamic) on a successful upstream response.
-    if (isCacheable(action) && payload && payload.ok && 'data' in payload) {
-      nodeCachePut(action, payload.data);
+    payload = await fetchReadUpstream(action, params);
+    if (!payload) {
+      const stale = isCacheable(action) ? nodeCacheStale(key) : null;
+      if (stale === null) return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+      payload = { ok: true, data: stale };
+      xcache = 'STALE';
     }
   }
 
@@ -642,7 +763,7 @@ async function handleData(req, res, url) {
       if (actor.role !== ROLE.COORDINATOR && actor.role !== ROLE.MAINTENANCE) {
         return sendJson(res, 403, { ok: false, error: 'forbidden' });
       }
-      const houses = (await fetchAppsScriptData('houses')) || [];
+      const houses = await housesForScoping();
       const clusterOf = {};
       for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
       payload.data = payload.data.filter((r) =>
@@ -650,14 +771,14 @@ async function handleData(req, res, url) {
     } else if (action === 'preventiveDaily' && !manager) {
       // The daily preventive checklist is scoped for a maintenance lead exactly like requests: only rows for
       // houses in their cluster scope. (canRead already refused every non-maintenance non-manager role.)
-      const houses = (await fetchAppsScriptData('houses')) || [];
+      const houses = await housesForScoping();
       const clusterOf = {};
       for (const h of houses) clusterOf[String(h.name)] = String(h.cluster || '');
       payload.data = payload.data.filter((r) =>
         houseInScope(actor.role, actor.scope, r.house, clusterOf[String(r.house)] || ''));
     }
   }
-  return sendJson(res, 200, payload);
+  return sendJson(res, 200, payload, isCacheable(action) ? { 'X-Cache': xcache } : undefined);
 }
 
 // Exec-only writes (ops_manager), beyond managementData/updateEvent: the /management readiness
@@ -669,7 +790,7 @@ const MANAGE_ONLY_ACTIONS = new Set(['deleteCompliance', 'deleteTraining']);
 
 // Write proxy — Bearer-gated. The actor is taken from the verified token (never the client body);
 // the token is forwarded so Code.gs verifies it independently and enforces the role rules.
-async function handleAction(req, res) {
+async function handleAction(req, res, url) {
   const auth = authFromRequest(req);
   if (!auth) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
   const { actor } = auth;
@@ -716,6 +837,12 @@ async function handleAction(req, res) {
     const gate = await approverGate(payload);
     if (gate) return sendJson(res, gate.status, { ok: false, error: gate.error });
   }
+  // /management is a READ carried by a POST: serve it from the per-period cache (perf round-4).
+  if (body.action === 'managementData') {
+    const fresh = !!(url && (url.searchParams.get('fresh') === '1' || url.searchParams.get('fresh') === 'true'))
+      || body.fresh === true || body.fresh === 1 || body.fresh === '1';
+    return handleManagementRead(res, payload, auth.token, fresh);
+  }
   const upstreamBody = JSON.stringify({ action: body.action, payload, token: auth.token });
   try {
     const upstream = await fetch(EXEC_URL, {
@@ -724,8 +851,10 @@ async function handleAction(req, res) {
       body: upstreamBody,
     });
     const text = await upstream.text();
-    // A write may have changed requests/findings/inspections — drop the short-TTL dynamic cache so the
-    // reload the client fires next reflects the write immediately (post-write freshness on this instance).
+    // ANY write (approve / reject / defer / assign / block / close / create / edit / delete / management
+    // writes …) may have changed a read sheet — drop every non-stable cache entry and the /management cache
+    // so the reload the client fires next reflects the write immediately (post-write freshness on this
+    // instance). Stable reference sheets (houses/config/technicians) are never written by a handler.
     if (upstream.status < 300) invalidateDynamicCache();
     res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json', 'Cache-Control': 'no-store' });
     res.end(text);
@@ -734,13 +863,49 @@ async function handleAction(req, res) {
   }
 }
 
+// managementData through the per-period cache: HIT within 60 s (unless fresh), else ONE deduped upstream
+// POST; upstream failure → STALE copy (10-min window) instead of a 502. The response bytes are cached
+// verbatim (status + content-type + body). Cleared by invalidateDynamicCache on every write.
+async function handleManagementRead(res, payload, token, fresh) {
+  const period = String(payload.period || '');
+  const send = (entry, xcache) => {
+    res.writeHead(entry.status, { 'Content-Type': entry.type, 'Cache-Control': 'no-store', 'X-Cache': xcache });
+    res.end(entry.text);
+  };
+  if (!fresh) {
+    const hit = mgmtLookup(period);
+    if (hit && hit.fresh) return send(hit.entry, 'HIT');
+  }
+  const entry = await dedupe(`mgmt|${period}`, async () => {
+    try {
+      const upstream = await fetch(EXEC_URL, {
+        method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'managementData', payload, token }),
+      });
+      if (upstream.status >= 300) return null;
+      const text = await upstream.text();
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch (e) { return null; }
+      const e = { status: upstream.status, type: upstream.headers.get('content-type') || 'application/json', text, at: Date.now(), ttl: MGMT_TTL_MS };
+      if (parsed && parsed.ok) mgmtCache.set(period, e); // only a successful hub response is cached
+      return e;
+    } catch (err) {
+      return null;
+    }
+  });
+  if (entry) return send(entry, 'MISS');
+  const stale = mgmtLookup(period);
+  if (stale) return send(stale.entry, 'STALE');
+  return sendJson(res, 502, { ok: false, error: 'upstream_error' });
+}
+
 // Emergency (חירום) requests are auto-approved by chain B and need no approver code. Node has no request
 // identity of its own, so a code-less approve/reject looks the target up (short-TTL cache, else one live
 // read) and lets ONLY an emergency through without a code. A request Node cannot see is forwarded and
 // Code.gs — which enforces the same rule against its own sheet — decides. Never throws.
 async function isEmergencyRequest(id) {
   if (!id) return null;
-  const list = nodeCacheGet('requests') || (await fetchAppsScriptData('requests'));
+  const list = nodeCacheStale('requests') || (await fetchAppsScriptData('requests'));
   if (!Array.isArray(list)) return null;
   const r = list.find((x) => x && String(x.id) === String(id));
   if (!r) return null;
@@ -769,7 +934,7 @@ export async function requestHandler(req, res) {
   // ---- API gateway (auth + data proxy) ----
   if (path === '/api/login' && req.method === 'POST') return handleLogin(req, res);
   if (path === '/api/data' && req.method === 'GET') return handleData(req, res, url);
-  if (path === '/api/action' && req.method === 'POST') return handleAction(req, res);
+  if (path === '/api/action' && req.method === 'POST') return handleAction(req, res, url);
   if (path === '/api/health') return sendJson(res, 200, { ok: true, ts: Date.now() });
   // Version truth: the git SHA live on each leg. Non-secret; no auth. node = THIS Railway build
   // (RAILWAY_GIT_COMMIT_SHA); appsScript = the live /exec's action=version (cached ~60s). The footer + the
@@ -887,6 +1052,6 @@ export { HTML_ROUTES as _HTML_ROUTES };
 // Exported so a test can run the shim in a sandbox and exercise the sign-out flow (clear + reload).
 export { CLIENT_SHIM as _CLIENT_SHIM };
 // Exported so tests can reset the Node micro-cache between cases (deterministic cache/TTL assertions).
-export { _resetNodeCache, _resetVersionCache, PAGE_ACTIONS as _PAGE_ACTIONS };
+export { _resetNodeCache, _resetVersionCache, _cacheBackdate, PAGE_ACTIONS as _PAGE_ACTIONS, pageActionsFor as _pageActionsFor };
 // Exported for the single-login tests: the shim builder and the ONE identity every session is issued for.
 export { buildClientShim, SESSION_IDENTITY as _SESSION_IDENTITY, APPROVER_ACTIONS as _APPROVER_ACTIONS };

@@ -105,6 +105,15 @@ The server **refuses to start** if any is missing or empty — set them **before
 Secrets live only in Railway env vars / Apps Script Script Properties — never in the repo. See
 `.env.example`.
 
+## Read cache (perf round-4)
+
+`src/server.js` caches every Apps Script read except `users` in process memory (houses / config /
+technicians 120 s; everything else 60 s), serves a stale copy for up to 10 minutes when Apps Script
+fails (`X-Cache: STALE`, never a 502 while a copy exists), dedupes concurrent misses into one upstream
+call, and clears every dynamic entry on any write. `?fresh=1` bypasses the cache. Responses carry
+`X-Cache: HIT | MISS | STALE`. The `/management` POST is cached per period the same way. Each screen is
+one upstream call cold and zero warm; digest rebuilds run off the write path (see `DEPLOY.md`).
+
 ## Develop
 
 ```bash

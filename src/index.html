@@ -109,13 +109,16 @@
     // unauthenticated visitor to the login overlay, then forward a signed-in manager to the dashboard.
     const EXEC_URL = window.__EXEC_URL__ || '__EXEC_URL__';
 
-    // The injected auth shim wraps fetch(): a /api/exec call triggers the login overlay when there is no
-    // session and resolves only once authenticated. We issue one harmless read purely to drive that flow,
-    // then forward to /dashboard. If the read fails for any reason we still forward — the dashboard's own
-    // shim re-checks auth. A visitor who cannot log in stays on the overlay (the promise never resolves).
+    // The injected auth shim exposes ensureAuth (window.__ezoneEnsureAuth): it resolves at once when a
+    // session is already stored, otherwise it opens the login overlay and resolves after login. That is
+    // all this page needs to forward to /dashboard — NO data read (perf round-4: the old throw-away
+    // `houses` probe cost a Node→Apps Script hop on every cold entry). If the hook is missing (a stale
+    // cached page) we still forward — the dashboard's own shim re-checks auth. A visitor who cannot log in
+    // stays on the overlay (the promise never resolves).
     (function () {
       function toDashboard() { try { location.replace('/dashboard'); } catch (e) {} }
-      fetch(EXEC_URL + '?action=houses').then(toDashboard, toDashboard);
+      var ensure = window.__ezoneEnsureAuth;
+      (typeof ensure === 'function' ? ensure() : Promise.resolve()).then(toDashboard, toDashboard);
     })();
   </script>
   <script>

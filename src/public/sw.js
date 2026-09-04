@@ -32,7 +32,7 @@
 // fix existing wedged clients WITHOUT a manual cache clear: (1) every app document is now network-first
 // (below); (2) install skipWaiting()s UNCONDITIONALLY and activate deletes every non-current cache + claims
 // clients, so the new worker can't be blocked from taking over by a failed shell precache.
-var CACHE = 'ezone-logistics-v4';
+var CACHE = 'ezone-logistics-v5';
 var SHELL = [
   './',
   './index.html',
