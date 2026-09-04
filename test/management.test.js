@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   buildManagementSummary, requestsPanel, recurringDefectsFromRequests, readinessByHouse, isDoneCell,
   RECURRENCE_WINDOW_DAYS, RECURRENCE_MIN,
-  budgetAdherenceByHouse, budgetTotalPercent, readinessPercent, readinessAveragePercent,
+  budgetTotalPercent, readinessPercent, readinessAveragePercent,
   preventiveCompletion, trainingsByHouse,
 } from '../src/management.js';
 import { canManage, ROLE } from '../src/roles.js';
@@ -156,37 +156,18 @@ test('canManage: ONLY ops_manager passes; field_ops, coordinator, maintenance an
   assert.equal(canManage(ROLE.MAINTENANCE), false);
 });
 
-// ── Budget adherence (עמידה בתקציב): actual = completed/closed actual_cost vs Budgets ──
+// ── Budget adherence (עמידה בתקציב): the SERVER rows are rendered as-is (PR 4); only the hub KPI is client-side ──
 
-test('budgetAdherenceByHouse: sums completed/closed actual_cost per house vs budget; % + over', () => {
-  const requests = [
-    { house: 'א', status: 'הושלם', actual_cost: 600 },
-    { house: 'א', status: 'סגור', actual_cost: 600 },
-    { house: 'א', status: 'בביצוע', actual_cost: 999 }, // not completed → ignored
-    { house: 'ב', status: 'הושלם', actual_cost: 300 },
-    { house: 'ג', status: 'הושלם', actual_cost: 100 },  // no budget row → omitted
-  ];
-  const budgetByHouse = { 'א': 1000, 'ב': 1000 };
-  const rows = budgetAdherenceByHouse(requests, budgetByHouse);
-  assert.deepEqual(rows.map(r => [r.house, r.actual, r.percentUsed, r.over]), [
-    ['א', 1200, 120, true],   // worst first
-    ['ב', 300, 30, false],
-  ]);
-  assert.equal(rows.find(r => r.house === 'ב').remaining, 700);
-});
-
-test('budgetAdherenceByHouse: houses with no positive budget are excluded; non-numeric spend ignored', () => {
-  const rows = budgetAdherenceByHouse(
-    [{ house: 'א', status: 'הושלם', actual_cost: '' }, { house: 'א', status: 'הושלם', actual_cost: 'x' }],
-    { 'א': 0, 'ב': 500 });
-  assert.deepEqual(rows.map(r => r.house), ['ב']); // 'א' budget 0 excluded; 'ב' has 0 spend
-  assert.equal(rows[0].actual, 0);
-  assert.equal(rows[0].percentUsed, 0);
-});
-
-test('budgetTotalPercent: aggregate utilization; null when no budget', () => {
+test('budgetTotalPercent: aggregate utilization over houses WITH a budget; a "not defined" house is listed but not summed; null when no budget', () => {
   assert.equal(budgetTotalPercent([{ budget: 1000, actual: 500 }, { budget: 1000, actual: 500 }]), 50);
+  assert.equal(budgetTotalPercent([{ budget: 1000, actual: 500, budgetDefined: true }, { actual: 9999, budgetDefined: false }]), 50, 'no-budget spend has no denominator');
+  assert.equal(budgetTotalPercent([{ actual: 300, budgetDefined: false }]), null);
   assert.equal(budgetTotalPercent([]), null);
+});
+
+test('no client-side spend recomputation exists any more (the server rule is the only one)', async () => {
+  const mod = await import('../src/management.js');
+  assert.equal('budgetAdherenceByHouse' in mod, false);
 });
 
 // ── Readiness percentages ──

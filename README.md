@@ -105,6 +105,21 @@ The server **refuses to start** if any is missing or empty — set them **before
 Secrets live only in Railway env vars / Apps Script Script Properties — never in the repo. See
 `.env.example`.
 
+## Budget adherence (עמידה בתקציב) — data source and the one spend rule
+
+Olga's budget screen (`/management` → עמידה בתקציב) reads **two tabs of this app's own Google Sheet**:
+`Budgets` (the target — one row per house per month: `house` = canonical id from HOUSE-IDS.md, `period` =
+`YYYY-MM`, `amount` in NIS, `notes`) and `Requests` (the spend). **One rule, computed on the server**
+(`src/budget.js` `computeAdherence`, mirrored verbatim in Code.gs under the drift guard; the page renders
+the server rows as-is, no client recomputation): every request that is not rejected (לא מאושר) counts,
+attributed to the **Israel-time month** of `completed_at` when completed, else of `created_at`, with cost
+= `actual_cost`, else `estimated_cost` (the house is marked "כולל אומדנים"). A house with spend but no
+budget row is shown as "לא הוגדר תקציב", never a fake 0. Malformed Budgets rows and unmapped house ids are
+**surfaced as a warning line** on the screen, never silently dropped. The month selector offers only months
+that have a budget row or spend. The "מקור הנתונים" line shows the spreadsheet **title** (never its id),
+the tab names and when the payload was computed; "רענן" re-reads with `?fresh=1`. Financial figures never
+enter any digest.
+
 ## Read cache (perf round-4)
 
 `src/server.js` caches every Apps Script read except `users` in process memory (houses / config /

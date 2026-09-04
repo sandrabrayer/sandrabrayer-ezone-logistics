@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  requestPeriod, requestActual, attributeRequest, parseBudgetRow, computeAdherence, budgetPeriods,
+  BUDGET_TZ, periodInJerusalem, requestPeriod, requestActual, attributeRequest, parseBudgetRow, computeAdherence, budgetPeriods,
 } from '../src/budget.js';
 
 // Hebrew house name → canonical id, and the reverse (HOUSE-IDS.md).
@@ -23,6 +23,66 @@ test('requestPeriod: completed_at month when completed, else created_at month', 
   assert.equal(requestPeriod({ created_at: '2026-01-20T00:00:00Z', completed_at: '' }), '2026-01'); // not completed
   assert.equal(requestPeriod({ created_at: '2026-01-20T00:00:00Z' }), '2026-01');
   assert.equal(requestPeriod({ created_at: 'bad' }), '');
+});
+
+// ---- Israel-time month boundary (PR 4) ----
+
+test('periodInJerusalem: the month flips at ISRAEL midnight, not UTC midnight (both directions, summer + winter)', () => {
+  assert.equal(BUDGET_TZ, 'Asia/Jerusalem');
+  // 31 Aug 22:30 UTC = 1 Sep 01:30 Israel (UTC+3, summer) → September
+  assert.equal(periodInJerusalem('2026-08-31T22:30:00.000Z'), '2026-09');
+  // 31 Aug 20:59 UTC = 31 Aug 23:59 Israel → still August
+  assert.equal(periodInJerusalem('2026-08-31T20:59:00.000Z'), '2026-08');
+  // 31 Dec 22:30 UTC = 1 Jan 00:30 Israel (UTC+2, winter) → January of the next year
+  assert.equal(periodInJerusalem('2026-12-31T22:30:00.000Z'), '2027-01');
+  assert.equal(periodInJerusalem('2026-12-31T21:30:00.000Z'), '2026-12');
+  // a Date object (what Apps Script returns for a date cell) and a date-only string behave the same
+  assert.equal(periodInJerusalem(new Date('2026-08-31T22:30:00.000Z')), '2026-09');
+  assert.equal(periodInJerusalem('2026-08-31'), '2026-08');
+  assert.equal(periodInJerusalem('2026-08-01'), '2026-08');
+  // unparseable → its own YYYY-MM prefix; garbage / blank → ''
+  assert.equal(periodInJerusalem('2026-05-notadate'), '2026-05');
+  assert.equal(periodInJerusalem('bad'), '');
+  assert.equal(periodInJerusalem(''), '');
+  assert.equal(periodInJerusalem(null), '');
+});
+
+test('the spend month follows the Israel boundary: a request completed 22:30 UTC on 31 Aug is SEPTEMBER spend', () => {
+  const r = { house: 'רמות השבים', status: 'הושלם', created_at: '2026-08-20T08:00:00.000Z', completed_at: '2026-08-31T22:30:00.000Z', actual_cost: 100 };
+  assert.equal(requestPeriod(r), '2026-09');
+  assert.equal(attributeRequest(r, NAME2ID).period, '2026-09');
+  assert.equal(computeAdherence([], [r], MAPS, '2026-09').houses[0].actual, 100);
+  assert.equal(computeAdherence([], [r], MAPS, '2026-08').houses.length, 0, 'not counted in August');
+});
+
+// ---- THE spend rule on fixtures (PR 4: one definition, the server's) ----
+
+test('spend rule: completed → month of completion; not completed → month of creation; ANY non-rejected status counts', () => {
+  const rows = [
+    { house: 'רמות השבים', status: 'הושלם', created_at: '2026-02-10T08:00:00Z', completed_at: '2026-03-02T08:00:00Z', actual_cost: 100 }, // → March
+    { house: 'רמות השבים', status: 'בביצוע', created_at: '2026-03-15T08:00:00Z', estimated_cost: 200 },                                    // open → March (created)
+    { house: 'רמות השבים', status: 'מאושר', created_at: '2026-03-20T08:00:00Z', estimated_cost: 50 },                                      // approved, not started → March
+    { house: 'רמות השבים', status: 'דרישה', created_at: '2026-02-28T08:00:00Z', estimated_cost: 999 },                                     // → February
+    { house: 'רמות השבים', status: 'לא מאושר', created_at: '2026-03-01T08:00:00Z', estimated_cost: 5000 },                                 // rejected → never
+  ];
+  const mar = computeAdherence([], rows, MAPS, '2026-03');
+  assert.equal(mar.houses[0].actual, 350, '100 actual + 200 + 50 estimated');
+  assert.equal(mar.houses[0].usedEstimated, true);
+  assert.equal(mar.usedEstimated, true);
+  const feb = computeAdherence([], rows, MAPS, '2026-02');
+  assert.equal(feb.houses[0].actual, 999);
+  assert.equal(computeAdherence([], rows.filter((r) => r.status === 'לא מאושר'), MAPS, '2026-03').houses.length, 0, 'rejected is never spend');
+});
+
+test('spend rule: actual_cost wins over estimated_cost; 0 actual is a real 0; estimate-only flags the house', () => {
+  const rows = [
+    { house: 'רמות השבים', status: 'הושלם', created_at: '2026-03-01T08:00:00Z', completed_at: '2026-03-02T08:00:00Z', actual_cost: 0, estimated_cost: 900 },
+    { house: 'רעננה אשר', status: 'הושלם', created_at: '2026-03-01T08:00:00Z', completed_at: '2026-03-02T08:00:00Z', actual_cost: '', estimated_cost: 400 },
+  ];
+  const r = computeAdherence([], rows, MAPS, '2026-03');
+  const ramot = r.houses.find((h) => h.id === 'ramot-hashavim'), asher = r.houses.find((h) => h.id === 'raanana-asher');
+  assert.equal(ramot.actual, 0); assert.equal(ramot.usedEstimated, false);
+  assert.equal(asher.actual, 400); assert.equal(asher.usedEstimated, true);
 });
 
 test('requestActual: actual_cost preferred; falls back to estimated_cost; flags which', () => {
@@ -101,19 +161,34 @@ test('other months are not mixed in (month bucketing is strict)', () => {
 
 // ---- malformed budget rows: skipped + logged ----
 
-test('malformed budget rows (bad period / non-numeric amount / unknown house) skipped and logged', () => {
+test('malformed budget rows (bad period / non-numeric amount) are counted in `skipped`; an unknown house id is LISTED in unmappedHouses', () => {
   const logs = [];
   const bad = [
-    { house: 'caesarea-ofroni', period: '2026/03', amount: 1000 }, // bad period format
-    { house: 'caesarea-ofroni', period: '2026-03', amount: 'lots' }, // non-numeric
-    { house: 'not-a-house', period: '2026-03', amount: 500 },        // unknown house id
+    { house: 'caesarea-ofroni', period: '2026/03', amount: 1000 }, // bad period format → skipped
+    { house: 'caesarea-ofroni', period: '2026-03', amount: 'lots' }, // non-numeric → skipped
+    { house: 'not-a-house', period: '2026-03', amount: 500 },        // unknown house id → unmapped (a typo, surfaced)
+    { house: 'Ramot Hashavim', period: '2026-03', amount: 500 },     // a Hebrew/English name instead of the id → unmapped
     { house: 'caesarea-ofroni', period: '2026-03', amount: 1000 },   // the one good row
   ];
   const r = computeAdherence(bad, [], MAPS, '2026-03', (m) => logs.push(m));
-  assert.equal(r.skipped, 3);
-  assert.equal(logs.length, 3);
+  assert.equal(r.skipped, 2, 'only the malformed rows');
+  assert.deepEqual(r.unmappedHouses, ['Ramot Hashavim', 'not-a-house'], 'unknown ids listed (sorted, unique)');
+  assert.equal(logs.length, 4);
   assert.equal(r.houses.length, 1);
   assert.equal(r.houses[0].budget, 1000);
+  assert.equal(r.usedEstimated, false);
+});
+
+test('a request whose house name maps to no canonical id is SURFACED in unmappedRequestHouses for that month (never counted, never silent)', () => {
+  const rows = [
+    { house: 'בית חדש', status: 'הושלם', created_at: '2026-03-01T08:00:00Z', completed_at: '2026-03-02T08:00:00Z', actual_cost: 700 },
+    { house: 'בית חדש', status: 'לא מאושר', created_at: '2026-03-01T08:00:00Z', estimated_cost: 1 },  // rejected → not surfaced
+    { house: 'בית אחר', status: 'דרישה', created_at: '2026-02-01T08:00:00Z', estimated_cost: 1 },      // other month → not surfaced here
+  ];
+  const r = computeAdherence([], rows, MAPS, '2026-03');
+  assert.deepEqual(r.unmappedRequestHouses, ['בית חדש']);
+  assert.equal(r.houses.length, 0, 'never counted under a guessed house');
+  assert.deepEqual(computeAdherence([], rows, MAPS, '2026-02').unmappedRequestHouses, ['בית אחר']);
 });
 
 test('parseBudgetRow returns null (and logs) for a malformed row; a valid row parses', () => {
@@ -126,7 +201,13 @@ test('parseBudgetRow returns null (and logs) for a malformed row; a valid row pa
 
 // ---- month selector list ----
 
-test('budgetPeriods: union of budget + request periods and the current month, most-recent first', () => {
-  const periods = budgetPeriods(BUDGETS, REQUESTS, MAPS, '2026-04');
-  assert.deepEqual(periods, ['2026-04', '2026-03', '2026-02']);
+test('budgetPeriods (month selector): ONLY months with a mapped Budgets row or spend, most-recent first — the current month is NOT added by itself', () => {
+  assert.deepEqual(budgetPeriods(BUDGETS, REQUESTS, MAPS), ['2026-03', '2026-02']);
+  assert.deepEqual(budgetPeriods([], [], MAPS), [], 'no data → no months');
+  // an unmapped / malformed budget row does not create a month; a rejected request does not either
+  const junk = [{ house: 'not-a-house', period: '2026-05', amount: 1 }, { house: 'caesarea-ofroni', period: '2026/06', amount: 1 }];
+  const rejected = [{ house: 'רעננה אשר', status: 'לא מאושר', created_at: '2026-07-01T08:00:00Z', estimated_cost: 9 }];
+  assert.deepEqual(budgetPeriods(junk, rejected, MAPS), []);
+  // spend alone (no budget row) does create a month; a legacy 4th argument is ignored
+  assert.deepEqual(budgetPeriods([], REQUESTS, MAPS, '2026-04'), ['2026-03']);
 });

@@ -43,6 +43,14 @@
     /* notRecorded — a deliberately NEUTRAL pill (never green/ok): a missing record must not read as fine. */
     .pill.gray { background: #2a2f38; color: #aeb6c2; }
     .na { color: var(--muted); font-style: italic; }
+    /* budget: data-source line + warnings (PR 4 — auditable numbers) */
+    .src { color: var(--muted); font-size: .84rem; margin: -6px 0 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .src .info { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--card-line); color: var(--accent-2); font-size: .8rem; cursor: help; }
+    .src .refresh { font-family: inherit; font-weight: 700; font-size: .8rem; color: var(--ink); background: #161a20; border: 1px solid var(--card-line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+    .src .refresh:hover { border-color: var(--accent-2); }
+    .warn-line { background: #4a3410; color: var(--amber); border-radius: 10px; padding: 8px 12px; margin: 0 0 12px; font-size: .88rem; }
+    .est { font-size: .74rem; font-weight: 700; color: var(--amber); margin-inline-start: 6px; }
+    .no-budget { color: var(--muted); font-size: .85rem; margin-top: 4px; }
     .loading, .empty { color: var(--muted); }
     .deny { background: var(--card); border: 1px solid var(--red); border-radius: var(--radius); padding: 28px; text-align: center; color: #ff8a80; font-weight: 700; }
     h3 { font-size: 1.05rem; margin: 22px 0 8px; color: var(--accent-2); }
@@ -137,15 +145,18 @@
     }
     const readinessPct = (g) => (g && g.total > 0 ? Math.round(100 * g.doneCount / g.total) : null);
     function readinessAvg(groups) { const p = (groups || []).map(readinessPct).filter((x) => x != null); return p.length ? Math.round(p.reduce((s, x) => s + x, 0) / p.length) : null; }
-    function budgetAdherenceByHouse(requests, budgetByHouse) {
-      const spend = {};
-      (requests || []).forEach((r) => { if (!r || COMPLETED.indexOf(String(r.status)) === -1) return; const a = Number(r.actual_cost); if (!isFinite(a) || a <= 0) return; const h = String(r.house || ''); if (!h) return; spend[h] = (spend[h] || 0) + a; });
-      const out = [];
-      Object.keys(budgetByHouse || {}).forEach((house) => { const budget = Number(budgetByHouse[house]); if (!isFinite(budget) || budget <= 0) return; const actual = spend[house] || 0; out.push({ house, budget, actual, remaining: budget - actual, percentUsed: Math.round(100 * actual / budget), over: actual > budget }); });
-      out.sort((a, b) => b.percentUsed - a.percentUsed || String(a.house).localeCompare(String(b.house), 'he'));
-      return out;
+    // Budget (PR 4): NO client-side spend recomputation. The rows come from the SERVER rule (Code.gs
+    // computeAdherence, mirrored in src/budget.js) and are rendered as-is. The hub KPI sums only houses that
+    // have a budget row (mirror of src/management.js budgetTotalPercent).
+    function budgetTotalPct(rows) { let b = 0, a = 0; (rows || []).forEach((r) => { if (!r || r.budgetDefined === false) return; b += Number(r.budget) || 0; a += Number(r.actual) || 0; }); return b > 0 ? Math.round(100 * a / b) : null; }
+    // "עודכן HH:MM dd/MM" in Israel time from the server's generatedAt (ISO). '' when missing/unparseable.
+    function fmtGenerated(iso) {
+      const d = new Date(iso || ''); if (isNaN(d.getTime())) return '';
+      try {
+        const p = {}; new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', hour12: false }).formatToParts(d).forEach((x) => { p[x.type] = x.value; });
+        return `${p.hour}:${p.minute} ${p.day}/${p.month}`;
+      } catch (e) { return ''; }
     }
-    function budgetTotalPct(rows) { let b = 0, a = 0; (rows || []).forEach((r) => { b += Number(r.budget) || 0; a += Number(r.actual) || 0; }); return b > 0 ? Math.round(100 * a / b) : null; }
     function preventiveCompletion(rows, template, houses, dates) {
       const total = (template || []).length, done = {};
       (rows || []).forEach((r) => { if (!r || !r.house || !r.date || !isDoneCell(r.done)) return; const k = String(r.house) + '|' + String(r.date).slice(0, 10); (done[k] || (done[k] = new Set())).add(String(r.item)); });
@@ -174,14 +185,11 @@
       const worst = overdue.map((r) => ({ ...r, dov: daysOverdueR(r, now) })).sort((a, b) => b.dov - a.dov);
       const sla = { openCount: open.length, overdueCount: overdue.length, blockedCount: open.filter(isBlockedR).length, worst };
 
-      // Budget: per-house budget from the server (existing Budgets sheet, selected period); spend recomputed
-      // client-side as completed/closed actual_cost within that period (the task's definition).
+      // Budget: the SERVER rows as-is (one spend definition, computed in Code.gs for the selected period).
       const bud = d.budget || null;
+      const adh = (bud && bud.adherence) || {};
       const period = bud ? bud.period : '';
-      const budgetByHouse = {};
-      if (bud && bud.adherence && bud.adherence.houses) bud.adherence.houses.forEach((h) => { if (h.budgetDefined) budgetByHouse[h.house] = h.budget; });
-      const inPeriod = reqs.filter((r) => period && String(r.completed_at || '').slice(0, 7) === period);
-      const budgetRows = budgetAdherenceByHouse(inPeriod, budgetByHouse);
+      const budgetRows = Array.isArray(adh.houses) ? adh.houses : [];
 
       const preOpening = houses.filter((h) => String(h.status) === 'pre-opening');
       const opening = readinessByHouse(d.openingChecklist || [], preOpening);
@@ -191,7 +199,13 @@
 
       return {
         sla, recurring: recurringDefects(reqs, now),
-        budget: { rows: budgetRows, period, periods: bud ? (bud.periods || []) : [], available: !!bud },
+        budget: {
+          rows: budgetRows, period, periods: bud ? (bud.periods || []) : [], available: !!bud,
+          skipped: Number(adh.skipped) || 0,
+          unmappedHouses: Array.isArray(adh.unmappedHouses) ? adh.unmappedHouses : [],
+          unmappedRequestHouses: Array.isArray(adh.unmappedRequestHouses) ? adh.unmappedRequestHouses : [],
+          source: (bud && bud.source) || null,
+        },
         opening, emergency,
         maintenance: d.maintenance || null,
         trainings: trainingsByHouse(d.trainings || [], houses),
@@ -224,14 +238,38 @@
       },
       {
         key: 'budget', title: 'עמידה בתקציב', icon: '₪',
-        summary: (m) => { const p = budgetTotalPct(m.budget.rows); return `<div class="n ${p == null ? 'na' : (p > 100 ? 'red' : (p >= 90 ? 'amber' : 'ok'))}">${p == null ? '—' : p + '%'}</div><div class="l">ניצול תקציב כולל · ${m.budget.rows.length} בתים</div>`; },
+        summary: (m) => { const p = budgetTotalPct(m.budget.rows); const withBudget = m.budget.rows.filter((r) => r.budgetDefined !== false).length; return `<div class="n ${p == null ? 'na' : (p > 100 ? 'red' : (p >= 90 ? 'amber' : 'ok'))}">${p == null ? '—' : p + '%'}</div><div class="l">ניצול תקציב כולל · ${withBudget} בתים עם תקציב</div>`; },
         view: (m) => {
-          let h = '<p class="sub">הוצאה בפועל (דרישות שהושלמו/נסגרו) מול התקציב החודשי לכל בית. הוצאות מזון יתווספו בהמשך מדייג׳סט המטבח.</p>';
-          if (!m.budget.available) return h + '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין נתוני תקציב</div></div>';
-          const opts = (m.budget.periods || []).map((p) => `<option value="${esc(p)}"${p === m.budget.period ? ' selected' : ''}>${esc(p)}</option>`).join('');
-          h += `<div class="grid" style="margin-bottom:8px"><div class="kpi"><label class="l">חודש</label><br><select onchange="loadMonth(this.value)" style="margin-top:6px;min-height:36px">${opts || `<option>${esc(m.budget.period)}</option>`}</select></div></div>`;
-          if (!m.budget.rows.length) return h + '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין תקציב לחודש זה</div></div>';
-          h += m.budget.rows.map((r) => `<div class="house-row"><div class="house-head"><b>${esc(r.house)}</b><span>${nis(r.actual)} / ${nis(r.budget)}</span></div>${gauge(r.percentUsed)}</div>`).join('');
+          const B = m.budget;
+          // The spend rule, in one sentence — the ⓘ tooltip. Mirrors the server rule (Code.gs computeAdherence).
+          const RULE = 'ההוצאה לחודש = כל הדרישות שלא נדחו, לפי חודש ההשלמה (או חודש הפתיחה אם טרם הושלמו) בשעון ישראל, בעלות בפועל ואם אין — לפי האומדן.';
+          let h = '<p class="sub">הוצאה מול התקציב החודשי לכל בית, לפי כלל אחד שמחושב בשרת. הוצאות מזון יתווספו בהמשך מדייג׳סט המטבח.</p>';
+          if (!B.available) return h + '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין נתוני תקציב</div></div>';
+          // מקור הנתונים — spreadsheet TITLE + tab names + generated time (Israel), never a sheet id — and a fresh reload.
+          const src = B.source || {};
+          const tabs = Array.isArray(src.tabs) && src.tabs.length ? src.tabs.join(' + ') : 'Budgets + Requests';
+          const when = fmtGenerated(src.generatedAt);
+          h += `<div class="src" id="budget-source"><span>מקור הנתונים: נקרא מגיליון <b>${esc(src.spreadsheet || 'הגיליון של האפליקציה')}</b>, לשוניות ${esc(tabs)}${when ? ' · עודכן ' + esc(when) : ''}</span><span class="info" title="${esc(RULE)}" aria-label="${esc(RULE)}">ⓘ</span><button type="button" class="refresh" onclick="refreshBudget()">רענן</button></div>`;
+          // Month selector: ONLY months with a Budgets row or spend (server rule). The selected month is kept
+          // visible even when it has no data, marked so — never a blank selector.
+          const periods = B.periods || [];
+          let opts = periods.map((p) => `<option value="${esc(p)}"${p === B.period ? ' selected' : ''}>${esc(p)}</option>`).join('');
+          if (periods.indexOf(B.period) === -1) opts = `<option value="${esc(B.period)}" selected>${esc(B.period)} (אין נתונים)</option>` + opts;
+          h += `<div class="grid" style="margin-bottom:8px"><div class="kpi"><label class="l">חודש</label><br><select onchange="loadMonth(this.value)" style="margin-top:6px;min-height:36px">${opts}</select></div></div>`;
+          // Warnings — what the server skipped or could not map, so a typo in the Budgets tab is VISIBLE.
+          const warn = [];
+          if (B.skipped) warn.push(`${B.skipped} שורות תקציב לא תקינות (חודש/סכום/בית חסרים) לא נספרו`);
+          if (B.unmappedHouses.length) warn.push(`מזהי בית לא מוכרים בלשונית Budgets (בדקי מול HOUSE-IDS): ${B.unmappedHouses.map(esc).join(', ')}`);
+          if (B.unmappedRequestHouses.length) warn.push(`דרישות עם שם בית לא מוכר שלא נספרו: ${B.unmappedRequestHouses.map(esc).join(', ')}`);
+          if (warn.length) h += `<div class="warn-line" id="budget-warnings">⚠ ${warn.join(' · ')}</div>`;
+          if (!B.rows.length) return h + '<div class="kpi"><div class="n na">אין נתונים</div><div class="l">אין תקציב ואין הוצאות לחודש זה</div></div>';
+          h += B.rows.map((r) => {
+            const est = r.usedEstimated ? '<span class="est" title="חלק מההוצאה לפי אומדן (אין עלות בפועל)">כולל אומדנים</span>' : '';
+            if (r.budgetDefined === false) {
+              return `<div class="house-row"><div class="house-head"><b>${esc(r.house)}${est}</b><span>${nis(r.actual)}</span></div><div class="no-budget">לא הוגדר תקציב לחודש זה — ההוצאה מוצגת, ללא יעד</div></div>`;
+            }
+            return `<div class="house-row"><div class="house-head"><b>${esc(r.house)}${est}</b><span>${nis(r.actual)} / ${nis(r.budget)}</span></div>${gauge(r.percentUsed)}</div>`;
+          }).join('');
           return h;
         },
       },
@@ -332,11 +370,13 @@
 
     let _period = null;
     window.loadMonth = (period) => load(period);
+    // רענן: re-read the budget month from the Sheet right now (?fresh=1 bypasses the Node read cache).
+    window.refreshBudget = () => load(_period, true);
 
-    async function load(period) {
+    async function load(period, fresh) {
       _period = period || null;
       try {
-        const res = await fetch(EXEC_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: period ? { period } : {} }) });
+        const res = await fetch(EXEC_URL + (fresh ? '?fresh=1' : ''), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'managementData', token: window.__STAFF_TOKEN__ || '', payload: period ? { period } : {} }) });
         if (res.status === 403) { document.getElementById('out').innerHTML = '<div class="deny">אין הרשאה לצפייה במסך זה. המסך פתוח למנהלת התפעול ולמנכ״לית בלבד.</div>'; return; }
         const j = await res.json();
         if (!j || !j.ok) { if (j && /forbidden/i.test(j.error || '')) { document.getElementById('out').innerHTML = '<div class="deny">אין הרשאה לצפייה במסך זה.</div>'; return; } throw new Error((j && j.error) || 'load failed'); }

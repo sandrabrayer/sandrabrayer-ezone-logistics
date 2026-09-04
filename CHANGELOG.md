@@ -3,6 +3,56 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Budget] — עמידה בתקציב made auditable: one server spend rule, Israel-time months, visible data source (PR 4)
+
+**What:** Olga's budget screen showed numbers computed by a **second, client-side rule** (completed/closed
+requests with a positive `actual_cost`, month by `completed_at`), while the server computed — and the tests
+locked — a different one. The client rule is deleted: the page now renders the **server rows as-is**, the
+month is bucketed in **Asia/Jerusalem** on both legs, the selector offers only months with data, and a
+"מקור הנתונים" line + warnings make every number traceable to the Sheet.
+
+**The one spend rule (`src/budget.js` ↔ Code.gs `MIRROR:budget`, drift-guarded):** every request that is not
+rejected (לא מאושר) counts, attributed to the **Israel-time month** of `completed_at` when completed, else of
+`created_at`; cost = `actual_cost`, else `estimated_cost` (the house is flagged `usedEstimated` → "כולל
+אומדנים"). A house with spend but no Budgets row is a row with `budgetDefined:false` ("לא הוגדר תקציב"),
+never a fake 0.
+- New `periodInJerusalem(value)` (Date / ISO / date-only; Intl with a UTC fallback) drives `requestPeriod`
+  and Code.gs `currentPeriod_` (was `getUTCMonth` — the 1st of the month showed the previous month until
+  ~03:00 Israel time).
+- `computeAdherence` now returns `skipped` (malformed rows only), **`unmappedHouses`** (Budgets ids that are
+  not canonical — a typo in the tab), **`unmappedRequestHouses`** (Requests house names with no id, this
+  period) and `usedEstimated`. `budgetPeriods(budgets, requests, maps)` lists **only** months with a mapped
+  budget row or spend — the current month is no longer added by itself.
+
+**Code.gs (isolated commit):** `readBudgetAdherence_` returns
+`source: { spreadsheet: <title>, tabs: ['Budgets','Requests'], generatedAt: <ISO>, timezone }` —
+the spreadsheet **title, never its id**; `currentPeriod_` → `periodInJerusalem(new Date())`.
+
+**Page (`src/management.html`):** `budgetAdherenceByHouse` and the client month filter are gone; the rows come
+from `budget.adherence.houses`. Under the title: **"מקור הנתונים: נקרא מגיליון <title>, לשוניות Budgets +
+Requests · עודכן HH:MM dd/MM"** (Israel time) with a ⓘ tooltip stating the rule in one Hebrew sentence and a
+**רענן** button that reloads with `?fresh=1` (bypasses the Node cache). A **warning line** shows skipped
+malformed rows, unknown Budgets house ids and unmapped request house names. Per-house **"כולל אומדנים"**
+marker; a no-budget house shows its spend with "לא הוגדר תקציב". The month selector shows only months with
+data and keeps a data-less selected month visible as "(אין נתונים)". The hub KPI sums only houses with a
+budget (`src/management.js` `budgetTotalPercent`; `budgetAdherenceByHouse` removed).
+
+**Docs:** README budget section (data source + the rule), help page section **"תקציב חודשי"** (how Olga fills
+Budgets: canonical id from HOUSE-IDS.md, `YYYY-MM`, amount; the rule; what the warnings mean). setupSheet
+already writes/appends the Budgets headers `house | period | amount | notes` — now locked by a test. No SW
+bump: `management.html` / `help.html` are network-first documents, not precached shell assets.
+
+**Tests (802, all green):** `budget.test.js` — Israel month boundary (summer + winter, both directions, Date
+object, date-only), the spend rule on fixtures (completed vs created month, any non-rejected status, actual
+vs estimate, 0 actual is real, rejected excluded), skipped vs unmapped, unmapped request houses, selector
+contents (no current month, no junk months). New `budget-source.test.js` — the real Code.gs handler:
+`source` shape, **contract guard that the payload never contains the sheet id or URL**, Jerusalem default
+period, selector months, server rows (no-budget house, estimate flag, skipped, both unmapped lists); static
+guards on the page (no client recomputation, source line, tooltip, רענן → `?fresh=1`, warnings), the help
+section and the Budgets headers on both schema.js and setup.gs. `management.test.js` follows the KPI change.
+Drift guards green.
+
+---
 ## [Perf] — Read cache with stale fallback, one-call pages, deferred digest rebuild (PR 3)
 
 **What:** The app's slowness came from putting a Node→Apps Script round-trip (302 + cold start, ~1–3 s
