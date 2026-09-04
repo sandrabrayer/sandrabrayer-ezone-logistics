@@ -112,6 +112,28 @@ PR 2 (אולגה approves everything) needs **no new property and no new env var
 `setupSheet()` once so the retired סנדרה roster row is set `active=FALSE` (never deleted). `setUserPin()` is
 retired and throws; `Users.pin_hash` stays as an unused, append-only column.
 
+## Digest rebuild — deferred (perf round-4)
+
+Write handlers no longer rebuild the coordinators digest inline. Each write calls `scheduleDigestRebuild()`,
+which creates **one** one-off time-based trigger (~1 minute, handler `rebuildDigestFromTrigger`) if none is
+pending; the handler deletes itself, then runs `rebuildDigest()` under the script lock. Expect a write to
+show in the digest tabs within about a minute. Nothing to configure: the trigger scope
+(`script.scriptapp`) is the one `installDigestTrigger()` already uses, and the 15-minute backstop stays.
+
+- **Manual rebuild:** run `rebuildDigestNow()` from the Apps Script editor (synchronous, locked).
+- **If writes seem not to reach the digest:** Apps Script → Triggers should show at most one
+  `rebuildDigestFromTrigger` one-off plus the 15-minute `rebuildDigest`; the execution log shows
+  `scheduleDigestRebuild failed: …` when trigger creation was refused (quota) — the backstop still rebuilds.
+
+## Read cache — what to expect live (perf round-4)
+
+Node caches every Apps Script read except `users`: houses / config / technicians 120 s, everything else
+60 s, with a 10-minute stale fallback when Apps Script fails (`X-Cache: STALE` instead of a 502). Every
+`/api/data` and `/api/action?action=managementData` response carries `X-Cache: HIT | MISS | STALE`
+(DevTools → Network). Any write clears the dynamic entries on that Node instance. Append `?fresh=1` to a
+data URL (or send `fresh: 1` in a managementData body) to force a live read — the fix for "I edited the
+Sheet and the screen hasn't caught up yet" without waiting out a TTL.
+
 ## Security
 
 - Credentials live **only** in GitHub Secrets — never committed, never printed;

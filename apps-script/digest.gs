@@ -285,12 +285,61 @@ function digestEnsureTab_(ss, name, headers) {
 
 // ===== Rebuild =====
 
+// ===== Deferred rebuild (perf round-4) =====
+//
+// Every write handler used to call rebuildDigest() SYNCHRONOUSLY: open the digest spreadsheet, read
+// Requests + AuditLog + InventoryCounts, rewrite two tabs — several seconds added to every approve /
+// reject / assign / close before the user got a response. Writes now ENQUEUE the rebuild instead:
+// scheduleDigestRebuild() creates ONE one-off time-based trigger (~1 minute out) and returns at once;
+// the trigger handler deletes itself and runs rebuildDigest() (still under the script lock). Dedupe: if a
+// pending one-off trigger already exists, nothing is created — a burst of writes yields ONE rebuild.
+// The 15-minute installDigestTrigger() backstop stays. rebuildDigestNow() is the manual editor entry.
+var DIGEST_TRIGGER_FN_ = 'rebuildDigestFromTrigger';
+var DIGEST_TRIGGER_DELAY_MS_ = 60 * 1000;
+
+/** Enqueue a digest rebuild (~1 min out), at most one pending. Never throws — a write must never fail here. */
+function scheduleDigestRebuild() {
+  var id = null;
+  try { id = PropertiesService.getScriptProperties().getProperty(DIGEST_PROP_); } catch (e0) { id = null; }
+  if (!id) return false; // not provisioned yet — nothing to do
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === DIGEST_TRIGGER_FN_) return false; // already pending — deduped
+    }
+    ScriptApp.newTrigger(DIGEST_TRIGGER_FN_).timeBased().after(DIGEST_TRIGGER_DELAY_MS_).create();
+    return true;
+  } catch (err) {
+    // Trigger quota / permission hiccup: log and rely on the 15-minute backstop. The write itself succeeded.
+    Logger.log('scheduleDigestRebuild failed: ' + (err && err.message ? err.message : err));
+    return false;
+  }
+}
+
+/** The one-off trigger handler: remove the pending trigger(s) FIRST (so a write landing during the rebuild
+ *  can enqueue a fresh one — no lost update), then rebuild under the lock. */
+function rebuildDigestFromTrigger() {
+  try {
+    ScriptApp.getProjectTriggers().forEach(function (t) {
+      if (t.getHandlerFunction() === DIGEST_TRIGGER_FN_) ScriptApp.deleteTrigger(t);
+    });
+  } catch (err) {
+    Logger.log('rebuildDigestFromTrigger: trigger cleanup failed: ' + (err && err.message ? err.message : err));
+  }
+  rebuildDigest();
+}
+
+/** Manual, from the Apps Script editor: rebuild both digest tabs right now (synchronous, locked). */
+function rebuildDigestNow() {
+  rebuildDigest();
+}
+
 /**
  * rebuildDigest() — wipe and rewrite BOTH tabs from Requests / AuditLog / Houses /
- * InventoryCounts. Fully idempotent. Wrapped in LockService so concurrent writes (each write
- * handler calls this) never interleave. No-op if the digest has not been set up yet, and any
- * error is logged (never thrown) so a digest hiccup can't break a staff write — the 15-minute
- * trigger is the catch-up backstop.
+ * InventoryCounts. Fully idempotent. Wrapped in LockService so concurrent rebuilds (the one-off
+ * write trigger, the 15-minute backstop, a manual rebuildDigestNow) never interleave. No-op if the
+ * digest has not been set up yet, and any error is logged (never thrown) — the 15-minute trigger is
+ * the catch-up backstop. Since perf round-4 write handlers call scheduleDigestRebuild() instead.
  */
 function rebuildDigest() {
   var id = PropertiesService.getScriptProperties().getProperty(DIGEST_PROP_);
@@ -472,8 +521,9 @@ function buildWeeklyCountRows_() {
 
 /**
  * installDigestTrigger() — run ONCE manually. Installs a 15-minute time-driven backstop so the
- * digest stays fresh even if a write-handler rebuild was skipped (lock contention) or failed.
- * Idempotent: removes any existing rebuildDigest trigger before adding one.
+ * digest stays fresh even if a write's one-off rebuild trigger was skipped (quota / permission) or failed.
+ * Idempotent: removes any existing rebuildDigest trigger before adding one. (The one-off write triggers
+ * use a different handler, rebuildDigestFromTrigger, and are left alone.)
  */
 function installDigestTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {

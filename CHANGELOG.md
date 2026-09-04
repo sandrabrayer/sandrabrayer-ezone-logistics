@@ -3,6 +3,83 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Perf] — Read cache with stale fallback, one-call pages, deferred digest rebuild (PR 3)
+
+**What:** The app's slowness came from putting a Node→Apps Script round-trip (302 + cold start, ~1–3 s
+live, per the earlier rounds' measurements) in front of the user far more often than needed. This round
+adopts the ezone-outpatient `server.js` caching pattern end to end and removes the remaining per-screen
+hops. Target: main screens usable in **< 1 s warm** — a warm dashboard / workorders / reports / inventory /
+management open is now served from Node memory with zero upstream calls.
+
+**Node read cache (`src/server.js`)**
+- **Every Apps Script read action except `users`** is cached in process memory: stable reference sheets
+  (houses / config / technicians) **120 s**; everything else (requests, findings, inspections, inventory*,
+  checklist, the four hub-tab sheets, events, …) **60 s**. Parameterised reads (house / month / week_start /
+  id) get their own keys. `users` is never cached (no `X-Cache` header, always live).
+- **Stale fallback:** entries are kept **10 minutes** past their TTL; when the upstream fails (network error,
+  non-2xx, non-JSON) the last good copy is served with `X-Cache: STALE` instead of a 502. Beyond the window
+  a failure is a 502 again; with nothing cached it is a 502.
+- **`?fresh=1`** bypasses the cache read (the fresh result repopulates it). **`X-Cache: HIT | MISS | STALE`**
+  on every cached response, incl. `pageData`.
+- **In-flight dedupe:** concurrent misses for the same action + params (or the same bundle / the same
+  management period) share ONE upstream call.
+- **Invalidation on ANY write:** every forwarded `/api/action` (approve, reject, defer, assign, markExternal,
+  assignBatch, block, setStatus, setExecution, create, edit, delete, inspections, inventory, readiness,
+  preventive, training / compliance deletes) drops every non-stable entry **and** the /management cache;
+  houses / config / technicians keep their 120 s. A refused write (403) touches nothing. The per-role scope
+  filter still runs on every HIT.
+- **`/management` POST cached per period** (`managementData`): 60 s, 10-min stale fallback, `?fresh=1` (URL —
+  the shim now keeps the query string on POST) or `body.fresh` bypass, deduped, cleared by writes, still
+  role-gated before the cache.
+- **pageData:** `X-Cache` on the aggregate; a down upstream serves the stale page (10-min window) instead of a
+  502; a sheet an OLDER bundle silently omits is fetched individually (never rendered empty).
+
+**One call per screen**
+- **Workorders:** the two sequential readiness reads (managers) / the daily preventive read (maintenance)
+  ride in the page's ONE bundle call (`PAGE_EXTRAS`, role-gated per sheet, preventiveDaily scope-filtered);
+  `src/workorders.html` reads them from `pageData`. Code.gs `BUNDLE_READERS_` gains `openingChecklist`,
+  `emergencyReadiness`, `preventiveDaily`, `trainings`.
+- **Landing (`/`):** the throw-away `houses` probe before the /dashboard redirect is gone; the shim exposes
+  `window.__ezoneEnsureAuth` and the landing forwards through it with zero upstream calls.
+
+**Apps Script — deferred digest rebuild (isolated commit; `apps-script/digest.gs`, `Code.gs`)**
+- Every write used to run `rebuildDigest()` **synchronously** (open the digest spreadsheet, read Requests +
+  AuditLog + InventoryCounts, rewrite two tabs) before answering — seconds per approve / reject / close.
+  Writes now call **`scheduleDigestRebuild()`**: ONE one-off time trigger (~1 min, handler
+  `rebuildDigestFromTrigger`), deduped (a pending trigger → nothing new), never throws (a trigger failure is
+  logged; the write succeeded; the 15-min backstop catches up). The trigger handler deletes itself first
+  (so a write landing mid-rebuild can enqueue again — no lost update) then rebuilds under the script lock.
+  **`rebuildDigestNow()`** is the manual editor entry. The 15-minute `installDigestTrigger` backstop and the
+  background maintenance scan's inline rebuild are unchanged.
+- **Digest freshness contract:** a write is visible in the digest tabs within ~1 minute (was: immediately).
+
+**Docs:** `DEPLOY.md` (digest trigger, `rebuildDigestNow`, cache headers / `?fresh=1`), README (read-cache
+section). `src/public/sw.js` dev cache name `v4` → `v5` (`index.html`, a precached shell document, changed).
+
+**Tests (788, all green):** new `test/read-cache.test.js` (MISS/HIT/STALE, 60 s vs 120 s TTL via a backdate
+hook, stale-on-500 / connection-drop, 502 beyond the window, `?fresh=1`, in-flight dedupe per key, a
+per-write-action invalidation matrix over 22 actions with houses/config/technicians surviving, parameterised
+keys, `users` never cached, the /management per-period cache incl. fresh / stale / dedupe / role gate,
+pageData HIT/STALE/fresh, workorders one-call with the readiness sheets, the older-bundle fallback, the
+landing without a probe); new `test/digest-trigger.test.js` (real .gs files: one one-off trigger, dedupe,
+unprovisioned no-op, ScriptApp failure logged, a write never opens the digest spreadsheet, trigger handler
+deletes-then-rebuilds under the lock, no lost update, `rebuildDigestNow`, backstop untouched, static guard
+that every write handler enqueues); `bundle.test.js` covers the four hub sheets; `delete-digest.test.js`
+follows the enqueue contract. Drift guards green.
+
+**Before / after (warm = within the TTL, no write in between):**
+
+| Route | Before | After |
+|---|---|---|
+| Dashboard / reports / inventory / inspection open, warm | 1 Apps Script call after 8 s idle (~1–3 s) | 0 calls for 60 s (memory) |
+| Workorders (manager), cold | 1 bundle + 2 sequential readiness reads (3 hops) | 1 bundle call |
+| Workorders (manager), warm | 2 hops (readiness never cached) | 0 calls |
+| `/management` open / month change / after a tick | 1 Apps Script POST reading ~8 sheets, every time | 0 calls for 60 s; 1 after a write |
+| Cold entry via `/` | houses probe + dashboard bundle (2 hops) | dashboard bundle only |
+| Approve / reject / assign / close | handler + synchronous digest rebuild (seconds) | handler only; rebuild ~1 min later off the request path |
+| Any screen while Apps Script hiccups | 502 → error screen | last good copy, `X-Cache: STALE` (10 min) |
+
+---
 ## [Approvals] — אולגה approves everything (chain B v3); סנדרה / ceo removed (PR 2)
 
 **What:** The approval chain is now two rules: **emergency (חירום) → auto-approved (unchanged); everything

@@ -20,6 +20,10 @@ function load() {
     Users: [['name', 'role', 'house', 'active', 'pin_hash'], ['אולגה', 'ops_manager', '', 'TRUE', 'SECRET_HASH']],
     Requests: [['id', 'house', 'status'], ['r1', 'רמות השבים', 'דרישה']],
     InspectionFindings: [['id', 'inspection_id'], ['f1', 'i1']],
+    OpeningChecklist: [['id', 'house', 'item', 'done', 'date', 'by'], ['o1', 'שדה אליעזר', 'x', 'FALSE', '', '']],
+    EmergencyReadiness: [['id', 'house', 'item', 'done', 'date', 'by'], ['e1', 'רמות השבים', 'y', 'TRUE', '', '']],
+    PreventiveDaily: [['house', 'date', 'item', 'done', 'by'], ['רמות השבים', '2026-09-04', 'מים', 'TRUE', '']],
+    Trainings: [['id', 'topic', 'house', 'date', 'attended', 'by'], ['t1', 'עזרה ראשונה', 'רמות השבים', '2026-09-01', '', '']],
   };
   const sheet = (n) => ({
     getDataRange: () => ({ getValues: () => { reads[n] = (reads[n] || 0) + 1; return rows[n]; } }),
@@ -71,4 +75,16 @@ test('bundle reads each requested sheet exactly once in the single execution', (
   assert.equal(reads.Houses, 1);
   assert.equal(reads.Requests, 1);
   assert.equal(reads.InspectionFindings, 1);
+});
+
+test('perf round-4: the four hub-tab sheets are bundleable (workorders readiness tabs ride in the one page call)', () => {
+  const { api, reads } = load();
+  const j = call(api, 'openingChecklist,emergencyReadiness,preventiveDaily,trainings,houses');
+  assert.equal(j.ok, true);
+  assert.equal(j.data.openingChecklist[0].id, 'o1');
+  assert.equal(j.data.emergencyReadiness[0].id, 'e1');
+  assert.equal(j.data.preventiveDaily[0].item, 'מים');
+  assert.equal(j.data.trainings[0].topic, 'עזרה ראשונה');
+  for (const n of ['OpeningChecklist', 'EmergencyReadiness', 'PreventiveDaily', 'Trainings']) assert.equal(reads[n], 1, `${n} read once`);
+  assert.ok(!('users' in j.data), 'users still never bundleable');
 });

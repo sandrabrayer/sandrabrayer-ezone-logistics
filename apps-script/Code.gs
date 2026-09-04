@@ -539,6 +539,13 @@ var BUNDLE_READERS_ = {
   inventoryItems: function () { return readObjects_('InventoryItems'); },
   inventoryCounts: function () { return readObjects_('InventoryCounts'); },
   events: function () { return readObjects_('Events'); },
+  // Hub-tab sheets (perf round-4): the workorders field-entry tabs ride in the page's ONE bundle call instead
+  // of 1–2 extra sequential reads. The Node proxy role-gates each (readiness/trainings manager-tier,
+  // preventiveDaily maintenance+manager and scope-filtered like requests).
+  openingChecklist:   function () { return readObjects_('OpeningChecklist'); },
+  emergencyReadiness: function () { return readObjects_('EmergencyReadiness'); },
+  preventiveDaily:    function () { return readObjects_('PreventiveDaily'); },
+  trainings:          function () { return readObjects_('Trainings'); },
 };
 
 function bundleRead_(e) {
@@ -658,7 +665,7 @@ function handleCreateRequest_(input, actor) {
   // (logged), never a silently wrong date.
   row.due_at = deriveDueAt(row.created_at, row.urgency, slaSpec_(), function (m) { Logger.log(m); });
   appendRequest(row);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, id: row.id });
 }
 
@@ -739,7 +746,7 @@ function handleCreateRequestIntake_(body) {
   // Audit the creation: from '' → דרישה, by the coordinator, tagged with the intake source so the
   // provenance of a coordinator-filed request is visible in the AuditLog.
   writeAuditEntry(row.id, '', STATUS_REQUEST, row.created_by, 'source=coordinators');
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, id: row.id });
 }
 
@@ -899,7 +906,7 @@ function handleApprove_(p, actor) {
   }
   updateRequest_(p.id, fields,
     req.status, ST.APPROVED, approver, emergency ? 'אושר אוטומטית (חירום)' : (p.note || ''));
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -920,7 +927,7 @@ function handleReject_(p, actor) {
   updateRequest_(p.id,
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '', rejected_at: new Date().toISOString() },
     req.status, ST.NOT_APPROVED, rejecter, p.reason || '');
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -937,7 +944,7 @@ function handleDefer_(p, actor) {
   updateRequest_(p.id,
     { status: ST.DEFERRED, deferred_until: p.deferred_until },
     req.status, ST.DEFERRED, actor.name, 'נדחה ל-' + p.deferred_until);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -960,7 +967,7 @@ function handleAssign_(p, actor) {
     ? 'הועבר מחדש ל-' + p.assigned_to
     : 'הוקצה ל-' + p.assigned_to + (p.trade ? ' (' + p.trade + ')' : '');
   updateRequest_(p.id, fields, req.status, fields.status || req.status, actor.name, note);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -976,7 +983,7 @@ function handleMarkExternal_(p, actor) {
   updateRequest_(p.id,
     { assignment_type: 'external', trade: p.trade },
     req.status, req.status, actor.name, 'סומן כעבודה חיצונית: ' + p.trade);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -995,7 +1002,7 @@ function handleAssignBatch_(p, actor) {
       req.status, ST.IN_PROGRESS, actor.name, 'הוקצה בביקור מרוכז ' + batchId);
     done.push(id);
   }
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, batch_id: batchId, assigned: done });
 }
 
@@ -1020,7 +1027,7 @@ function handleSetStatus_(p, actor) {
   // Preventive maintenance: a completed plan-linked request writes its completion date back to the
   // plan's last_done (no-op for a normal request — plan_id blank).
   if (p.to === ST.COMPLETED) updatePlanLastDone_({ plan_id: req.plan_id, completed_at: fields.completed_at });
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -1043,14 +1050,14 @@ function handleSetExecution_(p, actor) {
       req.status, ST.COMPLETED, actor.name, 'סומן כבוצע');
     // Preventive maintenance: write completion date back to the plan's last_done (no-op if not linked).
     updatePlanLastDone_({ plan_id: req.plan_id, completed_at: completedAt });
-    rebuildDigest();
+    scheduleDigestRebuild();
     return jsonOut_({ ok: true, completed: true });
   }
 
   updateRequest_(p.id,
     { execution_status: p.value },
     req.status, req.status, actor.name, 'סטטוס ביצוע: ' + p.value);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, completed: false });
 }
 
@@ -1076,7 +1083,7 @@ function handleSetBlocked_(p, actor) {
       { blocked: 'FALSE', blocked_reason: '', blocked_at: '' },
       req.status, req.status, actor.name, 'שוחרר מחסימה');
   }
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, blocked: block });
 }
 
@@ -2165,6 +2172,7 @@ function runMaintenanceScan() {
       complianceDefaultReminder_(), today, log);
     for (var j = 0; j < comp.toCreate.length; j++) createComplianceRequest_(comp.toCreate[j]);
 
+    // A background scan (time trigger, no user waiting): rebuild inline, synchronously, as before.
     if (plan.toCreate.length || comp.toCreate.length) rebuildDigest();
     Logger.log('scan: maintenance created ' + plan.toCreate.length + ' (dup ' + plan.skippedDuplicate +
       ', malformed ' + plan.skippedMalformed + ', inactive ' + plan.skippedInactive + '); compliance created ' +
@@ -2616,7 +2624,7 @@ function handleCreateInspection_(p, actor) {
     domain_kitchen_summary: p.domain_kitchen_summary || '',
     general_notes: p.general_notes || '', reinspect_date: p.reinspect_date || '', status: 'in-progress',
   });
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, id: id });
 }
 
@@ -2637,7 +2645,7 @@ function handleAddFinding_(p, actor) {
     suggested_category: p.suggested_category || '',
     linked_request_id: '', confirmed_by: '', confirmed_at: '',
   });
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, id: id });
 }
 
@@ -2671,7 +2679,7 @@ function handleConfirmFinding_(p, actor) {
   writeAuditEntry(row.id, '', row.status, actor.name, 'נוצר מבקרה (finding ' + finding.id + ')');
 
   updateFinding_(finding.id, { linked_request_id: row.id, confirmed_by: actor.name, confirmed_at: new Date().toISOString() });
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true, request_id: row.id });
 }
 
@@ -2710,7 +2718,7 @@ function handleDeleteRequest_(p, actor) {
     if (String(data[r][idCol]) === String(p.id)) {
       writeAuditEntry(p.id, data[r][headers.indexOf('status')], 'נמחק', actor.name, p.note || 'נמחק ע"י ' + actor.name);
       sheet.deleteRow(r + 1);
-      rebuildDigest();
+      scheduleDigestRebuild();
       return jsonOut_({ ok: true });
     }
   }
@@ -2760,7 +2768,7 @@ function handleEditRequest_(p, actor) {
        ' → ' + (fields.category == null || fields.category === '' ? '—' : fields.category) + ' (' + actor.name + ')')
     : ('נערך ע"י ' + actor.name);
   updateRequest_(p.id, fields, req.status, req.status, actor.name, editNote);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return jsonOut_({ ok: true });
 }
 
@@ -2898,7 +2906,7 @@ function writeInventoryRows_(house, weekStartStr, countedBy, filled, auditAction
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
   writeAuditEntry(countId, '', auditAction, countedBy, auditNote);
-  rebuildDigest();
+  scheduleDigestRebuild();
   return { count_id: countId, items: filled.length };
 }
 

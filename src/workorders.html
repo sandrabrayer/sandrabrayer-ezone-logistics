@@ -187,11 +187,12 @@
         findings = d.findings || [];
         inspections = d.inspections || [];
         houses = d.houses || [];
-        // Append the role-specific field-entry tabs and fetch their data (separate role-gated reads, so the
-        // shared workorders pageData is never broadened for a role that can't read a checklist).
+        // The role-specific field-entry tabs ride in the SAME pageData call (perf round-4): the server folds
+        // the readiness checklists (managers) / the daily preventive checklist (maintenance, scope-filtered)
+        // into the one bundle, gated per role — no extra sequential /exec reads after the page load.
         tabList = TABS.slice();
-        if (isManagerRole) { tabList.push(OPENING_TAB, EMERGENCY_TAB); await loadReadiness(); }
-        if (isMaintenance) { tabList.push(DAILY_TAB); await loadPreventive(); }
+        if (isManagerRole) { tabList.push(OPENING_TAB, EMERGENCY_TAB); openingRows = d.openingChecklist || []; emergencyRows = d.emergencyReadiness || []; }
+        if (isMaintenance) { tabList.push(DAILY_TAB); preventiveRows = d.preventiveDaily || []; }
         renderTabs();
         renderLeadFilter();
         render();
@@ -200,12 +201,6 @@
       }
     }
 
-    async function fetchData(action) {
-      try { const j = await fetch(EXEC_URL + '?action=' + action).then(r => r.json()); return (j && j.ok && j.data) || []; }
-      catch (e) { return []; }
-    }
-    async function loadReadiness() { openingRows = await fetchData('openingChecklist'); emergencyRows = await fetchData('emergencyReadiness'); }
-    async function loadPreventive() { preventiveRows = await fetchData('preventiveDaily'); }
 
     function renderTabs() {
       document.getElementById('leadTabs').innerHTML = tabList.map(l =>

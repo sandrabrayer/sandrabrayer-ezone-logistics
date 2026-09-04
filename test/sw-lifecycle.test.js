@@ -62,7 +62,7 @@ test('install skipWaiting still fires when even fetch rejects (best-effort preca
 
 test('activate deletes EVERY non-current cache and claims all clients (existing tabs heal)', async () => {
   const { handlers, state, CACHE } = loadSW();
-  assert.equal(CACHE, 'ezone-logistics-v4', 'the file default cache name (server rewrites it per-commit live)');
+  assert.equal(CACHE, 'ezone-logistics-v5', 'the file default cache name (server rewrites it per-commit live)');
   let waited;
   handlers.activate({ waitUntil: (p) => { waited = p; } });
   await waited;
