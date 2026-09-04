@@ -7,8 +7,8 @@
 // job is to bring an unauthenticated visitor to the login overlay and then forward a signed-in user to
 // /dashboard. This proves, for coordinator/maintenance/field_ops/ops_manager/ceo, that the overlay
 // appears, the click posts /api/login, the session is saved, the overlay closes, and the page then
-// forwards to /dashboard. (The overlay itself is role-agnostic; the roster gate — only רועי + אולגה may
-// actually authenticate — is enforced at the server and covered by login-roster.test.js.)
+// forwards to /dashboard. (The overlay itself is role-agnostic — one password field, no picker; the
+// single-login contract is enforced at the server and covered by login-single.test.js.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';

@@ -98,6 +98,16 @@ APP_URL=https://ezone-logistics.up.railway.app EXPECTED_COMMIT=<sha> node test/s
 defaults to the public Railway host; override with an `APP_URL` **repo variable** if the host changes.
 `APPS_SCRIPT_EXEC_URL` stays a **secret** — the clasp workflow reads it; you never paste it into a PR.
 
+## Script Properties the live Apps Script needs
+
+Set once in the Apps Script project (Project Settings → Script Properties); clasp does not manage them:
+
+| Property | Same value as | Used for |
+| --- | --- | --- |
+| `SESSION_SECRET` | Railway `SESSION_SECRET` | verifying every session token independently of Node |
+| `APPROVER_CODE` | Railway `APPROVER_CODE` | verifying the approver code on every non-emergency approve / reject (PR 1). **Set it BEFORE merging PR 1** — until it exists, Code.gs refuses every human approval (fail-closed) |
+| `CREATE_REQUEST_SECRET` | ezone-coordinators intake secret | the server-to-server request intake |
+
 ## Security
 
 - Credentials live **only** in GitHub Secrets — never committed, never printed;

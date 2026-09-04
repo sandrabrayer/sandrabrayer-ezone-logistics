@@ -263,10 +263,12 @@ function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject: only the role that chain B resolves to FOR THAT REQUEST. The CEO may always
-// approve. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
+// approve / reject: the role that chain B resolves to FOR THAT REQUEST may approve it. The ops_manager
+// (אולגה) and the CEO may approve at ANY amount — single-login (PR 1): every session is ops_manager, and
+// the approve/reject write is additionally gated by the APPROVER_CODE (server.js + Code.gs), so the role
+// alone never approves. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
 function canApprove(actorRole, requiredRole) {
-  if (actorRole === ROLE.CEO) return true;
+  if (actorRole === ROLE.CEO || actorRole === ROLE.OPS_MANAGER) return true;
   return actorRole === requiredRole;
 }
 
@@ -844,11 +846,41 @@ function updateRequest_(id, fields, fromStatus, toStatus, by, note) {
 }
 
 // Is this actor authorized to APPROVE/REJECT this specific request? Chain B: the resolved role (or
-// ceo). Emergency (auto) requires no human approver — allow any dispatch-capable actor to record it.
+// ops_manager / ceo). Emergency (auto) requires no human approver — allow any dispatch-capable actor to record it.
 function actorMayApprove_(actor, req) {
   var required = requiredApproverFor_(req);
   if (required === APPROVER.AUTO) return canDispatch(actor.role);
   return canApprove(actor.role, required);
+}
+
+// ---- Approver code (single login, PR 1) ----
+// Every session is the ONE app identity (ops_manager), so the role alone never approves: a human approval
+// (anything but the emergency auto path) must carry אולגה's approver code. The Node proxy verifies it first
+// and forwards it; it is verified AGAIN here against the APPROVER_CODE Script Property, independently of
+// Node (the Node layer is never trusted). A verified approval / rejection is recorded as APPROVER_NAME_ in
+// approved_by and in the AuditLog. Fail-closed: an unset property refuses every non-emergency approval.
+var APPROVER_NAME_ = 'אולגה';
+
+function getApproverCode_() {
+  var v = PropertiesService.getScriptProperties().getProperty('APPROVER_CODE');
+  return String(v == null ? '' : v).replace(/^\s+|\s+$/g, '');
+}
+
+// Constant-time compare of the forwarded code with the Script Property. false on an unset property, a
+// missing code, or any mismatch (constantTimeEq_ fails closed on a length difference).
+function approverCodeOk_(p) {
+  var expected = getApproverCode_();
+  var supplied = (p && p.approver_code != null) ? String(p.approver_code) : '';
+  if (!expected || !supplied) return false;
+  return constantTimeEq_(supplied, expected);
+}
+
+// The approver-gate error for a non-emergency approve/reject without a valid code; null when it may proceed.
+// Error strings are the same the Node proxy uses, so the dashboard maps both to one Hebrew message.
+function approverGateError_(p, emergency) {
+  if (emergency) return null;
+  if (approverCodeOk_(p)) return null;
+  return (p && p.approver_code) ? 'approver_code_invalid' : 'approver_code_required';
 }
 
 function handleApprove_(p, actor) {
@@ -860,14 +892,18 @@ function handleApprove_(p, actor) {
   }
   if (!actorMayApprove_(actor, req)) return forbidden_();
   var emergency = (requiredApproverFor_(req) === APPROVER.AUTO);
-  var fields = { status: ST.APPROVED, approved_by: actor.name, approved_at: new Date().toISOString() };
+  var gateErr = approverGateError_(p, emergency);
+  if (gateErr) return jsonOut_({ ok: false, error: gateErr });
+  // A code-verified approval is אולגה's; the emergency auto path keeps the session actor (unchanged).
+  var approver = emergency ? actor.name : APPROVER_NAME_;
+  var fields = { status: ST.APPROVED, approved_by: approver, approved_at: new Date().toISOString() };
   // SLA wake-up (increment 36): a request approved OUT OF deferral re-derives its due date from the
   // deferral date FORWARD (not from original creation) — the clock restarts when it wakes up.
   if (req.status === ST.DEFERRED) {
     fields.due_at = deriveDueAt(req.deferred_until, req.urgency, slaSpec_(), function (m) { Logger.log(m); });
   }
   updateRequest_(p.id, fields,
-    req.status, ST.APPROVED, actor.name, emergency ? 'אושר אוטומטית (חירום)' : (p.note || ''));
+    req.status, ST.APPROVED, approver, emergency ? 'אושר אוטומטית (חירום)' : (p.note || ''));
   rebuildDigest();
   return jsonOut_({ ok: true });
 }
@@ -880,11 +916,15 @@ function handleReject_(p, actor) {
     return jsonOut_({ ok: false, error: 'Cannot reject from status "' + req.status + '"' });
   }
   if (!actorMayApprove_(actor, req)) return forbidden_();
+  var emergency = (requiredApproverFor_(req) === APPROVER.AUTO);
+  var gateErr = approverGateError_(p, emergency);
+  if (gateErr) return jsonOut_({ ok: false, error: gateErr });
+  var rejecter = emergency ? actor.name : APPROVER_NAME_;
   // Stamp the rejection instant so the digest can age the rejected ticket out of OpenTickets after the
   // retention window (mirrors completed_at for completions).
   updateRequest_(p.id,
     { status: ST.NOT_APPROVED, rejection_reason: p.reason || '', rejected_at: new Date().toISOString() },
-    req.status, ST.NOT_APPROVED, actor.name, p.reason || '');
+    req.status, ST.NOT_APPROVED, rejecter, p.reason || '');
   rebuildDigest();
   return jsonOut_({ ok: true });
 }

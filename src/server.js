@@ -1,8 +1,11 @@
 // server.js — zero-dependency Node server for the frontend AND the auth/data gateway.
 //
-// Increment 30 brought auth to the ezone-managers / ezone-staffing standard:
+// Increment 30 brought auth to the ezone-managers / ezone-staffing standard; PR 1 (single login) collapsed
+// it to ONE password for the whole app:
 //   - fail-closed startup: the server REFUSES TO START if any required secret is missing/empty
-//   - POST /api/login { name, pin } → HMAC-signed session token carrying name + role + issued-at
+//   - POST /api/login { pin } → HMAC-signed session token for the ONE app identity (רועי / ops_manager);
+//     no per-person picker, no Users-sheet read on the login path
+//   - approve / reject additionally require the APPROVER_CODE (אולגה) — verified here AND in Code.gs
 //   - rate-limited login (8 attempts / 15 min per IP, fail-closed, in-memory)
 //   - Bearer-gated data gateway: /api/data (reads) and /api/action (writes) proxy to Apps Script;
 //     the actor is resolved from the verified token, never from a client-supplied field, and the
@@ -41,12 +44,19 @@ const SHARED_ACCESS_CODE = (process.env.SHARED_ACCESS_CODE || '').trim();
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS) || 0;
 
-// Who may log into this app with the shared code = the manager-tier roles ONLY (field_ops = רועי,
-// ops_manager = אולגה). This is JUST the login-roster filter — it does not touch the Users sheet or any
-// token/role/scope logic. Excluded from login: ceo (סנדרה), maintenance (רמי/צחי), and coordinators.
-// (⚠ removing maintenance means רמי/צחי can no longer reach ANY page, including their #73 /workorders
-// preventive-daily entry — add 'maintenance' back here to restore them; nothing else changes.)
-const LOGIN_ROLES = new Set(['field_ops', 'ops_manager']);
+// Single login (PR 1): ONE password (SHARED_ACCESS_CODE) for the whole app — no per-person picker and no
+// Users-sheet read on the login path. Every session is issued for this ONE identity: name רועי (stamped as
+// created_by / AuditLog `by` on non-approval actions) with role ops_manager (so every manager-tier page and
+// write is reachable with the one password). The role alone NEVER approves: approve/reject are additionally
+// gated by APPROVER_CODE below, and a verified approval is recorded as אולגה (Code.gs).
+const SESSION_IDENTITY = Object.freeze({ name: 'רועי', role: 'ops_manager', scope: '' });
+// The approver code (אולגה). Required on every approve/reject that needs a human approver (emergency = auto
+// approval is unchanged and needs no code). Verified here with a constant-time compare AND independently in
+// Code.gs against the APPROVER_CODE Script Property — the Node layer is never trusted. Trimmed like the
+// login code; fail-closed at startup (server refuses to start without it) and at runtime (checkPin fails
+// closed on an empty expected value). Never logged.
+const APPROVER_CODE = (process.env.APPROVER_CODE || '').trim();
+const APPROVER_ACTIONS = new Set(['approve', 'reject']);
 
 // ---- version truth (deploy provenance) ----
 // COMMIT: the git SHA this Node build was deployed from. Railway injects RAILWAY_GIT_COMMIT_SHA into the
@@ -73,23 +83,14 @@ const HEAD_INJECT =
 // proxy and rewrites GET→/api/data, POST→/api/action, attaching Authorization on every call. The
 // legacy per-page staffGate() is neutralized by pre-setting its sessionStorage flag (a non-secret
 // '1', not the token). Names are not secret, so the login picker lists them; the server still
-// verifies name+PIN and resolves the role from the Users sheet.
-// FALLBACK login-roster names only. The picker is normally built from the LIVE active roster
-// (getLoginNames → doGet('users')); this hardcoded list is used solely when that read is unavailable
-// (a deploy-order window or an upstream outage) so the login page can never present an empty picker.
-// It mirrors the LOGIN_ROLES (active manager-tier: field_ops + ops_manager) seeded SEED_USERS (setup.gs);
-// a guard test asserts the two stay in sync. Only רועי + אולגה log into this app.
-const DEFAULT_LOGIN_NAMES = ['רועי', 'אולגה'];
-// buildClientShim(names) → the injected <head> shim, with `names` as the login picker's roster. Built
-// per-request from the live active roster so the picker always reflects who can actually log in (a
-// renamed/added/deactivated user in the Users sheet is reflected within one micro-cache TTL) — no more
-// hardcoded roster drift where the dropdown lists a name that no longer matches a roster row.
-function buildClientShim(names) {
+// verifies the ONE shared password (single login, PR 1): the overlay is a single password field — no name
+// picker — and the server issues the one app identity. Built once at module load (no per-request roster
+// read: serving a page no longer waits on Apps Script).
+function buildClientShim() {
   return `<script>(function(){
   var TOKEN=null,authPromise=null,origFetch=window.fetch.bind(window);
   window.__EXEC_URL__='/api/exec'; window.__STAFF_TOKEN__='';
   try{sessionStorage.setItem('ezone_staff_token','1');}catch(e){}
-  var NAMES=${JSON.stringify(names)};
   // Role → ordered nav links the role may open (from src/access.js — single source of truth, no drift).
   // Display only; the server + Code.gs data gates are the authority.
   var NAV_BY_ROLE=${JSON.stringify(navByRole())};
@@ -185,15 +186,13 @@ function buildClientShim(names) {
       var ov=el('div','position:fixed;inset:0;z-index:99999;background:#071410;display:flex;align-items:center;justify-content:center;direction:rtl;font-family:system-ui,Arial,sans-serif');
       var card=el('div','background:#0e211b;border:1px solid #143a30;border-radius:14px;padding:24px;width:min(92vw,340px);box-shadow:0 10px 40px rgba(0,0,0,.5)');
       var h=el('div','color:#eef1f5;font-size:1.15rem;font-weight:800;margin-bottom:14px','כניסה — לוגיסטיקה');
-      var sel=el('select','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
-      NAMES.forEach(function(n){var o=el('option',null,n);o.value=n;sel.appendChild(o);});
       var pin=el('input','width:100%;min-height:44px;font-size:16px;margin-bottom:10px;border-radius:8px;padding:6px');
       pin.type='password';pin.setAttribute('autocomplete','off');pin.placeholder='קוד גישה';
       var btn=el('button','width:100%;min-height:44px;font-size:16px;font-weight:700;border:0;border-radius:8px;background:#00bfa5;color:#04150f;cursor:pointer','כניסה');
       var err=el('div','color:#ff8a80;font-size:.9rem;margin-top:10px;min-height:1.1em','');
       // Spinner keyframes — a <style> inside the overlay applies globally (inline styles can't do @keyframes).
       card.appendChild(el('style',null,'@keyframes ezspin{to{transform:rotate(360deg)}}'));
-      card.appendChild(h);card.appendChild(sel);card.appendChild(pin);card.appendChild(btn);card.appendChild(err);ov.appendChild(card);
+      card.appendChild(h);card.appendChild(pin);card.appendChild(btn);card.appendChild(err);ov.appendChild(card);
       document.body.appendChild(ov);pin.focus();
       // In-progress state for the login button: disable + show a spinner INSIDE the button. setLoading(false)
       // restores the label and re-enables; on success we DON'T restore — the button keeps spinning through
@@ -211,7 +210,7 @@ function buildClientShim(names) {
       function attempt(){
         if(btn.disabled)return; // already in-flight — guards an Enter-key double-submit while the button spins
         err.textContent='';setLoading(true);
-        origFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sel.value,pin:pin.value})})
+        origFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pin.value})})
         .then(function(r){return r.json().then(function(j){return{s:r.status,j:j};});})
         .then(function(res){
           if(res.s===200&&res.j&&res.j.token){
@@ -221,7 +220,7 @@ function buildClientShim(names) {
           }
           setLoading(false); // FAILURE — restore the button, then surface the error
           if(res.s===429){err.textContent='יותר מדי ניסיונות. נסו שוב מאוחר יותר.';}
-          else{err.textContent='שם או קוד שגויים';pin.value='';pin.focus();}
+          else{err.textContent='קוד גישה שגוי';pin.value='';pin.focus();}
         }).catch(function(){setLoading(false);err.textContent='שגיאת רשת';});
       }
       btn.addEventListener('click',attempt);
@@ -266,8 +265,8 @@ function buildClientShim(names) {
 })();</script>`;
 }
 
-// The default shim (fallback names), exported for the shim-behavior tests that run it in a sandbox.
-const CLIENT_SHIM = buildClientShim(DEFAULT_LOGIN_NAMES);
+// The ONE shim, built once. Exported for the shim-behavior tests that run it in a sandbox.
+const CLIENT_SHIM = buildClientShim();
 
 // The anonymous /help response body (served with HTTP status 401): a minimal shell that carries the
 // injected auth shim and re-fetches /help — the shim attaches the Bearer token (showing the login
@@ -374,37 +373,6 @@ function readJsonBody(req, limitBytes) {
   });
 }
 
-// Single active-user predicate — the ONE place that decides who is in the login roster. Used by BOTH
-// the login PICKER (server-injected name list) and the login VERIFICATION (handleLogin), so the two can
-// never disagree about who is active. Tolerant of how the Users.active cell reads back (boolean TRUE from
-// a checkbox, or the text 'TRUE'/'true'/'1' from a hand edit); trims stray whitespace on string values.
-function isActiveUser(u) {
-  if (!u) return false;
-  const a = u.active;
-  if (a === true || a === 1) return true;
-  const s = String(a == null ? '' : a).trim().toUpperCase();
-  return s === 'TRUE' || s === '1';
-}
-
-// The login-roster name list, derived from the LIVE users read — the single shared users-read path the
-// login picker and login verification both go through. Returns the ACTIVE users' names (trimmed, de-duped,
-// blanks dropped), in sheet order. On an empty/failed roster read the caller falls back to
-// DEFAULT_LOGIN_NAMES so the picker is never blank. Names are non-secret (the picker has always listed
-// them); pin_hash is never touched here.
-function loginRosterNames(users) {
-  if (!Array.isArray(users)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const u of users) {
-    if (!isActiveUser(u) || !LOGIN_ROLES.has(String(u && u.role))) continue; // roster = active LOGIN_ROLES only
-    const name = String((u && u.name) == null ? '' : u.name).trim();
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    out.push(name);
-  }
-  return out;
-}
-
 // Read a data action from Apps Script (server-to-server). Returns the `data` array, or null on any
 // failure. `extra` adds query params (e.g. the roster proof). Used for the login roster + read scoping.
 async function fetchAppsScriptData(action, extra) {
@@ -477,24 +445,7 @@ function nodeCachePut(action, value) {
 function invalidateDynamicCache() {
   for (const a of DYNAMIC_CACHEABLE) nodeCache.delete(a);
 }
-function _resetNodeCache() { nodeCache.clear(); loginNamesCache = null; }
-
-// ---- Login-picker roster names (server-injected into the shim) ----
-// The picker needs the roster BEFORE any login, so it can't go through the Bearer-gated /api/data users
-// read. We fetch the PUBLIC roster (no proof → pin_hash already stripped by Code.gs), keep only ACTIVE
-// names, and cache that NAME LIST briefly. This is safe to cache where the auth roster is not: it holds
-// no secret (names only), and login VERIFICATION still reads the roster LIVE with the proof (handleLogin)
-// — so a just-added user is verifiable immediately even if the picker lists them a TTL later. A blank/failed
-// read is NOT cached and falls back to DEFAULT_LOGIN_NAMES, so the picker is never empty and self-heals.
-let loginNamesCache = null; // { value: string[], exp: number } | null
-async function getLoginNames() {
-  if (loginNamesCache && loginNamesCache.exp > Date.now()) return loginNamesCache.value;
-  const users = await fetchAppsScriptData('users'); // public read (pin_hash stripped upstream)
-  const names = loginRosterNames(users);
-  if (!names.length) return DEFAULT_LOGIN_NAMES; // roster unavailable/empty → fallback, don't cache
-  loginNamesCache = { value: names, exp: Date.now() + NODE_CACHE_TTL_MS };
-  return names;
-}
+function _resetNodeCache() { nodeCache.clear(); }
 
 // Fetch several read-sheets from Apps Script in ONE round-trip via the `bundle` action. Returns a map
 // { action: rows[] } or null when bundle is unavailable (unknown action / upstream error). null triggers
@@ -602,46 +553,26 @@ function authFromRequest(req) {
   return actor ? { actor, token } : null;
 }
 
-// Shared-code login (replaces the per-user pin_hash + tier-B APP_PIN scheme). Identity + role STILL come
-// from the SELECTED roster user (Users sheet); only the secret check is now one shared code for everyone
-// in the roster. This removes the fragile, live-only failure modes of the per-user path (see PR notes):
-// a SESSION_SECRET/roster-proof drift that strips pin_hash, an Apps-Script-vs-Node hashing mismatch, or a
-// stale/wrong stored hash. The roster is read PUBLICLY (no proof) — we no longer need pin_hash at all, so
-// login can't be broken by proof/secret drift. Names are matched TRIMMED (guards trailing-whitespace sheet
-// cells). All failures return the SAME generic 401. The code is never logged.
+// Single login (PR 1): ONE password for the whole app. No name, no roster read — the login path never
+// touches Apps Script, so it cannot be broken by an upstream outage, a roster edit, or a deploy window.
+// The secret check is a constant-time compare against SHARED_ACCESS_CODE; any failure returns the SAME
+// generic 401; the code is never logged. A success issues the ONE app identity (SESSION_IDENTITY).
 async function handleLogin(req, res) {
   const ip = clientIp(req);
-  const generic401 = () => sendJson(res, 401, { ok: false, error: 'שם או קוד שגויים' });
+  const generic401 = () => sendJson(res, 401, { ok: false, error: 'קוד גישה שגוי' });
   if (!rateLimitLogin(ip)) {
     return sendJson(res, 429, { ok: false, error: 'יותר מדי ניסיונות. נסו שוב מאוחר יותר.' });
   }
   const body = await readJsonBody(req, 4096);
-  const name = (body && typeof body.name === 'string') ? body.name.trim() : '';
   const code = (body && body.pin != null) ? String(body.pin) : '';
-
-  // PUBLIC roster read (no server-to-server proof needed now — pin_hash is irrelevant). name/role/active/
-  // house are all present. Roster = ACTIVE, LOGIN_ROLES users only; match by trimmed name.
-  const users = await fetchAppsScriptData('users');
-  if (!users) { console.warn(`[login] roster unavailable for ${ip}`); return generic401(); }
-  const user = users.find((u) =>
-    String((u && u.name) == null ? '' : u.name).trim() === name &&
-    isActiveUser(u) && LOGIN_ROLES.has(String(u && u.role)));
-
-  // ONE shared access code for the whole roster. Constant-time compare; fail-closed on an empty code or a
-  // name that is not an active roster user.
-  const ok = !!user && checkPin(code, SHARED_ACCESS_CODE);
-  if (!ok) {
-    console.warn(`[login] failed attempt from ${ip} for name=${JSON.stringify(name)}`);
+  if (!checkPin(code, SHARED_ACCESS_CODE)) {
+    console.warn(`[login] failed attempt from ${ip}`);
     return generic401();
   }
-
-  const name_ = String(user.name).trim();
-  const scope = String(user.house || ''); // '' for managers (all houses); cluster(s) for maintenance
-  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name: name_, role: user.role, scope });
-  // role + scope are the user's OWN, non-secret facts — returned so the UI can adapt (e.g. lock the
-  // request form to their house). They are never the security control: the server filters reads and
-  // 403s out-of-scope writes regardless of what the browser does.
-  return sendJson(res, 200, { ok: true, token, name: name_, role: user.role, scope, expiresInDays: SESSION_DAYS });
+  const { name, role, scope } = SESSION_IDENTITY;
+  const token = signToken(SESSION_SECRET, SESSION_DAYS, { name, role, scope });
+  // role + scope are non-secret facts the UI adapts to; they are never the security control.
+  return sendJson(res, 200, { ok: true, token, name, role, scope, expiresInDays: SESSION_DAYS });
 }
 
 // Read proxy — Bearer-gated + role/scope-enforced. Forwards an allowlisted set of query keys.
@@ -773,7 +704,19 @@ async function handleAction(req, res) {
   if (MANAGE_ONLY_ACTIONS.has(body.action) && !canManage(actor.role)) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
-  const upstreamBody = JSON.stringify({ action: body.action, payload: body.payload || {}, token: auth.token });
+  const payload = (body.payload && typeof body.payload === 'object') ? Object.assign({}, body.payload) : {};
+  // The actor is the verified token identity, never a client-supplied field: a legacy `by` in the payload is
+  // dropped here so no user parameter is ever forwarded (single login — there is no per-user selection).
+  delete payload.by;
+  // Approver-code gate (PR 1): approve/reject need the APPROVER_CODE unless the request is an emergency
+  // (auto approval, unchanged). A supplied code is verified constant-time and a wrong one is refused with NO
+  // upstream call; a missing code is refused unless the target request is חירום. Code.gs re-verifies the
+  // forwarded code independently, so a bypass of this proxy still cannot approve.
+  if (APPROVER_ACTIONS.has(body.action)) {
+    const gate = await approverGate(payload);
+    if (gate) return sendJson(res, gate.status, { ok: false, error: gate.error });
+  }
+  const upstreamBody = JSON.stringify({ action: body.action, payload, token: auth.token });
   try {
     const upstream = await fetch(EXEC_URL, {
       method: 'POST', redirect: 'follow',
@@ -789,6 +732,34 @@ async function handleAction(req, res) {
   } catch (err) {
     return sendJson(res, 502, { ok: false, error: 'upstream_error' });
   }
+}
+
+// Emergency (חירום) requests are auto-approved by chain B and need no approver code. Node has no request
+// identity of its own, so a code-less approve/reject looks the target up (short-TTL cache, else one live
+// read) and lets ONLY an emergency through without a code. A request Node cannot see is forwarded and
+// Code.gs — which enforces the same rule against its own sheet — decides. Never throws.
+async function isEmergencyRequest(id) {
+  if (!id) return null;
+  const list = nodeCacheGet('requests') || (await fetchAppsScriptData('requests'));
+  if (!Array.isArray(list)) return null;
+  const r = list.find((x) => x && String(x.id) === String(id));
+  if (!r) return null;
+  return String(r.urgency) === 'חירום';
+}
+
+// Returns null when the write may proceed, else { status, error }. The code is removed from the payload
+// when absent (never forwarded as an empty string) and forwarded verbatim when it verified.
+async function approverGate(payload) {
+  const supplied = payload.approver_code != null ? String(payload.approver_code) : '';
+  delete payload.approver_code;
+  if (supplied) {
+    if (!checkPin(supplied, APPROVER_CODE)) return { status: 403, error: 'approver_code_invalid' };
+    payload.approver_code = supplied;
+    return null;
+  }
+  const emergency = await isEmergencyRequest(payload.id);
+  if (emergency === true || emergency === null) return null; // auto approval, or unknown → Code.gs decides
+  return { status: 403, error: 'approver_code_required' };
 }
 
 export async function requestHandler(req, res) {
@@ -859,13 +830,12 @@ export async function requestHandler(req, res) {
   // shell (no guide content), whose shim-routed re-fetch attaches the token so real navigation still
   // works. Any authenticated role gets it; the nav shows it to the login roster (see src/access.js).
   if (path === '/help' || path === '/help.html') {
-    const shim = buildClientShim(await getLoginNames());
     if (!authFromRequest(req)) {
       res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(HELP_SHELL.replace('</head>', HEAD_INJECT + shim + '</head>'));
+      return res.end(HELP_SHELL.replace('</head>', HEAD_INJECT + CLIENT_SHIM + '</head>'));
     }
     let html = readFileSync(join(__dirname, 'help.html'), 'utf8');
-    html = html.replace('</head>', HEAD_INJECT + shim + '</head>');
+    html = html.replace('</head>', HEAD_INJECT + CLIENT_SHIM + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(html);
   }
@@ -875,10 +845,8 @@ export async function requestHandler(req, res) {
   const file = HTML_ROUTES[path];
   if (file) {
     let html = readFileSync(join(__dirname, file), 'utf8');
-    // Build the shim with the LIVE active-roster names (cached; falls back to DEFAULT_LOGIN_NAMES if the
-    // roster read is unavailable) so the login picker always matches who can actually log in.
-    const shim = buildClientShim(await getLoginNames());
-    html = html.replace('</head>', HEAD_INJECT + shim + '</head>');
+    // The shim is a module-load constant: serving a page never waits on an Apps Script roster read.
+    html = html.replace('</head>', HEAD_INJECT + CLIENT_SHIM + '</head>');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
@@ -905,6 +873,7 @@ if (isMain) {
   if (!process.env.SESSION_DAYS || !(SESSION_DAYS > 0)) fatal('SESSION_DAYS is required (a positive number)');
   if (!EXEC_URL) fatal('APPS_SCRIPT_EXEC_URL is required');
   if (!SHARED_ACCESS_CODE) fatal('SHARED_ACCESS_CODE is required (the shared login code; set it in Railway before deploy)');
+  if (!APPROVER_CODE) fatal('APPROVER_CODE is required (the approver code for approve/reject; set it in Railway AND as the APPROVER_CODE Apps Script Script Property before deploy)');
 
   server.listen(PORT, () => {
     console.log(`EZone Logistics gateway on http://localhost:${PORT}`);
@@ -919,6 +888,5 @@ export { HTML_ROUTES as _HTML_ROUTES };
 export { CLIENT_SHIM as _CLIENT_SHIM };
 // Exported so tests can reset the Node micro-cache between cases (deterministic cache/TTL assertions).
 export { _resetNodeCache, _resetVersionCache, PAGE_ACTIONS as _PAGE_ACTIONS };
-// Exported for the login-roster tests: the shared active-user filter, the roster→names derivation, the
-// per-request shim builder, and the hardcoded fallback list (asserted in sync with the seed).
-export { isActiveUser, loginRosterNames, buildClientShim, getLoginNames, DEFAULT_LOGIN_NAMES as _DEFAULT_LOGIN_NAMES };
+// Exported for the single-login tests: the shim builder and the ONE identity every session is issued for.
+export { buildClientShim, SESSION_IDENTITY as _SESSION_IDENTITY, APPROVER_ACTIONS as _APPROVER_ACTIONS };

@@ -295,6 +295,8 @@ export const USER_ROLES = ['coordinator', 'maintenance', 'field_ops', 'ops_manag
 // everyone — tier-A managers' hashes are set later via setUserPin() (never seeded as plaintext).
 // setupSheet() upserts by `name` — re-running never duplicates a row and never overwrites an
 // edited one (so a manager's set pin_hash survives a re-run).
+// Single login (PR 1): the LOGIN PATH no longer reads this sheet at all — one password issues the one app
+// identity (רועי / ops_manager). The roster stays as reference data (inspector/counter names, scopes).
 export const SEED_USERS = [
   { name: 'רועי',  role: 'field_ops',   house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)
   { name: 'אולגה', role: 'ops_manager', house: '',                 active: 'TRUE', pin_hash: '' }, // tier A (personal password)

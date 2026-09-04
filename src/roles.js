@@ -22,10 +22,12 @@ function isRole(role) {
   return ROLES.indexOf(role) !== -1;
 }
 
-// approve / reject: only the role that chain B resolves to FOR THAT REQUEST. The CEO may always
-// approve. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
+// approve / reject: the role that chain B resolves to FOR THAT REQUEST may approve it. The ops_manager
+// (אולגה) and the CEO may approve at ANY amount — single-login (PR 1): every session is ops_manager, and
+// the approve/reject write is additionally gated by the APPROVER_CODE (server.js + Code.gs), so the role
+// alone never approves. requiredRole is the whoApproves() result ('field_ops' | 'ops_manager' | 'ceo').
 function canApprove(actorRole, requiredRole) {
-  if (actorRole === ROLE.CEO) return true;
+  if (actorRole === ROLE.CEO || actorRole === ROLE.OPS_MANAGER) return true;
   return actorRole === requiredRole;
 }
 

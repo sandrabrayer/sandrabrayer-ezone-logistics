@@ -70,7 +70,7 @@ test('EXEC-ONLY writes: ops_manager forwarded (200) with real token; field_ops &
   for (const act of EXEC_ONLY) assert.equal((await action(olga, act, { id: 'X' })).status, 200, `${act} ops_manager`);
   for (const f of forwarded) assert.equal(verifyToken(SECRET, f.token).role, 'ops_manager');
   forwarded.length = 0;
-  const roy = (await login('רועי', CODE)).token;      // field_ops — NOT an exec
+  const roy = signToken(SECRET, 7, { name: 'רועי', role: 'field_ops', scope: '' }); // field_ops — NOT an exec (minted: the single login issues ops_manager)
   const rami = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' });             // maintenance
   for (const act of EXEC_ONLY) {
     assert.equal((await action(roy, act, { id: 'X' })).status, 403, `${act} field_ops must be 403`);

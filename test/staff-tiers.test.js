@@ -1,6 +1,6 @@
 // test/staff-tiers.test.js — end-to-end ROLE + SCOPE enforcement through the real gateway, backed by a
 // FAKE Apps Script upstream. Tokens are minted directly (signToken) so these assert the token's role/scope
-// gating independent of the login mechanism (the shared-code LOGIN contract lives in login-roster.test.js).
+// gating independent of the login mechanism (the single-login contract lives in login-single.test.js).
 // Covers: house/cluster read filtering, unknown-role fail-closed, one-token-everywhere, exec-only writes,
 // events gating, manager-only reads, and pin_hash never reaching the browser.
 import { test, before, after } from 'node:test';

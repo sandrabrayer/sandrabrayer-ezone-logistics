@@ -5,24 +5,22 @@
 // to window.__EXEC_URL__ (/api/exec); the injected auth shim rewrites that to POST /api/action with the
 // session token as `Authorization: Bearer`. handleAction resolves the actor from the token (never the
 // body) and forwards { action, payload, token } to Apps Script. A break anywhere on that chain makes the
-// buttons "do nothing". These tests lock the whole chain end-to-end: a manager's approve/reject reaches
-// upstream with the CORRECT forwarded token, and a tier-B role is refused BEFORE any upstream call.
+// buttons "do nothing". These tests lock the whole chain end-to-end: the single-login session's approve /
+// reject (with the approver code — the gate itself is locked in approver-code.test.js) reaches upstream with
+// the CORRECT forwarded token, and a tier-B role is refused BEFORE any upstream call.
 //
 // This mirrors the harness in staff-tiers.test.js (real requestHandler + a fake upstream on localhost).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { hashPin, rosterProof, verifyToken, signToken } from '../src/auth.js';
+import { verifyToken, signToken } from '../src/auth.js';
 
 const SECRET = 'k'.repeat(40);
-const APP_PIN = '555555';
-const CODE = '2026'; // shared access code
+const CODE = '2026';        // the ONE login password
+const APPROVER = 'olga-77'; // APPROVER_CODE
 
-const USERS = [
-  { name: 'רועי',  role: 'field_ops',   house: '', active: 'TRUE', pin_hash: hashPin('roy-password') },
-  { name: 'אולגה', role: 'ops_manager', house: '', active: 'TRUE', pin_hash: hashPin('olga-password') },
-  { name: 'רמי',   role: 'maintenance', house: 'sharon', active: 'TRUE', pin_hash: '' },
-];
+// The requests the fake upstream serves (Node looks a code-less approve/reject up here for the emergency rule).
+const REQUESTS = [{ id: 'REQ-1', urgency: 'רגיל', status: 'דרישה' }, { id: 'REQ-2', urgency: 'רגיל', status: 'דרישה' }];
 
 // The fake upstream RECORDS every POST body so we can assert exactly what the gateway forwarded.
 const forwarded = [];
@@ -30,12 +28,7 @@ const upstream = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const send = (data) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, data })); };
   if (req.method === 'GET') {
-    const action = u.searchParams.get('action');
-    if (action === 'users') {
-      const withHash = u.searchParams.get('auth') === rosterProof(SECRET);
-      return send(withHash ? USERS : USERS.map((x) => { const c = { ...x }; delete c.pin_hash; return c; }));
-    }
-    return send([]);
+    return send(u.searchParams.get('action') === 'requests' ? REQUESTS : []);
   }
   let raw = '';
   req.on('data', (c) => { raw += c; });
@@ -55,6 +48,7 @@ before(async () => {
   process.env.APPS_SCRIPT_EXEC_URL = `http://127.0.0.1:${upstream.address().port}/exec`;
   process.env.SESSION_SECRET = SECRET;
   process.env.SHARED_ACCESS_CODE = CODE;
+  process.env.APPROVER_CODE = APPROVER;
   process.env.SESSION_DAYS = '7';
   const mod = await import('../src/server.js');
   _loginAttempts = mod._loginAttempts;
@@ -68,11 +62,11 @@ after(async () => {
   await new Promise((r) => upstream.close(r));
 });
 
-async function login(name, pin) {
+async function login(pin) {
   _loginAttempts.clear();
   const r = await fetch(`${base}/api/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, pin }),
+    body: JSON.stringify({ pin }),
   });
   return (await r.json());
 }
@@ -87,33 +81,40 @@ async function dashboardWrite(token, action, payload) {
   return { status: r.status };
 }
 
-test('dashboard APPROVE: a manager\'s אישור reaches Apps Script with the correct forwarded token', async () => {
+test('dashboard APPROVE: אישור (with the approver code) reaches Apps Script with the correct forwarded token', async () => {
   forwarded.length = 0;
-  const { token } = await login('רועי', CODE); // field_ops
-  const { status } = await dashboardWrite(token, 'approve', { id: 'REQ-1', by: 'רועי' });
+  const { token } = await login(CODE); // the ONE session (רועי / ops_manager)
+  const { status } = await dashboardWrite(token, 'approve', { id: 'REQ-1', approver_code: APPROVER });
   assert.equal(status, 200, 'the gateway forwards approve and returns the upstream 200');
   assert.equal(forwarded.length, 1, 'exactly one write reached Apps Script');
   const sent = forwarded[0];
   assert.equal(sent.action, 'approve');
-  assert.deepEqual(sent.payload, { id: 'REQ-1', by: 'רועי' }, 'the payload is forwarded verbatim');
+  assert.deepEqual(sent.payload, { id: 'REQ-1', approver_code: APPROVER }, 'forwarded with the verified code and no user field');
   // The forwarded token is the REAL session token (from the Bearer header), not the body placeholder —
   // Apps Script re-verifies it and resolves the actor from it.
   assert.notEqual(sent.token, '1', 'the placeholder body token is NOT what gets forwarded');
   const actor = verifyToken(SECRET, sent.token);
   assert.ok(actor, 'the forwarded token verifies against SESSION_SECRET');
-  assert.equal(actor.role, 'field_ops', 'the forwarded token carries the real actor role');
+  assert.equal(actor.role, 'ops_manager', 'the forwarded token carries the single-login role');
   assert.equal(actor.name, 'רועי');
 });
 
-test('dashboard REJECT: a manager\'s לא אושר reaches Apps Script with the reason payload', async () => {
+test('dashboard REJECT: לא אושר (with the approver code) reaches Apps Script with the reason payload', async () => {
   forwarded.length = 0;
-  const { token } = await login('אולגה', CODE); // ops_manager
-  const { status } = await dashboardWrite(token, 'reject', { id: 'REQ-2', by: 'אולגה', reason: 'לא מאושר תקציבית' });
+  const { token } = await login(CODE);
+  const { status } = await dashboardWrite(token, 'reject', { id: 'REQ-2', reason: 'לא מאושר תקציבית', approver_code: APPROVER });
   assert.equal(status, 200);
   assert.equal(forwarded.length, 1);
   assert.equal(forwarded[0].action, 'reject');
   assert.equal(forwarded[0].payload.reason, 'לא מאושר תקציבית', 'the rejection reason is forwarded');
   assert.equal(verifyToken(SECRET, forwarded[0].token).role, 'ops_manager');
+});
+
+test('dashboard APPROVE without the approver code on a normal request → 403, nothing reaches upstream', async () => {
+  forwarded.length = 0;
+  const { token } = await login(CODE);
+  assert.equal((await dashboardWrite(token, 'approve', { id: 'REQ-1' })).status, 403);
+  assert.equal(forwarded.length, 0, 'the code gate refuses before any Apps Script call');
 });
 
 test('approve/reject WITHOUT a Bearer token → 401 and nothing reaches upstream', async () => {
@@ -126,7 +127,7 @@ test('approve/reject WITHOUT a Bearer token → 401 and nothing reaches upstream
 test('tier-B (maintenance) is refused approve AND reject at the gateway (403), no upstream call', async () => {
   forwarded.length = 0;
   const token = signToken(SECRET, 7, { name: 'רמי', role: 'maintenance', scope: 'sharon' }); // maintenance can't log in; mint to test the gate
-  assert.equal((await dashboardWrite(token, 'approve', { id: 'REQ-1', by: 'רמי' })).status, 403);
-  assert.equal((await dashboardWrite(token, 'reject', { id: 'REQ-1', by: 'רמי' })).status, 403);
+  assert.equal((await dashboardWrite(token, 'approve', { id: 'REQ-1', approver_code: APPROVER })).status, 403);
+  assert.equal((await dashboardWrite(token, 'reject', { id: 'REQ-1', approver_code: APPROVER })).status, 403);
   assert.equal(forwarded.length, 0, 'a refused write is blocked BEFORE any Apps Script call');
 });

@@ -3,6 +3,76 @@
 All notable changes to EZone Logistics are documented here, per the project working rule
 (documentation for every change and every commit). Newest first.
 
+## [Auth] — Single login + approver code (PR 1): one password for the app, אולגה approves with a second code
+
+**What:** The two-name login (רועי / אולגה picker + one shared code) collapses to **ONE login with ONE
+password**, and approvals get their own control: every approve / reject that needs a human approver now
+requires **אולגה's approver code**, verified in Node **and** independently in Code.gs, and is recorded as
+approved by אולגה. Emergency (חירום) auto-approval is unchanged. Defer, dispatch, block and close need no
+code. Nothing about routing (chain B, `approval_threshold`) or the Users sheet data changed.
+
+**Login (`src/server.js`)**
+- `POST /api/login { pin }` — no name. The code is checked constant-time against `SHARED_ACCESS_CODE`; a
+  success issues the token for the **one app identity** (`name רועי`, `role ops_manager`, no scope), which
+  is what gets stamped as `created_by` / AuditLog `by` on non-approval actions. A legacy `name` field is
+  ignored. The login path **never reads the Users sheet and never calls Apps Script** — the roster read on
+  every login, and the per-page roster fetch that built the picker (which blocked every HTML response on
+  Apps Script whenever its 120 s cache was cold or the read failed), are gone. Serving a page is now
+  Node-local.
+- The injected auth shim is built once at module load: one password field, no `<select>`, no names in the
+  page. Error text: `קוד גישה שגוי`.
+- Removed: `LOGIN_ROLES`, `DEFAULT_LOGIN_NAMES`, `getLoginNames`, `loginRosterNames`, `isActiveUser`, the
+  login-names cache. `Users` stays as reference data (`setUserPin` / `pin_hash` are now legacy).
+
+**Approver code (`src/server.js` + `apps-script/Code.gs`)**
+- New required env **`APPROVER_CODE`** (Railway) — the server **refuses to start** without it — and the
+  **same value as an Apps Script Script Property `APPROVER_CODE`** (Code.gs refuses every non-emergency
+  approval while it is unset: fail-closed).
+- Node `handleAction` (`approverGate`): on `approve` / `reject` a supplied `payload.approver_code` is verified
+  constant-time — wrong → **403 `approver_code_invalid`**, nothing forwarded; a missing code is refused with
+  **403 `approver_code_required`** unless the target request is חירום (looked up in the short-TTL cache or
+  one live read; a request Node cannot see is forwarded and Code.gs decides). A verified code is forwarded
+  verbatim for the independent check. The client `by` field is **stripped from every write** — no user
+  parameter is ever forwarded; the actor is always the token.
+- Code.gs `handleApprove_` / `handleReject_`: after the role gate, `approverGateError_` re-verifies the code
+  against the Script Property (`constantTimeEq_`). A verified approval writes `approved_by = אולגה` and the
+  AuditLog `by = אולגה`; a verified rejection's AuditLog `by = אולגה`. Emergency keeps the session actor and
+  the `אושר אוטומטית (חירום)` note.
+- `canApprove` (`src/roles.js`, mirrored in Code.gs under the drift guard): **ops_manager may approve at any
+  amount** (like ceo). Required because every session is ops_manager now and a ≤threshold request routes to
+  field_ops; the approver code, not the role, is the control.
+
+**Dashboard (`src/dashboard.html`)**
+- The **`משתמש` dropdown is removed** from the filter bar (בית / אחראי unchanged); `who()` and every
+  `by:` payload field are gone. The attention panel header is **`דורש את תשומת לבך`** with no `— <name>`
+  suffix and shows all items (the new-requests and inspection-defect items no longer depend on a picked
+  name).
+- `אישור` / `לא אושר` prompt for the **approver code** (`קוד מאשר (אולגה)`), kept in memory for the page
+  only and cleared when the server rejects it; an emergency request never prompts. Server errors map to
+  `קוד מאשר שגוי.` / `נדרש קוד מאשר לאישור/דחייה.`. `canApproveUI` mirrors the new `canApprove`.
+- `src/public/sw.js` dev cache name `v3` → `v4` (the live name is commit-stamped at serve time).
+
+**Docs:** README (roles, auth section, env table, Apps Script setup), `.env.example` (`APPROVER_CODE`),
+`DEPLOY.md` (Script Properties table), `src/help.html` (מי מאשר מה: אולגה with the approver code at any
+amount; the threshold is a flag only), `src/schema.js` seed comment.
+
+**Tests (723, all green):** new `test/login-single.test.js` (one password → the one identity; `name`
+ignored; wrong/empty → generic 401; login and page serving make **zero** upstream calls; the shim has no
+picker; rate limit intact) and `test/approver-code.test.js` (Node gate: required / invalid / verified-and-
+forwarded / emergency code-less / unknown request forwarded / `by` stripped on every write / defer-dispatch-
+close need no code / tier-B refused first / startup and runtime fail-closed; **Code.gs handlers in a
+sandbox**: the same refusals with no row change and no audit row, `approved_by`/AuditLog = אולגה, reject
+path, emergency unchanged, ops_manager approves a ≤threshold request). `dashboard-approve-gate.test.js`
+adds: no `#who`, attention header without suffix, approve on both tiers for the session role, the code
+prompt posts `{ id, approver_code }` with **no user field**, empty code cancels, emergency never prompts.
+Rewritten for the new contract: `dashboard-approve.test.js`, `roles.test.js`, `management-writes.test.js`;
+removed `login-roster.test.js` + `login-path.test.js` (they tested the deleted per-person roster path).
+
+**Deploy (post-merge, in this order):** 1) set `APPROVER_CODE` as an Apps Script **Script Property**;
+2) set `APPROVER_CODE` in **Railway** (the server will not boot without it) — Code.gs auto-deploys via clasp
+CI on the merge. No `setupSheet()` needed (no schema change).
+
+---
 ## [Data/Docs] — רעננה הפרדס (pardes) opened: status flips to `open` across every enumeration
 
 **Why:** the house רעננה הפרדס (canonical id `pardes`, HOUSE-IDS.md) opened in August 2026 and is
